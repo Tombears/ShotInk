@@ -1,0 +1,15 @@
+build/
+dist/
+obj/
+bin/
+.vs/
+.idea/
+*.user
+*.suo
+*.zip
+*.pdb
+*.log
+.env
+.env.*
+*.key
+*.pem
