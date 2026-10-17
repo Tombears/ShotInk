@@ -171,12 +171,13 @@ namespace SnipasteLite
                 if (IsDisposed) return;
                 var overlay = new CaptureOverlay(scroll);
                 overlay.Cancelled += delegate { captureBusy = false; restoreWindows(); };
+                overlay.Completed += delegate(Bitmap image, CaptureAction action)
+                {
+                    captureBusy = false; restoreWindows();
+                    AcceptCapture(image, false, action == CaptureAction.Pin, action == CaptureAction.Copy);
+                };
                 overlay.Selected += delegate(Rectangle region, Bitmap snapshot)
                 {
-                    if (!scroll)
-                    {
-                        captureBusy = false; restoreWindows(); AcceptCapture(snapshot); return;
-                    }
                     if (region.Height < 120 || region.Width < 80)
                     {
                         captureBusy = false; restoreWindows();
@@ -192,12 +193,15 @@ namespace SnipasteLite
             catch (Exception ex) { captureBusy = false; restoreWindows(); MessageBox.Show(ex.Message, "无法截图"); }
         }
 
-        private void AcceptCapture(Bitmap image)
+        private void AcceptCapture(Bitmap image, bool openEditor = true, bool pinImage = false, bool copyImage = true)
         {
             try
             {
-                try { Clipboard.SetDataObject(image, true, 5, 100); }
-                catch (System.Runtime.InteropServices.ExternalException) { notice.Text = "剪贴板暂时不可用，可在编辑器中重新复制。"; }
+                if (copyImage)
+                {
+                    try { Clipboard.SetDataObject(image, true, 5, 100); }
+                    catch (System.Runtime.InteropServices.ExternalException) { notice.Text = "剪贴板暂时不可用，已打开编辑器供重新复制。"; openEditor = true; }
+                }
                 if (autoSave.Checked)
                 {
                     try
@@ -210,7 +214,9 @@ namespace SnipasteLite
                     }
                     catch (Exception ex) { notice.Text = "自动保存失败：" + ex.Message + "；仍可手动保存。"; }
                 }
-                var editor = new EditorForm(image, PinImage); editor.Show();
+                if (openEditor) { var editor = new EditorForm(image, PinImage); editor.Show(); }
+                else if (pinImage) PinImage(image);
+                else image.Dispose();
             }
             catch { image.Dispose(); throw; }
         }

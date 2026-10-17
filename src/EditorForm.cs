@@ -8,7 +8,7 @@ using System.Windows.Forms;
 
 namespace SnipasteLite
 {
-    internal enum DrawTool { Rectangle, Ellipse, Arrow, Pen, Text, Mosaic }
+    internal enum DrawTool { Rectangle, Ellipse, Arrow, Pen, Text, Mosaic, Highlight, Eraser, None, Line }
 
     internal sealed class Mark
     {
@@ -29,13 +29,17 @@ namespace SnipasteLite
 
     internal sealed class AnnotationCanvas : Control
     {
-        internal readonly Bitmap Image;
+        internal Bitmap Image { get; private set; }
         internal readonly List<Mark> Marks = new List<Mark>();
         internal DrawTool Tool = DrawTool.Rectangle;
         internal Color Ink = Color.FromArgb(244, 75, 95);
         internal float Stroke = 3;
         internal float Zoom = 1;
         private Mark active;
+        private readonly Stack<List<Mark>> undo = new Stack<List<Mark>>();
+        private readonly Stack<List<Mark>> redo = new Stack<List<Mark>>();
+        internal bool CanUndo { get { return Marks.Count > 0 || undo.Count > 0; } }
+        internal bool CanRedo { get { return redo.Count > 0; } }
         internal event Action Changed;
 
         internal AnnotationCanvas(Bitmap image)
@@ -60,13 +64,15 @@ namespace SnipasteLite
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
+            if (Tool == DrawTool.None) return;
             var point = ImagePoint(e.Location);
+            if (Tool == DrawTool.Eraser) { Capture = true; EraseAt(point); return; }
             active = new Mark { Tool = Tool, Color = Ink, Width = Stroke };
             active.Points.Add(point);
             if (Tool == DrawTool.Text)
             {
                 var text = TextPrompt.Ask(FindForm());
-                if (!string.IsNullOrWhiteSpace(text)) { active.Text = text; Marks.Add(active); NotifyChanged(); }
+                if (!string.IsNullOrWhiteSpace(text)) { active.Text = text; AddMark(active); }
                 active = null;
                 return;
             }
@@ -76,26 +82,85 @@ namespace SnipasteLite
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            base.OnMouseMove(e);
+            if (Tool == DrawTool.Eraser && Capture) { EraseAt(ImagePoint(e.Location)); return; }
             if (active == null) return;
             var point = ImagePoint(e.Location);
-            if (Tool == DrawTool.Pen) active.Points.Add(point);
+            if (active.Tool == DrawTool.Pen || active.Tool == DrawTool.Highlight) active.Points.Add(point);
             else active.Points[active.Points.Count - 1] = point;
             Invalidate();
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            base.OnMouseUp(e);
+            if (Tool == DrawTool.Eraser) { Capture = false; return; }
             if (active == null || e.Button != MouseButtons.Left) return;
             var point = ImagePoint(e.Location);
-            if (active.Tool == DrawTool.Pen) active.Points.Add(point);
+            if (active.Tool == DrawTool.Pen || active.Tool == DrawTool.Highlight) active.Points.Add(point);
             else active.Points[active.Points.Count - 1] = point;
-            Marks.Add(active);
+            var mark = active;
             active = null;
             Capture = false;
-            NotifyChanged();
+            AddMark(mark);
         }
 
-        internal void Undo() { if (Marks.Count == 0) return; Marks.RemoveAt(Marks.Count - 1); NotifyChanged(); }
+        internal void AddMark(Mark mark)
+        {
+            SaveUndo(); Marks.Add(mark); NotifyChanged();
+        }
+        private void SaveUndo() { undo.Push(new List<Mark>(Marks)); redo.Clear(); }
+        internal void Undo()
+        {
+            if (!CanUndo) return;
+            redo.Push(new List<Mark>(Marks));
+            if (undo.Count > 0) { var state = undo.Pop(); Marks.Clear(); Marks.AddRange(state); }
+            else Marks.RemoveAt(Marks.Count - 1);
+            NotifyChanged();
+        }
+        internal void Redo()
+        {
+            if (redo.Count == 0) return;
+            undo.Push(new List<Mark>(Marks)); var state = redo.Pop(); Marks.Clear(); Marks.AddRange(state); NotifyChanged();
+        }
+        internal bool EraseAt(PointF point)
+        {
+            for (int i = Marks.Count - 1; i >= 0; i--)
+            {
+                if (!HitMark(Marks[i], point)) continue;
+                SaveUndo(); Marks.RemoveAt(i); NotifyChanged(); return true;
+            }
+            return false;
+        }
+        private bool HitMark(Mark mark, PointF point)
+        {
+            if (mark.Points.Count == 0) return false;
+            var bounds = mark.Bounds;
+            if (mark.Tool == DrawTool.Text)
+            {
+                using (var g = Graphics.FromImage(Image))
+                using (var font = new Font("Microsoft YaHei UI", Math.Max(14, mark.Width * 6), FontStyle.Bold, GraphicsUnit.Pixel))
+                    return new RectangleF(mark.Points[0], g.MeasureString(mark.Text, font)).Contains(point);
+            }
+            if (mark.Tool == DrawTool.Mosaic) return bounds.Contains(point);
+            using (var path = new GraphicsPath())
+            using (var pen = new Pen(Color.Black, Math.Max(12, mark.Width * (mark.Tool == DrawTool.Highlight ? 6 : 2))))
+            {
+                if (mark.Tool == DrawTool.Rectangle && bounds.Width > 0 && bounds.Height > 0) path.AddRectangle(bounds);
+                else if (mark.Tool == DrawTool.Ellipse && bounds.Width > 0 && bounds.Height > 0) path.AddEllipse(bounds);
+                else if (mark.Points.Count > 1) path.AddLines(mark.Points.ToArray());
+                return path.PointCount > 0 && path.IsOutlineVisible(point, pen);
+            }
+        }
+        internal void Reframe(Bitmap image, Point shift)
+        {
+            var unique = new HashSet<Mark>(Marks);
+            foreach (var state in undo) unique.UnionWith(state);
+            foreach (var state in redo) unique.UnionWith(state);
+            foreach (var mark in unique)
+                for (int i = 0; i < mark.Points.Count; i++) mark.Points[i] = new PointF(mark.Points[i].X + shift.X, mark.Points[i].Y + shift.Y);
+            var previous = Image; Image = image; previous.Dispose(); SetZoom(Zoom);
+        }
         private void NotifyChanged() { Invalidate(); if (Changed != null) Changed(); }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -127,7 +192,14 @@ namespace SnipasteLite
                     case DrawTool.Arrow:
                         using (var arrow = new AdjustableArrowCap(4, 5, true)) { pen.CustomEndCap = arrow; g.DrawLine(pen, first, last); }
                         break;
+                    case DrawTool.Line:
+                        g.DrawLine(pen, first, last);
+                        break;
                     case DrawTool.Pen:
+                        if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
+                        break;
+                    case DrawTool.Highlight:
+                        pen.Color = Color.FromArgb(88, mark.Color); pen.Width = mark.Width * 6;
                         if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
                         break;
                     case DrawTool.Text:
@@ -186,7 +258,7 @@ namespace SnipasteLite
             AutoScaleMode = AutoScaleMode.Dpi;
             KeyPreview = true;
             var tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 106, Padding = new Padding(9), BackColor = Color.White, WrapContents = true };
-            string[] labels = { "矩形", "椭圆", "箭头", "画笔", "文字", "马赛克" };
+            string[] labels = { "矩形", "椭圆", "箭头", "画笔", "文字", "马赛克", "荧光笔", "橡皮擦" };
             for (int i = 0; i < labels.Length; i++)
             {
                 var selectedTool = (DrawTool)i;
@@ -201,6 +273,7 @@ namespace SnipasteLite
             width.ValueChanged += delegate { canvas.Stroke = (float)width.Value; };
             tools.Controls.Add(width);
             AddButton(tools, "撤销", false, 66, delegate { canvas.Undo(); });
+            AddButton(tools, "重做", false, 66, delegate { canvas.Redo(); });
             AddButton(tools, "复制", false, 66, delegate { CopyImage(); });
             AddButton(tools, "贴图", false, 66, delegate { this.pin(canvas.Render()); });
             AddButton(tools, "保存 PNG", true, 100, delegate { SaveImage(); });
@@ -257,6 +330,7 @@ namespace SnipasteLite
             if (e.Control && e.KeyCode == Keys.S) { SaveImage(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.C) { CopyImage(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.Z) { canvas.Undo(); e.SuppressKeyPress = true; }
+            if (e.Control && e.KeyCode == Keys.Y) { canvas.Redo(); e.SuppressKeyPress = true; }
             base.OnKeyDown(e);
         }
     }

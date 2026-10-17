@@ -26,6 +26,11 @@ namespace SnipasteLite
                 Run("accumulated height is bounded", TestAccumulatedLimit);
                 Run("annotations render at original resolution and undo", TestAnnotations);
                 Run("mosaic covers partial edge blocks", TestMosaic);
+                Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
+                Run("highlighter remains translucent and preserves the original", TestHighlighter);
+                Run("floating selection stays open and exports only edited pixels", TestFloatingSelection);
+                Run("selection resize and toolbar stay within display bounds", TestSelectionGeometry);
+                Run("cancelled selection does not export a screenshot", TestSelectionCancel);
                 if (args.Length == 2 && args[0] == "--preview")
                 {
                     Run("native screen capture reads a known test window", TestScreenCapture);
@@ -128,7 +133,7 @@ namespace SnipasteLite
                 using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
                 var rectangle = new Mark { Tool = DrawTool.Rectangle, Color = Color.Red, Width = 3 };
                 rectangle.Points.Add(new PointF(80, 80)); rectangle.Points.Add(new PointF(20, 20));
-                canvas.Marks.Add(rectangle); canvas.SetZoom(0.25F);
+                canvas.AddMark(rectangle); canvas.SetZoom(0.25F);
                 using (var rendered = canvas.Render())
                 { Assert(rendered.Size == new Size(120, 100), "Zoom changed export dimensions."); Assert(rendered.GetPixel(20, 50).R > 240 && rendered.GetPixel(20, 50).G < 40, "Annotation missing."); }
                 Assert(canvas.Image.GetPixel(20, 50).ToArgb() == Color.White.ToArgb(), "Source image mutated.");
@@ -140,7 +145,7 @@ namespace SnipasteLite
             using (var canvas = new AnnotationCanvas(Pattern(90, 100, 32)))
             {
                 var mark = new Mark { Tool = DrawTool.Mosaic, Width = 3 };
-                mark.Points.Add(new PointF(10, 10)); mark.Points.Add(new PointF(32, 33)); canvas.Marks.Add(mark);
+                mark.Points.Add(new PointF(10, 10)); mark.Points.Add(new PointF(32, 33)); canvas.AddMark(mark);
                 using (var rendered = canvas.Render())
                 {
                     Assert(rendered.GetPixel(31, 32).ToArgb() == canvas.Image.GetPixel(32, 32).ToArgb(), "Partial edge block was left exposed.");
@@ -160,6 +165,117 @@ namespace SnipasteLite
                     Assert(Math.Abs(color.R - 37) < 5 && Math.Abs(color.G - 91) < 5 && Math.Abs(color.B - 163) < 5, "Native capture did not match the test window.");
                 }
                 scene.Close();
+            }
+        }
+        private static Mark RectangleMark()
+        {
+            var mark = new Mark { Tool = DrawTool.Rectangle, Color = Color.Red, Width = 3 };
+            mark.Points.Add(new PointF(20, 20)); mark.Points.Add(new PointF(80, 80)); return mark;
+        }
+        private static void TestUndoRedoErase()
+        {
+            using (var canvas = new AnnotationCanvas(new Bitmap(120, 100)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                canvas.AddMark(RectangleMark());
+                canvas.Undo(); Assert(canvas.Marks.Count == 0 && canvas.CanRedo, "Undo did not make redo available.");
+                canvas.Redo(); Assert(canvas.Marks.Count == 1, "Redo did not restore the mark.");
+                Assert(!canvas.EraseAt(new PointF(50, 50)), "Eraser removed a rectangle from its empty interior.");
+                Assert(canvas.EraseAt(new PointF(20, 50)) && canvas.Marks.Count == 0, "Eraser did not remove the hit annotation.");
+                canvas.Undo(); Assert(canvas.Marks.Count == 1, "Undo did not restore erased annotation.");
+                canvas.Redo(); Assert(canvas.Marks.Count == 0, "Redo did not restore erasure.");
+                canvas.Undo(); canvas.AddMark(RectangleMark()); Assert(!canvas.CanRedo, "New edits kept an obsolete redo branch.");
+                Assert(canvas.Image.GetPixel(20, 50).ToArgb() == Color.White.ToArgb(), "Eraser changed the original screenshot.");
+            }
+        }
+        private static void TestHighlighter()
+        {
+            using (var canvas = new AnnotationCanvas(new Bitmap(100, 80)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                var mark = new Mark { Tool = DrawTool.Highlight, Color = Color.Red, Width = 3 };
+                mark.Points.Add(new PointF(20, 40)); mark.Points.Add(new PointF(80, 40)); canvas.AddMark(mark);
+                using (var output = canvas.Render())
+                { var pixel = output.GetPixel(50, 40); Assert(pixel.R > 240 && pixel.G > 100 && pixel.G < 220 && pixel.B == pixel.G, "Highlighter was opaque or absent."); }
+                Assert(canvas.Image.GetPixel(50, 40).ToArgb() == Color.White.ToArgb(), "Highlighter changed original pixels.");
+            }
+        }
+        private static void Mouse(Control control, string method, MouseButtons button, int x, int y)
+        {
+            control.GetType().GetMethod(method, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(control, new object[] { new MouseEventArgs(button, 1, x, y, 0) });
+        }
+        private static T Field<T>(object target, string name)
+        { return (T)target.GetType().GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(target); }
+        private static void Select(CaptureOverlay overlay)
+        {
+            Mouse(overlay, "OnMouseDown", MouseButtons.Left, 80, 70);
+            Mouse(overlay, "OnMouseMove", MouseButtons.Left, 780, 440);
+            Mouse(overlay, "OnMouseUp", MouseButtons.Left, 780, 440);
+        }
+        private static Bitmap FlatDesktop()
+        {
+            var image = new Bitmap(900, 600);
+            using (var g = Graphics.FromImage(image)) g.Clear(Color.White);
+            return image;
+        }
+        private static void TestFloatingSelection()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600)))
+            {
+                Bitmap output = null; bool cancelled = false;
+                overlay.Completed += delegate(Bitmap image, CaptureAction action) { Assert(action == CaptureAction.Copy, "Enter did not choose copy."); output = image; };
+                overlay.Cancelled += delegate { cancelled = true; };
+                Select(overlay);
+                Assert(!overlay.IsDisposed && Field<bool>(overlay, "ready"), "Selecting immediately closed the overlay.");
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                Assert(toolbar != null && toolbar.Top > 440, "Toolbar was not placed beneath the selection.");
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                toolbar.SelectTool(DrawTool.Rectangle);
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 20, 20);
+                Mouse(canvas, "OnMouseMove", MouseButtons.Left, 80, 80);
+                Mouse(canvas, "OnMouseUp", MouseButtons.Left, 80, 80);
+                overlay.GetType().GetMethod("OnKeyDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay, new object[] { new KeyEventArgs(Keys.Enter) });
+                Assert(output != null && !cancelled, "Completion failed or emitted cancellation.");
+                using (output)
+                {
+                    Assert(output.Size == new Size(700, 370), "Toolbar or border changed export dimensions.");
+                    var pixel = output.GetPixel(20, 50); Assert(pixel.R > 220 && pixel.G < 100, "Edited annotation not exported.");
+                    Assert(output.GetPixel(0, 0).ToArgb() == Color.White.ToArgb() && output.GetPixel(699, 369).ToArgb() == Color.White.ToArgb(), "Selection border or controls leaked into export.");
+                }
+            }
+        }
+        private static void TestSelectionGeometry()
+        {
+            var bounds = new Rectangle(0, 0, 900, 600);
+            Assert(SelectionGeometry.Move(new Rectangle(80, 70, 700, 370), new Point(1000, 1000), bounds) == new Rectangle(200, 230, 700, 370), "Moving exceeded screen bounds.");
+            Assert(SelectionGeometry.Resize(new Rectangle(80, 70, 700, 370), 0, new Point(1000, 1000), bounds).Size == new Size(8, 8), "Resize reversed the selection.");
+            var work = new Rectangle(-1920, -200, 1920, 1080);
+            var size = new Size(450, 66);
+            var location = CaptureToolbar.Place(new Rectangle(-1000, 710, 990, 170), work, size);
+            Assert(work.Contains(new Rectangle(location, size)) && location.Y < 710, "Toolbar overflowed a monitor with negative coordinates.");
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), bounds))
+            {
+                Select(overlay);
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas"); canvas.AddMark(RectangleMark());
+                var grips = Field<Array>(overlay, "grips");
+                var grip = (Control)grips.GetValue(0);
+                Mouse(grip, "OnMouseDown", MouseButtons.Left, 4, 4);
+                Mouse(overlay, "OnMouseMove", MouseButtons.Left, 90, 75);
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, 90, 75);
+                Assert(Field<Rectangle>(overlay, "selection") == new Rectangle(90, 75, 690, 365), "Resize grip did not change selection.");
+                using (var output = canvas.Render()) Assert(output.GetPixel(10, 45).R > 240 && output.GetPixel(10, 45).G < 40, "Resizing lost the annotation's screen position.");
+                canvas.Undo(); canvas.Redo(); Assert(canvas.Marks[0].Points[0] == new PointF(10, 15), "Resize corrupted undo/redo coordinates.");
+            }
+        }
+        private static void TestSelectionCancel()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600)))
+            {
+                bool exported = false;
+                overlay.Completed += delegate(Bitmap image, CaptureAction action) { exported = true; image.Dispose(); };
+                Select(overlay);
+                overlay.GetType().GetMethod("OnKeyDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay, new object[] { new KeyEventArgs(Keys.Escape) });
+                Assert(!exported && overlay.IsDisposed, "Cancel exported or kept the overlay open.");
             }
         }
         private static Bitmap Sample()
@@ -239,6 +355,28 @@ namespace SnipasteLite
                 editor.Show(); editor.Activate(); Application.DoEvents(); System.Threading.Thread.Sleep(200); Application.DoEvents();
                 using (var bitmap = Native.Capture(editor.Bounds)) bitmap.Save(Path.Combine(root, "preview-editor.png"));
                 editor.Close();
+            }
+            using (var background = new Bitmap(1100, 700))
+            {
+                using (var g = Graphics.FromImage(background))
+                using (var sample = Sample()) { g.Clear(Color.FromArgb(32, 37, 47)); g.DrawImageUnscaled(sample, 80, 30); }
+                using (var overlay = new CaptureOverlay(false, new Bitmap(background), new Rectangle(40, 40, 1100, 700)))
+                {
+                    overlay.Show(); overlay.Activate(); Application.DoEvents();
+                    Mouse(overlay, "OnMouseDown", MouseButtons.Left, 80, 50);
+                    Mouse(overlay, "OnMouseMove", MouseButtons.Left, 900, 500);
+                    Mouse(overlay, "OnMouseUp", MouseButtons.Left, 900, 500);
+                    Application.DoEvents(); System.Threading.Thread.Sleep(180); Application.DoEvents();
+                    using (var screenshot = Native.Capture(overlay.Bounds)) screenshot.Save(Path.Combine(root, "preview-floating-toolbar.png"));
+                    Field<CaptureToolbar>(overlay, "toolbar").SelectTool(DrawTool.Arrow);
+                    var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                    Mouse(canvas, "OnMouseDown", MouseButtons.Left, 570, 160);
+                    Mouse(canvas, "OnMouseMove", MouseButtons.Left, 400, 100);
+                    Mouse(canvas, "OnMouseUp", MouseButtons.Left, 400, 100);
+                    Application.DoEvents(); System.Threading.Thread.Sleep(180); Application.DoEvents();
+                    using (var screenshot = Native.Capture(overlay.Bounds)) screenshot.Save(Path.Combine(root, "preview-floating-drawing.png"));
+                    overlay.Close();
+                }
             }
             Console.WriteLine("Previews: " + root);
         }
