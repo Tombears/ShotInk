@@ -9,6 +9,7 @@ using System.Windows.Forms;
 namespace ShotInk
 {
     internal enum DrawTool { Rectangle, Ellipse, Arrow, Pen, Text, Mosaic, Highlight, Eraser, None, Line }
+    internal enum ApplyMode { Brush, Rectangle }
 
     internal sealed class Mark
     {
@@ -16,13 +17,21 @@ namespace ShotInk
         internal Color Color;
         internal float Width;
         internal string Text;
+        internal bool Freehand;
+        internal int MosaicSize;
+        internal float BrushSize = 24;
         internal readonly List<PointF> Points = new List<PointF>();
         internal RectangleF Bounds
         {
             get
             {
-                var a = Points[0]; var b = Points[Points.Count - 1];
-                return RectangleF.FromLTRB(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
+                if (Points.Count == 0) return RectangleF.Empty;
+                float left = Points[0].X, top = Points[0].Y, right = left, bottom = top;
+                foreach (var point in Points)
+                { left = Math.Min(left, point.X); top = Math.Min(top, point.Y); right = Math.Max(right, point.X); bottom = Math.Max(bottom, point.Y); }
+                var bounds = RectangleF.FromLTRB(left, top, right, bottom);
+                if (Freehand) bounds.Inflate(BrushSize / 2, BrushSize / 2);
+                return bounds;
             }
         }
     }
@@ -31,11 +40,23 @@ namespace ShotInk
     {
         internal Bitmap Image { get; private set; }
         internal readonly List<Mark> Marks = new List<Mark>();
-        internal DrawTool Tool = DrawTool.Rectangle;
+        private DrawTool tool = DrawTool.Rectangle;
+        internal DrawTool Tool
+        {
+            get { return tool; }
+            set { CancelGesture(); tool = value; UpdateToolCursor(); }
+        }
+        internal ApplyMode MosaicMode = ApplyMode.Brush;
+        internal ApplyMode EraserMode = ApplyMode.Brush;
+        internal int MosaicSize = 14;
+        internal float MosaicBrushSize = 24;
+        internal float EraserBrushSize = 24;
         internal Color Ink = Color.FromArgb(244, 75, 95);
         internal float Stroke = 3;
         internal float Zoom = 1;
         private Mark active;
+        private PointF hoverPoint;
+        private bool hovering;
         private readonly Stack<List<Mark>> undo = new Stack<List<Mark>>();
         private readonly Stack<List<Mark>> redo = new Stack<List<Mark>>();
         internal bool CanUndo { get { return Marks.Count > 0 || undo.Count > 0; } }
@@ -60,14 +81,18 @@ namespace ShotInk
 
         private PointF ImagePoint(Point p) { return new PointF(Math.Max(0, Math.Min(Image.Width - 1, p.X / Zoom)), Math.Max(0, Math.Min(Image.Height - 1, p.Y / Zoom))); }
 
+        private bool BrushTool
+        { get { return Tool == DrawTool.Mosaic && MosaicMode == ApplyMode.Brush || Tool == DrawTool.Eraser && EraserMode == ApplyMode.Brush; } }
+        private float CurrentBrushSize { get { return Tool == DrawTool.Eraser ? EraserBrushSize : MosaicBrushSize; } }
+        internal void UpdateToolCursor() { Cursor = Tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; Invalidate(); }
+        private void CancelGesture() { active = null; Capture = false; Invalidate(); }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button != MouseButtons.Left) return;
-            if (Tool == DrawTool.None) return;
+            if (e.Button != MouseButtons.Left || Tool == DrawTool.None) return;
             var point = ImagePoint(e.Location);
-            if (Tool == DrawTool.Eraser) { Capture = true; EraseAt(point); return; }
-            active = new Mark { Tool = Tool, Color = Ink, Width = Stroke };
+            active = new Mark { Tool = Tool, Color = Ink, Width = Stroke, Freehand = BrushTool, MosaicSize = MosaicSize, BrushSize = CurrentBrushSize };
             active.Points.Add(point);
             if (Tool == DrawTool.Text)
             {
@@ -78,30 +103,35 @@ namespace ShotInk
             }
             active.Points.Add(point);
             Capture = true;
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            if (Tool == DrawTool.Eraser && Capture) { EraseAt(ImagePoint(e.Location)); return; }
-            if (active == null) return;
-            var point = ImagePoint(e.Location);
-            if (active.Tool == DrawTool.Pen || active.Tool == DrawTool.Highlight) active.Points.Add(point);
-            else active.Points[active.Points.Count - 1] = point;
             Invalidate();
         }
 
+        private void MoveGesture(PointF point)
+        {
+            if (active.Freehand || active.Tool == DrawTool.Pen || active.Tool == DrawTool.Highlight) active.Points.Add(point);
+            else active.Points[active.Points.Count - 1] = point;
+        }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            hoverPoint = ImagePoint(e.Location); hovering = true;
+            if (active != null) MoveGesture(hoverPoint);
+            if (active != null || BrushTool) Invalidate();
+        }
+        protected override void OnMouseLeave(EventArgs e)
+        { base.OnMouseLeave(e); hovering = false; Invalidate(); }
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!Capture && active != null) { active = null; Invalidate(); }
+        }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (Tool == DrawTool.Eraser) { Capture = false; return; }
             if (active == null || e.Button != MouseButtons.Left) return;
-            var point = ImagePoint(e.Location);
-            if (active.Tool == DrawTool.Pen || active.Tool == DrawTool.Highlight) active.Points.Add(point);
-            else active.Points[active.Points.Count - 1] = point;
-            var mark = active;
-            active = null;
-            Capture = false;
+            MoveGesture(ImagePoint(e.Location));
+            var mark = active; active = null; Capture = false;
+            if ((mark.Tool == DrawTool.Mosaic || mark.Tool == DrawTool.Eraser) && !mark.Freehand && (mark.Bounds.Width <= 0 || mark.Bounds.Height <= 0)) { Invalidate(); return; }
             AddMark(mark);
         }
 
@@ -112,6 +142,7 @@ namespace ShotInk
         private void SaveUndo() { undo.Push(new List<Mark>(Marks)); redo.Clear(); }
         internal void Undo()
         {
+            CancelGesture();
             if (!CanUndo) return;
             redo.Push(new List<Mark>(Marks));
             if (undo.Count > 0) { var state = undo.Pop(); Marks.Clear(); Marks.AddRange(state); }
@@ -120,37 +151,9 @@ namespace ShotInk
         }
         internal void Redo()
         {
+            CancelGesture();
             if (redo.Count == 0) return;
             undo.Push(new List<Mark>(Marks)); var state = redo.Pop(); Marks.Clear(); Marks.AddRange(state); NotifyChanged();
-        }
-        internal bool EraseAt(PointF point)
-        {
-            for (int i = Marks.Count - 1; i >= 0; i--)
-            {
-                if (!HitMark(Marks[i], point)) continue;
-                SaveUndo(); Marks.RemoveAt(i); NotifyChanged(); return true;
-            }
-            return false;
-        }
-        private bool HitMark(Mark mark, PointF point)
-        {
-            if (mark.Points.Count == 0) return false;
-            var bounds = mark.Bounds;
-            if (mark.Tool == DrawTool.Text)
-            {
-                using (var g = Graphics.FromImage(Image))
-                using (var font = new Font("Microsoft YaHei UI", Math.Max(14, mark.Width * 6), FontStyle.Bold, GraphicsUnit.Pixel))
-                    return new RectangleF(mark.Points[0], g.MeasureString(mark.Text, font)).Contains(point);
-            }
-            if (mark.Tool == DrawTool.Mosaic) return bounds.Contains(point);
-            using (var path = new GraphicsPath())
-            using (var pen = new Pen(Color.Black, Math.Max(12, mark.Width * (mark.Tool == DrawTool.Highlight ? 6 : 2))))
-            {
-                if (mark.Tool == DrawTool.Rectangle && bounds.Width > 0 && bounds.Height > 0) path.AddRectangle(bounds);
-                else if (mark.Tool == DrawTool.Ellipse && bounds.Width > 0 && bounds.Height > 0) path.AddEllipse(bounds);
-                else if (mark.Points.Count > 1) path.AddLines(mark.Points.ToArray());
-                return path.PointCount > 0 && path.IsOutlineVisible(point, pen);
-            }
         }
         internal void Reframe(Bitmap image, Point shift)
         {
@@ -169,12 +172,83 @@ namespace ShotInk
             e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             foreach (var mark in Marks) DrawMark(e.Graphics, mark);
-            if (active != null) DrawMark(e.Graphics, active);
+            if (active != null)
+            {
+                DrawMark(e.Graphics, active);
+                if ((active.Tool == DrawTool.Mosaic || active.Tool == DrawTool.Eraser) && !active.Freehand)
+                    using (var outline = new Pen(Color.DodgerBlue, 1 / Zoom))
+                    { outline.DashStyle = DashStyle.Dash; var bounds = active.Bounds; e.Graphics.DrawRectangle(outline, bounds.X, bounds.Y, bounds.Width, bounds.Height); }
+            }
+            if (hovering && BrushTool)
+            {
+                float radius = CurrentBrushSize / 2;
+                var circle = new RectangleF(hoverPoint.X - radius, hoverPoint.Y - radius, radius * 2, radius * 2);
+                using (var white = new Pen(Color.White, 3 / Zoom)) e.Graphics.DrawEllipse(white, circle);
+                using (var black = new Pen(Color.Black, 1 / Zoom)) e.Graphics.DrawEllipse(black, circle);
+            }
+        }
+
+        private static Region AppliedRegion(Mark mark)
+        {
+            if (!mark.Freehand) return new Region(mark.Bounds);
+            using (var path = new GraphicsPath())
+            {
+                var points = new List<PointF>();
+                foreach (var point in mark.Points)
+                    if (points.Count == 0 || points[points.Count - 1] != point) points.Add(point);
+                float diameter = Math.Max(1, mark.BrushSize), radius = diameter / 2;
+                if (points.Count > 1)
+                {
+                    path.AddLines(points.ToArray());
+                    using (var pen = new Pen(Color.Black, diameter) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round }) path.Widen(pen);
+                }
+                // Widen cannot cover a stationary click; explicit caps also cover the endpoints.
+                if (points.Count > 0)
+                {
+                    var first = points[0]; var last = points[points.Count - 1];
+                    path.AddEllipse(first.X - radius, first.Y - radius, diameter, diameter);
+                    path.AddEllipse(last.X - radius, last.Y - radius, diameter, diameter);
+                }
+                path.FillMode = FillMode.Winding;
+                return new Region(path);
+            }
+        }
+
+        private void DrawAppliedMark(Graphics g, Mark mark)
+        {
+            var state = g.Save();
+            try
+            {
+                using (var region = AppliedRegion(mark))
+                {
+                    g.SetClip(region, CombineMode.Intersect);
+                    if (mark.Tool == DrawTool.Eraser)
+                    {
+                        // Restore the frozen screenshot only inside the brush or selection.
+                        g.CompositingMode = CompositingMode.SourceCopy;
+                        g.DrawImage(Image, new Rectangle(Point.Empty, Image.Size), 0, 0, Image.Width, Image.Height, GraphicsUnit.Pixel);
+                        return;
+                    }
+                    int block = mark.MosaicSize > 0 ? mark.MosaicSize : Math.Max(8, (int)mark.Width * 5);
+                    var bounds = mark.Bounds;
+                    var clipped = Rectangle.Intersect(Rectangle.FromLTRB((int)Math.Floor(bounds.Left), (int)Math.Floor(bounds.Top), (int)Math.Ceiling(bounds.Right), (int)Math.Ceiling(bounds.Bottom)), new Rectangle(Point.Empty, Image.Size));
+                    for (int y = clipped.Top; y < clipped.Bottom; y += block)
+                        for (int x = clipped.Left; x < clipped.Right; x += block)
+                        {
+                            var cell = new Rectangle(x, y, Math.Min(block, clipped.Right - x), Math.Min(block, clipped.Bottom - y));
+                            if (!region.IsVisible(cell)) continue;
+                            var color = Image.GetPixel(Math.Min(Image.Width - 1, x + block / 2), Math.Min(Image.Height - 1, y + block / 2));
+                            using (var brush = new SolidBrush(color)) g.FillRectangle(brush, cell);
+                        }
+                }
+            }
+            finally { g.Restore(state); }
         }
 
         private void DrawMark(Graphics g, Mark mark)
         {
             if (mark.Points.Count == 0) return;
+            if (mark.Tool == DrawTool.Mosaic || mark.Tool == DrawTool.Eraser) { DrawAppliedMark(g, mark); return; }
             var first = mark.Points[0];
             var last = mark.Points[mark.Points.Count - 1];
             var bounds = mark.Bounds;
@@ -206,17 +280,6 @@ namespace ShotInk
                         using (var font = new Font("Microsoft YaHei UI", Math.Max(14, mark.Width * 6), FontStyle.Bold, GraphicsUnit.Pixel))
                         using (var brush = new SolidBrush(mark.Color)) g.DrawString(mark.Text, font, brush, first);
                         break;
-                    case DrawTool.Mosaic:
-                        int block = Math.Max(8, (int)mark.Width * 5);
-                        var clipped = Rectangle.Intersect(Rectangle.Ceiling(bounds), new Rectangle(Point.Empty, Image.Size));
-                        // Opaque blocks cover all pixels, including partial edge blocks.
-                        for (int y = clipped.Top; y < clipped.Bottom; y += block)
-                            for (int x = clipped.Left; x < clipped.Right; x += block)
-                            {
-                                var color = Image.GetPixel(Math.Min(Image.Width - 1, x + block / 2), Math.Min(Image.Height - 1, y + block / 2));
-                                using (var brush = new SolidBrush(color)) g.FillRectangle(brush, x, y, Math.Min(block, clipped.Right - x), Math.Min(block, clipped.Bottom - y));
-                            }
-                        break;
                 }
             }
         }
@@ -243,6 +306,8 @@ namespace ShotInk
         private readonly Label status;
         private readonly Label zoomLabel;
         private readonly List<Button> toolButtons = new List<Button>();
+        private readonly AnnotationOptions toolOptions;
+        private readonly Panel toolArea;
         private readonly Action<Bitmap> pin;
         private bool dirty;
 
@@ -266,12 +331,6 @@ namespace ShotInk
                 button.Click += delegate { SelectTool(selectedTool); };
                 toolButtons.Add(button); tools.Controls.Add(button);
             }
-            var color = Theme.Button("颜色", false, 66);
-            color.Click += delegate { using (var dialog = new ColorDialog { Color = canvas.Ink, FullOpen = true }) if (dialog.ShowDialog(this) == DialogResult.OK) canvas.Ink = dialog.Color; };
-            tools.Controls.Add(color);
-            var width = new NumericUpDown { Minimum = 1, Maximum = 12, Value = 3, Width = 47, Margin = new Padding(5, 13, 5, 5) };
-            width.ValueChanged += delegate { canvas.Stroke = (float)width.Value; };
-            tools.Controls.Add(width);
             AddButton(tools, "撤销", false, 66, delegate { canvas.Undo(); });
             AddButton(tools, "重做", false, 66, delegate { canvas.Redo(); });
             AddButton(tools, "复制", false, 66, delegate { CopyImage(); });
@@ -286,7 +345,13 @@ namespace ShotInk
             canvas.Changed += delegate { dirty = true; UpdateStatus("已编辑"); };
             viewport.Controls.Add(canvas);
             status = Theme.Label("", 9, Theme.Muted); status.Dock = DockStyle.Bottom; status.Height = 34; status.Padding = new Padding(12, 8, 0, 0);
-            Controls.Add(viewport); Controls.Add(status); Controls.Add(tools);
+            toolOptions = new AnnotationOptions { Location = new Point(9, 106), Width = 440 };
+            toolOptions.SettingsChanged += delegate { toolOptions.ApplyTo(canvas); };
+            toolOptions.ToolChanged += SelectTool;
+            toolArea = new Panel { Dock = DockStyle.Top, BackColor = Color.White };
+            toolArea.Controls.Add(tools); toolArea.Controls.Add(toolOptions);
+            Controls.Add(viewport); Controls.Add(status); Controls.Add(toolArea);
+            SelectTool(DrawTool.Rectangle);
             Shown += delegate { Fit(); UpdateStatus("截图已复制；编辑后可再次复制或保存"); };
             FormClosing += delegate(object sender, FormClosingEventArgs e)
             {
@@ -302,8 +367,14 @@ namespace ShotInk
         private void SelectTool(DrawTool tool)
         {
             canvas.Tool = tool;
+            toolOptions.ShowTool(tool); toolOptions.ApplyTo(canvas);
+            toolArea.Height = 110 + toolOptions.Height;
             for (int i = 0; i < toolButtons.Count; i++)
-            { toolButtons[i].BackColor = i == (int)tool ? Theme.Accent : Color.White; toolButtons[i].ForeColor = i == (int)tool ? Color.White : Theme.Ink; }
+            {
+                bool chosen = i == (int)tool || tool == DrawTool.Line && i == (int)DrawTool.Arrow;
+                toolButtons[i].BackColor = chosen ? Theme.Accent : Color.White; toolButtons[i].ForeColor = chosen ? Color.White : Theme.Ink;
+            }
+            canvas.Focus();
         }
         private void Zoom(float value) { canvas.SetZoom(value); zoomLabel.Text = Math.Round(canvas.Zoom * 100) + "%"; }
         private void Fit() { Zoom(Math.Min(1, (viewport.ClientSize.Width - 60F) / canvas.Image.Width)); }

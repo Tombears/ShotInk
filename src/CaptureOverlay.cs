@@ -163,7 +163,7 @@ namespace ShotInk
             Controls.Add(canvas);
             toolbar = new CaptureToolbar();
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
-            toolbar.SettingsChanged += delegate { SyncSettings(); canvas.Focus(); };
+            toolbar.SettingsChanged += delegate { SyncSettings(); };
             toolbar.UndoClicked += delegate { canvas.Undo(); };
             toolbar.RedoClicked += delegate { canvas.Redo(); };
             toolbar.CancelClicked += delegate { Close(); };
@@ -175,7 +175,7 @@ namespace ShotInk
             canvas.Focus();
         }
 
-        private void SyncSettings() { canvas.Ink = toolbar.Ink; canvas.Stroke = toolbar.Stroke; }
+        private void SyncSettings() { toolbar.ApplyTo(canvas); }
         private void PositionToolbar()
         {
             if (toolbar == null) return;

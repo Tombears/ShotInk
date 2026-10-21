@@ -28,6 +28,10 @@ namespace ShotInk
                 Run("annotations render at original resolution and undo", TestAnnotations);
                 Run("mosaic covers partial edge blocks", TestMosaic);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
+                Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
+                Run("mosaic brush follows continuous strokes and keeps sizes independent", TestMosaicBrush);
+                Run("mosaic selection ignores brush size and respects pixel size", TestMosaicSelection);
+                Run("eraser brush and selection restore only the requested pixels", TestEraserModes);
                 Run("highlighter remains translucent and preserves the original", TestHighlighter);
                 Run("floating selection stays open and exports only edited pixels", TestFloatingSelection);
                 Run("selection resize and toolbar stay within display bounds", TestSelectionGeometry);
@@ -207,14 +211,160 @@ namespace ShotInk
                 canvas.AddMark(RectangleMark());
                 canvas.Undo(); Assert(canvas.Marks.Count == 0 && canvas.CanRedo, "Undo did not make redo available.");
                 canvas.Redo(); Assert(canvas.Marks.Count == 1, "Redo did not restore the mark.");
-                Assert(!canvas.EraseAt(new PointF(50, 50)), "Eraser removed a rectangle from its empty interior.");
-                Assert(canvas.EraseAt(new PointF(20, 50)) && canvas.Marks.Count == 0, "Eraser did not remove the hit annotation.");
+                canvas.Tool = DrawTool.Eraser; canvas.EraserBrushSize = 12;
+                Gesture(canvas, new Point(20, 50), new Point(20, 50));
+                using (var image = canvas.Render())
+                {
+                    Assert(image.GetPixel(20, 50).ToArgb() == Color.White.ToArgb(), "Eraser did not restore original pixels.");
+                    Assert(image.GetPixel(20, 25).R > 240 && image.GetPixel(20, 25).G < 40, "Eraser removed the entire annotation.");
+                }
                 canvas.Undo(); Assert(canvas.Marks.Count == 1, "Undo did not restore erased annotation.");
-                canvas.Redo(); Assert(canvas.Marks.Count == 0, "Redo did not restore erasure.");
+                using (var image = canvas.Render()) Assert(image.GetPixel(20, 50).G < 40, "Undo did not restore erased pixels.");
+                canvas.Redo();
+                using (var image = canvas.Render()) Assert(image.GetPixel(20, 50).ToArgb() == Color.White.ToArgb(), "Redo did not restore erasure.");
                 canvas.Undo(); canvas.AddMark(RectangleMark()); Assert(!canvas.CanRedo, "New edits kept an obsolete redo branch.");
                 Assert(canvas.Image.GetPixel(20, 50).ToArgb() == Color.White.ToArgb(), "Eraser changed the original screenshot.");
             }
         }
+        private static void Gesture(AnnotationCanvas canvas, params Point[] points)
+        {
+            Mouse(canvas, "OnMouseDown", MouseButtons.Left, points[0].X, points[0].Y);
+            for (int i = 1; i < points.Length - 1; i++) Mouse(canvas, "OnMouseMove", MouseButtons.Left, points[i].X, points[i].Y);
+            var last = points[points.Length - 1]; Mouse(canvas, "OnMouseUp", MouseButtons.Left, last.X, last.Y);
+        }
+        private static T Option<T>(Control parent, string name) where T : Control
+        { return (T)parent.Controls.Find(name, true)[0]; }
+        private static void TestToolOptions()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600)))
+            {
+                overlay.Show(); Select(overlay);
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                var tools = Field<System.Collections.Generic.Dictionary<DrawTool, ToolStripItem>>(toolbar, "tools");
+                var options = Field<AnnotationOptions>(toolbar, "options");
+                tools[DrawTool.Mosaic].PerformClick();
+                Assert(canvas.Tool == DrawTool.Mosaic && canvas.MosaicMode == ApplyMode.Brush && options.Visible, "Mosaic required a second click to activate the brush.");
+                ToolPreview(overlay, "mosaic");
+                var sliders = options.Controls.Find("mosaic-size", true);
+                Assert(sliders.Length == 1 && Option<TrackBar>(options, "mosaic-size").Parent.Top < Option<TrackBar>(options, "mosaic-brush-size").Parent.Top, "Mosaic sliders are missing or out of order.");
+                Option<TrackBar>(options, "mosaic-size").Value = 22;
+                Option<TrackBar>(options, "mosaic-brush-size").Value = 50;
+                Assert(canvas.MosaicSize == 22 && canvas.MosaicBrushSize == 50, "Mosaic sliders did not update separate settings.");
+                Option<Button>(options, "mode-rectangle").PerformClick();
+                Assert(canvas.MosaicMode == ApplyMode.Rectangle && !Option<TrackBar>(options, "mosaic-brush-size").Enabled, "Mosaic selection mode did not activate.");
+                tools[DrawTool.Eraser].PerformClick();
+                Assert(canvas.Tool == DrawTool.Eraser && canvas.EraserMode == ApplyMode.Brush && options.Visible, "Eraser required a second click to activate the brush.");
+                ToolPreview(overlay, "eraser");
+                Option<TrackBar>(options, "eraser-brush-size").Value = 62;
+                Assert(canvas.EraserBrushSize == 62 && canvas.MosaicBrushSize == 50 && canvas.MosaicSize == 22, "Eraser size changed mosaic settings.");
+                Option<Button>(options, "mode-rectangle").PerformClick();
+                Assert(canvas.EraserMode == ApplyMode.Rectangle, "Eraser selection mode did not activate.");
+                tools[DrawTool.Rectangle].PerformClick();
+                Assert(canvas.Tool == DrawTool.Rectangle && options.Visible, "Shape button did not select its default tool.");
+                Option<Button>(options, "shape-ellipse").PerformClick();
+                Assert(canvas.Tool == DrawTool.Ellipse, "Shape options did not switch to ellipse.");
+                tools[DrawTool.Arrow].PerformClick();
+                Assert(canvas.Tool == DrawTool.Arrow, "Arrow button did not select its default tool.");
+                Option<Button>(options, "line-straight").PerformClick();
+                Assert(canvas.Tool == DrawTool.Line, "Line options did not switch to straight line.");
+                tools[DrawTool.Pen].PerformClick(); tools[DrawTool.Pen].PerformClick();
+                Assert(canvas.Tool == DrawTool.Pen && options.Visible, "Clicking an active tool disabled it instead of showing options.");
+                tools[DrawTool.None].PerformClick();
+                Assert(canvas.Tool == DrawTool.None && !options.Visible && canvas.Cursor == Cursors.SizeAll, "Move selection mode was lost.");
+                overlay.Close();
+            }
+        }
+        private static void TestMosaicBrush()
+        {
+            using (var canvas = new AnnotationCanvas(Pattern(160, 140, 31)))
+            {
+                canvas.Tool = DrawTool.Mosaic; canvas.MosaicBrushSize = 20; canvas.MosaicSize = 8; canvas.SetZoom(0.5F);
+                Gesture(canvas, new Point(10, 20), new Point(60, 20), new Point(60, 50), new Point(10, 50));
+                using (var image = canvas.Render())
+                {
+                    Assert(image.GetPixel(60, 40).ToArgb() != canvas.Image.GetPixel(60, 40).ToArgb(), "Fast brush movement left gaps in mosaic.");
+                    Assert(image.GetPixel(120, 70).ToArgb() != canvas.Image.GetPixel(120, 70).ToArgb(), "Brush bounds ignored intermediate points.");
+                    Assert(image.GetPixel(60, 70).ToArgb() == canvas.Image.GetPixel(60, 70).ToArgb(), "Mosaic filled the bounding rectangle instead of following the brush.");
+                    Assert(image.GetPixel(60, 55).ToArgb() == canvas.Image.GetPixel(60, 55).ToArgb(), "Mosaic brush was larger than its configured size.");
+                    canvas.MosaicSize = 32; canvas.MosaicBrushSize = 80;
+                    using (var unchanged = canvas.Render()) EqualPixels(image, unchanged, image.Height);
+                }
+                Assert(canvas.Marks.Count == 1 && canvas.Marks[0].MosaicSize == 8 && canvas.Marks[0].BrushSize == 20, "Stroke settings were not captured independently.");
+                canvas.Undo();
+                using (var image = canvas.Render()) EqualPixels(canvas.Image, image, canvas.Image.Height);
+                canvas.Redo(); Assert(canvas.Marks.Count == 1, "Mosaic stroke did not redo as one action.");
+                canvas.SetZoom(1); canvas.MosaicSize = 8; canvas.MosaicBrushSize = 40;
+                Gesture(canvas, new Point(20, 40), new Point(120, 40));
+                using (var image = canvas.Render()) Assert(image.GetPixel(60, 55).ToArgb() != canvas.Image.GetPixel(60, 55).ToArgb(), "Brush size did not change the painted area.");
+                Gesture(canvas, new Point(0, 0), new Point(0, 0));
+                using (var image = canvas.Render()) Assert(image.GetPixel(0, 0).ToArgb() != canvas.Image.GetPixel(0, 0).ToArgb(), "Single click at image edge did not apply mosaic.");
+            }
+        }
+        private static void ToolPreview(CaptureOverlay overlay, string tool)
+        {
+            Application.DoEvents();
+            using (var image = new Bitmap(overlay.Width, overlay.Height))
+            {
+                overlay.DrawToBitmap(image, overlay.ClientRectangle);
+                image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-" + tool + "-options.png"), ImageFormat.Png);
+            }
+        }
+        private static void TestMosaicSelection()
+        {
+            using (var small = new AnnotationCanvas(Pattern(100, 80, 33)))
+            using (var large = new AnnotationCanvas(Pattern(100, 80, 33)))
+            {
+                foreach (var canvas in new[] { small, large }) { canvas.Tool = DrawTool.Mosaic; canvas.MosaicMode = ApplyMode.Rectangle; canvas.MosaicSize = 8; }
+                small.MosaicBrushSize = 4; large.MosaicBrushSize = 100;
+                Gesture(small, new Point(80, 60), new Point(10, 10)); Gesture(large, new Point(80, 60), new Point(10, 10));
+                using (var a = small.Render())
+                using (var b = large.Render())
+                {
+                    EqualPixels(a, b, a.Height);
+                    Assert(a.GetPixel(30, 30).ToArgb() == a.GetPixel(31, 31).ToArgb(), "Mosaic size did not produce blocks.");
+                    Assert(a.GetPixel(9, 30).ToArgb() == small.Image.GetPixel(9, 30).ToArgb(), "Selection mosaic changed pixels outside the box.");
+                    small.Undo(); small.MosaicSize = 24; Gesture(small, new Point(80, 60), new Point(10, 10));
+                    using (var changed = small.Render()) Assert(changed.GetPixel(30, 30).ToArgb() != a.GetPixel(30, 30).ToArgb(), "Mosaic size did not affect pixelation.");
+                }
+            }
+        }
+        private static void TestEraserModes()
+        {
+            using (var canvas = new AnnotationCanvas(new Bitmap(160, 120)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                var line = new Mark { Tool = DrawTool.Line, Color = Color.Red, Width = 4 };
+                line.Points.Add(new PointF(10, 50)); line.Points.Add(new PointF(150, 50)); canvas.AddMark(line);
+                canvas.Tool = DrawTool.Eraser; canvas.EraserBrushSize = 20;
+                Gesture(canvas, new Point(80, 10), new Point(80, 90));
+                using (var image = canvas.Render())
+                {
+                    Assert(image.GetPixel(80, 50).ToArgb() == Color.White.ToArgb(), "Eraser skipped a fast stroke between events.");
+                    Assert(image.GetPixel(100, 50).G < 40, "Small eraser removed pixels outside its brush.");
+                }
+                canvas.Undo(); Assert(canvas.Marks.Count == 1, "Eraser stroke was split into multiple undo steps.");
+                canvas.EraserBrushSize = 60; Gesture(canvas, new Point(80, 10), new Point(80, 90));
+                using (var image = canvas.Render()) Assert(image.GetPixel(100, 50).ToArgb() == Color.White.ToArgb(), "Eraser brush size did not affect coverage.");
+                canvas.Undo(); canvas.EraserMode = ApplyMode.Rectangle;
+                Gesture(canvas, new Point(75, 70), new Point(20, 30));
+                using (var image = canvas.Render())
+                {
+                    Assert(image.GetPixel(40, 50).ToArgb() == Color.White.ToArgb(), "Selection eraser did not restore the selected area.");
+                    Assert(image.GetPixel(100, 50).G < 40, "Selection eraser removed the whole mark.");
+                }
+                canvas.Undo(); canvas.Tool = DrawTool.Mosaic; canvas.MosaicMode = ApplyMode.Rectangle;
+                // Verify erasing mosaic restores the frozen pixels, rather than painting a color.
+                canvas.Reframe(Pattern(160, 120, 42), Point.Empty);
+                Gesture(canvas, new Point(20, 20), new Point(140, 100));
+                canvas.Tool = DrawTool.Eraser; Gesture(canvas, new Point(30, 30), new Point(70, 80));
+                using (var image = canvas.Render()) Assert(image.GetPixel(50, 50).ToArgb() == canvas.Image.GetPixel(50, 50).ToArgb(), "Erasing mosaic did not restore the original screenshot.");
+                canvas.Redo();
+                canvas.Undo();
+                using (var image = canvas.Render()) Assert(image.GetPixel(50, 50).ToArgb() != canvas.Image.GetPixel(50, 50).ToArgb(), "Undo did not restore erased mosaic.");
+            }
+        }
+
         private static void TestHighlighter()
         {
             using (var canvas = new AnnotationCanvas(new Bitmap(100, 80)))
