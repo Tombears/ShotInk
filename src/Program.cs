@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace SnipasteLite
+namespace ShotInk
 {
     internal static class Program
     {
@@ -10,11 +10,12 @@ namespace SnipasteLite
         private static void Main()
         {
             bool first;
+            // Share the legacy mutex so both names cannot register the same hotkeys.
             using (var instance = new Mutex(true, "Local\\SnipasteLite.Desktop", out first))
             {
                 if (!first)
                 {
-                    MessageBox.Show("Snipaste Lite 已在运行，请从系统托盘打开。", "Snipaste Lite");
+                    MessageBox.Show("ShotInk 已在运行，请从系统托盘打开。", "ShotInk");
                     return;
                 }
                 Native.EnableDpiAwareness();

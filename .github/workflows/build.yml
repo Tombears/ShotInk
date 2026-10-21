@@ -18,11 +18,11 @@ jobs:
       - name: Upload release files
         uses: actions/upload-artifact@v4
         with:
-          name: SnipasteLite-windows-portable
+          name: ShotInk-windows-portable
           if-no-files-found: error
           path: |
-            dist/SnipasteLite.exe
-            SnipasteLite-portable.zip
+            dist/ShotInk.exe
+            ShotInk-portable.zip
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: SnipasteLite-windows-portable
+          name: ShotInk-windows-portable
           path: release
       - name: Publish tagged release
         shell: powershell
@@ -44,5 +44,5 @@ jobs:
           $notes = "releases/$env:GITHUB_REF_NAME.md"
           $title = $env:GITHUB_REF_NAME -replace '^v', ''
           if (-not (Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
-          gh release create $env:GITHUB_REF_NAME release/dist/SnipasteLite.exe release/SnipasteLite-portable.zip --repo $env:GITHUB_REPOSITORY --verify-tag --latest --title $title --notes-file $notes
+          gh release create $env:GITHUB_REF_NAME release/dist/ShotInk.exe release/ShotInk-portable.zip --repo $env:GITHUB_REPOSITORY --verify-tag --latest --title $title --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

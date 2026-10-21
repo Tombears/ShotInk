@@ -1,10 +1,10 @@
-# Snipaste Lite
+# ShotInk
 
-一个可直接运行的 Windows 截图工具，参考 Snipaste 的截图、标注和桌面贴图交互，另提供自动滚动和手动采集的长截图功能。
+轻量 Windows 截图工具，支持区域截图、绘图标注、滚动长截图与桌面贴图。下载即可运行，截图保存在本机。
 
 ## 下载
 
-前往 [Releases](https://github.com/Tombears/snipaste/releases/latest) 查看版本说明，在 **Assets** 中下载 [SnipasteLite.exe](https://github.com/Tombears/snipaste/releases/latest/download/SnipasteLite.exe)，双击即可运行。也可下载 `SnipasteLite-portable.zip`，解压后运行其中的程序。
+前往 [Releases](https://github.com/Tombears/snipaste/releases/latest) 查看版本说明，在 **Assets** 中下载 [ShotInk.exe](https://github.com/Tombears/snipaste/releases/latest/download/ShotInk.exe)，双击即可运行。也可下载 `ShotInk-portable.zip`，解压后运行其中的程序。
 
 支持 Windows 10 / 11，需要 .NET Framework 4.8。
 
@@ -23,7 +23,7 @@
 
 Windows 10 / 11，安装系统自带或微软提供的 **.NET Framework 4.8**。无需 Node.js、Python、.NET SDK、管理员权限或额外 NuGet 依赖。
 
-双击 `dist\SnipasteLite.exe`。也可以在项目目录运行：
+双击 `dist\ShotInk.exe`。也可以在项目目录运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
@@ -35,7 +35,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 ```
 
-产物为 `dist\SnipasteLite.exe` 和 `SnipasteLite-portable.zip`。Visual Studio 也可打开 `SnipasteLite.csproj`（需要 .NET Framework 4.8 targeting pack）。
+产物为 `dist\ShotInk.exe` 和 `ShotInk-portable.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。
 
 ## 普通截图操作
 
@@ -66,4 +66,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 
 如果已经运行官方 Snipaste 等使用相同快捷键的程序，工作台会提示快捷键冲突，可使用按钮或托盘菜单。
 
-截图和设置目录：`%LOCALAPPDATA%\SnipasteLite`。应用本身不会向网络上传截图；GitHub 上传脚本只上传本项目源码，构建产物和运行数据均不纳入 Git。
+截图和设置目录：`%LOCALAPPDATA%\ShotInk`。从旧版升级时，如果存在 `%LOCALAPPDATA%\SnipasteLite` 且尚无新目录，会继续使用旧目录，保留截图历史与设置。应用本身不会向网络上传截图；GitHub 上传脚本只上传本项目源码，构建产物和运行数据均不纳入 Git。

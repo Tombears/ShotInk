@@ -4,7 +4,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Windows.Forms;
 
-namespace SnipasteLite
+namespace ShotInk
 {
     internal static class Tests
     {
@@ -18,6 +18,7 @@ namespace SnipasteLite
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
                 Run("unchanged frame does not duplicate content", TestUnchanged);
                 Run("unrelated frames are rejected", TestUnrelated);
@@ -42,6 +43,32 @@ namespace SnipasteLite
             }
             catch (Exception ex) { Console.Error.WriteLine("FAIL: " + ex); return 1; }
         }
+        private static void TestDataRoot()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ShotInk-tests-" + Guid.NewGuid().ToString("N"));
+            var current = Path.Combine(root, "ShotInk");
+            var legacy = Path.Combine(root, "SnipasteLite");
+            try
+            {
+                Assert(MainForm.ResolveDataRoot(root) == current, "Fresh installs use the wrong data directory.");
+                Directory.CreateDirectory(Path.Combine(legacy, "captures"));
+                var settings = Path.Combine(legacy, "settings.ini");
+                File.WriteAllText(settings, "save=0");
+                using (var image = new Bitmap(2, 2)) image.Save(Path.Combine(legacy, "captures", "saved.png"), ImageFormat.Png);
+                Assert(MainForm.ResolveDataRoot(root) == legacy, "Upgrade did not reuse existing data.");
+                using (var home = new MainForm(MainForm.ResolveDataRoot(root), false))
+                {
+                    Assert(!Field<CheckBox>(home, "autoSave").Checked, "Upgrade lost the auto-save preference.");
+                    Assert(Field<ListView>(home, "history").Items.Count == 1, "Upgrade lost the screenshot history.");
+                    Assert(home.Text.StartsWith("ShotInk"), "Window title still uses the previous name.");
+                }
+                Assert(File.ReadAllText(settings) == "save=0", "Opening the app changed the saved preference.");
+                Directory.CreateDirectory(current);
+                Assert(MainForm.ResolveDataRoot(root) == current, "An existing ShotInk directory was ignored.");
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
         private static void Run(string name, Action test) { test(); passed++; Console.WriteLine("PASS " + name); }
         private static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
         private static Bitmap Pattern(int width, int height, int seed)

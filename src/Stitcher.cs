@@ -4,7 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
-namespace SnipasteLite
+namespace ShotInk
 {
     internal enum StitchStatus { Added, Unchanged, Unmatched, LimitReached }
 

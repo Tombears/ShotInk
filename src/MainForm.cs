@@ -9,7 +9,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace SnipasteLite
+namespace ShotInk
 {
     internal sealed class MainForm : Form
     {
@@ -30,10 +30,10 @@ namespace SnipasteLite
         internal MainForm(string storageRoot, bool integrateDesktop)
         {
             desktopIntegration = integrateDesktop;
-            dataRoot = storageRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SnipasteLite");
+            dataRoot = storageRoot ?? ResolveDataRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             historyRoot = Path.Combine(dataRoot, "captures");
             Directory.CreateDirectory(historyRoot);
-            Text = "Snipaste Lite · 截图与长截图";
+            Text = "ShotInk · 截图与长截图";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9);
             Size = new Size(1080, 730);
@@ -43,8 +43,8 @@ namespace SnipasteLite
             appIcon = CreateIcon(); Icon = appIcon;
 
             var sidebar = new Panel { Dock = DockStyle.Left, Width = 202, BackColor = Color.FromArgb(24, 32, 53), Padding = new Padding(22) };
-            var brand = Theme.Label("▣  Snipaste", 20, Color.White); brand.Location = new Point(20, 30); sidebar.Controls.Add(brand);
-            var edition = Theme.Label("L I T E   /   W I N D O W S", 8, Color.FromArgb(149, 163, 194)); edition.Location = new Point(27, 75); sidebar.Controls.Add(edition);
+            var brand = Theme.Label("▣  ShotInk", 20, Color.White); brand.Location = new Point(20, 30); sidebar.Controls.Add(brand);
+            var edition = Theme.Label("S H O T I N K   /   W I N D O W S", 8, Color.FromArgb(149, 163, 194)); edition.Location = new Point(27, 75); sidebar.Controls.Add(edition);
             var nav = Theme.Label("●   截图工作台", 11, Color.FromArgb(170, 181, 255)); nav.Location = new Point(25, 145); sidebar.Controls.Add(nav);
             var sub = Theme.Label("捕捉 · 标注 · 贴图", 9, Color.FromArgb(149, 163, 194)); sub.Location = new Point(25, 180); sidebar.Controls.Add(sub);
             var shortcuts = Theme.Label("全局快捷键\n\nF1           区域截图\nF3           剪贴板贴图\nCtrl Alt L   长截图", 9, Color.FromArgb(185, 197, 219));
@@ -98,6 +98,14 @@ namespace SnipasteLite
             if (desktopIntegration) SetupTray();
         }
 
+        internal static string ResolveDataRoot(string localApplicationData)
+        {
+            var current = Path.Combine(localApplicationData, "ShotInk");
+            var legacy = Path.Combine(localApplicationData, "SnipasteLite");
+            // Reuse existing history and settings when upgrading from the previous name.
+            return !Directory.Exists(current) && Directory.Exists(legacy) ? legacy : current;
+        }
+
         private bool ReadAutoSave()
         {
             try { var path = Path.Combine(dataRoot, "settings.ini"); return !File.Exists(path) || File.ReadAllText(path).Trim() != "save=0"; }
@@ -122,7 +130,7 @@ namespace SnipasteLite
             menu.Items.Add("剪贴板贴图  F3", null, delegate { PinClipboard(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { Quit(); });
-            tray = new NotifyIcon { Icon = appIcon, Text = "Snipaste Lite · F1 截图 / Ctrl+Alt+L 长截图", ContextMenuStrip = menu, Visible = true };
+            tray = new NotifyIcon { Icon = appIcon, Text = "ShotInk · F1 截图 / Ctrl+Alt+L 长截图", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += delegate { ShowHome(); };
         }
 
@@ -283,7 +291,7 @@ namespace SnipasteLite
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (!quitting && desktopIntegration && e.CloseReason == CloseReason.UserClosing)
-            { e.Cancel = true; Hide(); if (tray != null) tray.ShowBalloonTip(1500, "Snipaste Lite 仍在运行", "按 F1 截图，或从系统托盘退出。", ToolTipIcon.Info); }
+            { e.Cancel = true; Hide(); if (tray != null) tray.ShowBalloonTip(1500, "ShotInk 仍在运行", "按 F1 截图，或从系统托盘退出。", ToolTipIcon.Info); }
             base.OnFormClosing(e);
         }
         protected override void Dispose(bool disposing)

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Owner,
-    [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Repository = 'snipaste',
+    [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Repository = 'ShotInk',
     [ValidateSet('private', 'public')][string]$Visibility = 'private'
 )
 $ErrorActionPreference = 'Stop'
@@ -9,9 +9,6 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 foreach ($command in @('git', 'gh')) { if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Install $command first." } }
 $login = & gh api user --jq '.login'
 if ($LASTEXITCODE -ne 0) { throw 'Run gh auth login, then retry.' }
-if (-not $Owner) { $Owner = $login.Trim() }
-if ($Owner -notmatch '^[A-Za-z0-9-]+$') { throw 'Invalid GitHub owner.' }
-$fullName = "$Owner/$Repository"
 Push-Location -LiteralPath $projectRoot
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot '.git'))) {
@@ -20,6 +17,17 @@ try {
     }
     $gitRoot = & git rev-parse --show-toplevel
     if ($LASTEXITCODE -ne 0 -or [IO.Path]::GetFullPath($gitRoot.Trim()) -ne [IO.Path]::GetFullPath($projectRoot)) { throw 'Unexpected Git repository root.' }
+    $remote = $null
+    $remotes = @(& git remote)
+    if ($remotes -contains 'origin') { $remote = & git remote get-url origin }
+    # Existing checkouts keep using their current repository across a product rename.
+    if ($remote -and $remote.Trim() -match '^(?:https://github\.com/|git@github\.com:)([A-Za-z0-9-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$') {
+        if (-not $Owner) { $Owner = $Matches[1] }
+        if (-not $PSBoundParameters.ContainsKey('Repository')) { $Repository = $Matches[2] }
+    }
+    if (-not $Owner) { $Owner = $login.Trim() }
+    if ($Owner -notmatch '^[A-Za-z0-9-]+$') { throw 'Invalid GitHub owner.' }
+    $fullName = "$Owner/$Repository"
     $author = & git config user.name
     if (-not $author) { & git config user.name $login.Trim() }
     $email = & git config user.email
@@ -31,9 +39,6 @@ try {
         & git commit -m 'Build Windows screenshot, annotation, pin and scrolling capture tool'
         if ($LASTEXITCODE -ne 0) { throw 'git commit failed.' }
     } elseif ($LASTEXITCODE -ne 0) { throw 'Cannot inspect staged changes.' }
-    $remote = $null
-    $remotes = @(& git remote)
-    if ($remotes -contains 'origin') { $remote = & git remote get-url origin }
     # A missing repository is expected on the first upload; Windows PowerShell 5
     # otherwise treats redirected native stderr as a terminating error.
     $savedPreference = $ErrorActionPreference

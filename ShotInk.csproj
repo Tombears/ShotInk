@@ -3,12 +3,12 @@
   <PropertyGroup>
     <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>SnipasteLite</RootNamespace>
-    <AssemblyName>SnipasteLite</AssemblyName>
+    <RootNamespace>ShotInk</RootNamespace>
+    <AssemblyName>ShotInk</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <OutputPath>dist\</OutputPath>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <StartupObject>SnipasteLite.Program</StartupObject>
+    <StartupObject>ShotInk.Program</StartupObject>
     <LangVersion>5</LangVersion>
     <Prefer32Bit>false</Prefer32Bit>
     <Optimize>true</Optimize>

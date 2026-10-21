@@ -6,7 +6,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Windows.Forms;
 
-namespace SnipasteLite
+namespace ShotInk
 {
     internal enum DrawTool { Rectangle, Ellipse, Arrow, Pen, Text, Mosaic, Highlight, Eraser, None, Line }
 
@@ -249,7 +249,7 @@ namespace SnipasteLite
         internal EditorForm(Bitmap image, Action<Bitmap> pin)
         {
             this.pin = pin;
-            Text = "截图编辑 · Snipaste Lite";
+            Text = "截图编辑 · ShotInk";
             Size = new Size(1100, 760);
             MinimumSize = new Size(850, 500);
             StartPosition = FormStartPosition.CenterScreen;
