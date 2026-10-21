@@ -4,7 +4,7 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Tombears/snipaste/releases/latest) 查看版本说明，在 **Assets** 中下载 [ShotInk.exe](https://github.com/Tombears/snipaste/releases/latest/download/ShotInk.exe)，双击即可运行。也可下载 `ShotInk-portable.zip`，解压后运行其中的程序。
+前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 查看版本说明，在 **Assets** 中下载 [ShotInk.exe](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk.exe)，双击即可运行。也可下载 `ShotInk-portable.zip`，解压后运行其中的程序。
 
 支持 Windows 10 / 11，需要 .NET Framework 4.8。
 
