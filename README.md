@@ -2,6 +2,12 @@
 
 一个可直接运行的 Windows 截图工具，参考 Snipaste 的截图、标注和桌面贴图交互，另提供自动滚动和手动采集的长截图功能。
 
+## 下载
+
+前往 [Releases](https://github.com/Tombears/snipaste/releases/latest) 查看版本说明，在 **Assets** 中下载 [SnipasteLite.exe](https://github.com/Tombears/snipaste/releases/latest/download/SnipasteLite.exe)，双击即可运行。也可下载 `SnipasteLite-portable.zip`，解压后运行其中的程序。
+
+支持 Windows 10 / 11，需要 .NET Framework 4.8。
+
 ## 功能
 
 - **区域截图**：`F1` 拖选区域，松开鼠标后保持屏幕选区，并在选区下方显示浮动图标工具栏。支持拖动选区、八个手柄调整大小、跨显示器选区和像素尺寸提示。
@@ -11,7 +17,7 @@
 - **滚动长截图**：`Ctrl+Alt+L` 选择内容区域，支持自动滚动和手动滚动后逐屏采集，匹配重叠区域后拼接。
 - **本地历史**：默认保存最近 100 张截图，可关闭自动保存；普通截图完成时保存带标注的结果，长截图保存原始长图，双击历史图片继续编辑。
 - **托盘常驻**：关闭工作台后仍可使用全局快捷键，从托盘菜单退出。
-- **GitHub 上传**：提供源码上传脚本，GitHub Actions 自动构建测试、生成便携包，推送 `v*` 标签可生成 Release。
+- **版本下载**：GitHub Releases 提供中文版本说明、可直接运行的 EXE 和便携 ZIP。
 
 ## 运行
 
