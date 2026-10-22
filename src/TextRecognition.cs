@@ -112,7 +112,7 @@ namespace ShotInk
         {
             if (worker != null && !worker.HasExited) return;
             ResetWorker();
-            if (!File.Exists(executable)) throw new InvalidOperationException("缺少文字识别组件，请使用包含 ocr 文件夹的 ShotInk 便携包。");
+            if (!File.Exists(executable)) throw new InvalidOperationException("缺少文字识别组件。请运行 ShotInk-Setup.exe 完整安装包，或将便携包完整解压后再启动程序。");
             var start = new ProcessStartInfo(executable, arguments) { WorkingDirectory = workingDirectory, UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = new UTF8Encoding(false), StandardErrorEncoding = new UTF8Encoding(false) };

@@ -9,6 +9,8 @@ function Get-ShotInkBuildSignature {
     }
     $ocrDoc = Join-Path $ProjectRoot 'docs\ocr.md'
     if (Test-Path -LiteralPath $ocrDoc) { $inputs += 'docs\ocr.md' }
+    $installerRoot = Join-Path $ProjectRoot 'installer'
+    if (Test-Path -LiteralPath $installerRoot) { $inputs += @(Get-ChildItem -LiteralPath $installerRoot -File | ForEach-Object { 'installer\' + $_.Name }) }
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'src') -Filter '*.cs' | ForEach-Object { 'src\' + $_.Name })
     $hashes = foreach ($relative in ($inputs | Sort-Object)) {
         $digest = Get-FileHash -LiteralPath (Join-Path $ProjectRoot $relative) -Algorithm SHA256

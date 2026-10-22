@@ -17,9 +17,12 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Build and test
         shell: powershell
-        run: ./build.ps1 -Test
+        run: ./build.ps1 -Test -Installer
       - name: Check real OCR and character coordinates
         run: python tests/ocr-benchmark.py --host dist/ocr/ShotInk.OcrHost.exe
+      - name: Install complete package and check installed OCR
+        shell: powershell
+        run: ./tests/Installer.Tests.ps1
       - name: Upload release files
         uses: actions/upload-artifact@v4
         with:
@@ -28,6 +31,7 @@ jobs:
           path: |
             dist/ShotInk.exe
             ShotInk-portable.zip
+            ShotInk-Setup.exe
       - name: Upload tool previews
         if: always()
         uses: actions/upload-artifact@v4

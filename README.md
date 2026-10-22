@@ -4,7 +4,9 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 查看最新版本，推荐下载 [ShotInk-portable.zip](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip)，完整解压后运行 `ShotInk.exe`，保留同目录的 `ocr` 文件夹。单独的 [ShotInk.exe](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk.exe) 可截图、标注，文字识别需要配套组件。
+前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 下载 [ShotInk-Setup.exe 完整安装包](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-Setup.exe)，按提示安装后，从桌面或开始菜单启动 ShotInk。安装包内含主程序、OCR 组件、模型和所需运行环境，可离线安装。
+
+也可使用 [ShotInk-portable.zip 便携包](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip)：完整解压后运行 `ShotInk.exe`，保留同目录的 `ocr` 文件夹。请勿单独复制其中的 EXE。
 
 支持 Windows 10 / 11，需要 .NET Framework 4.8。
 
@@ -24,7 +26,9 @@
 
 ## 运行
 
-Windows 10 / 11，安装系统自带或微软提供的 **.NET Framework 4.8**。OCR 便携组件支持 Windows x64，并随包携带 .NET 8 运行时和识别模型；用户无需安装 Python、.NET SDK 或单独下载模型。ONNX Runtime 还需要 [Microsoft Visual C++ 2015–2022 x64 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)，系统未安装时需先安装。首次使用 OCR 会加载模型，之后复用同一进程；截图全程在本地处理。
+完整安装包支持 Windows 10 / 11 x64，内含 .NET Framework 4.8 和 Visual C++ x64 离线安装程序，按需补齐环境；OCR 的 .NET 8 运行时和模型随程序一起安装。用户无需额外下载运行库、Python、.NET SDK 或模型。若安装提示需要重启，请重启后再运行。首次使用 OCR 会加载模型，之后复用同一进程；截图全程在本地处理。
+
+便携包需要系统已有 .NET Framework 4.8 和 Visual C++ x64 运行库；环境不全时请使用完整安装包。
 
 双击 `dist\ShotInk.exe`。也可以在项目目录运行：
 
@@ -38,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 ```
 
-产物为 `dist\ShotInk.exe`、`dist\ocr\` 和 `ShotInk-portable.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）；OCR 组件通过 `scripts\build-ocr.ps1` 构建。主程序保持 .NET Framework 4.8。
+产物为 `dist\ShotInk.exe`、`dist\ocr\` 和 `ShotInk-portable.zip`。加上 `-Installer` 可构建完整安装包 `ShotInk-Setup.exe`（构建机需要 Inno Setup 6.5 或更新版本）；构建时下载并验证微软签名的离线运行库。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。主程序保持 .NET Framework 4.8。
 
 OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](docs/ocr.md)。
 

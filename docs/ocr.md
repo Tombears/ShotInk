@@ -39,6 +39,8 @@ NuGet 版本由 `ocr-host/packages.lock.json` 固定；模型文件来源、字�
 
 ## 构建和部署
 
-Windows 安装 .NET SDK 8 或更新版本后，运行 `build.ps1 -Test`；脚本下载并校验模型，将 OCR 组件发布为自带运行时的 win-x64 程序，随 `ShotInk-portable.zip` 提供。用户需完整解压并保留 `ocr` 文件夹，系统还需安装 Microsoft Visual C++ 2015–2022 x64 运行库（ONNX Runtime 的原生依赖）。截图主程序仍为 .NET Framework 4.8，OCR 子进程为 .NET 8；独立 EXE 缺少配套文件时会提示使用便携包。
+Windows 安装 .NET SDK 8 或更新版本后，运行 `build.ps1 -Test`；脚本下载并校验模型，将 OCR 组件发布为自带运行时的 win-x64 程序。安装 Inno Setup 6.5 或更新版本后，使用 `build.ps1 -Test -Installer` 生成 `ShotInk-Setup.exe`，内含主程序、OCR 全部文件和微软签名的 .NET Framework 4.8、Visual C++ x64 离线安装程序。安装时检测已有环境并按需补齐，用户无需另外下载运行库。
+
+便携包需完整解压并保留 `ocr` 文件夹，且系统已有 .NET Framework 4.8、Visual C++ x64 运行库；环境缺失时推荐完整安装包。安装后会通过真实 OCR 进程检查组件定位、逐字坐标和结果缓存，并验证主程序可启动。
 
 识别可能混淆 I/l/1、O/0 或相似标点；复制后请核对关键编号、金额。当前没有针对专业票据、手写字、竖排文字做专项优化。
