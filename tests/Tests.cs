@@ -27,6 +27,7 @@ namespace ShotInk
                 Run("accumulated height is bounded", TestAccumulatedLimit);
                 Run("annotations render at original resolution and undo", TestAnnotations);
                 Run("inline text supports multiline input, settings, cancellation and export", TestInlineText);
+                Run("typing stays transparent, compact and anchored to the image caret", TestTransparentTextInput);
                 Run("text moves, scales and rotates with independent undo at different zooms", TestTextTransform);
                 Run("mosaic covers partial edge blocks", TestMosaic);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
@@ -228,6 +229,73 @@ namespace ShotInk
         }
         private static void TextGesture(AnnotationCanvas canvas, PointF from, PointF to)
         { Gesture(canvas, new Point((int)Math.Round(from.X * canvas.Zoom), (int)Math.Round(from.Y * canvas.Zoom)), new Point((int)Math.Round(to.X * canvas.Zoom), (int)Math.Round(to.Y * canvas.Zoom))); }
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr word, IntPtr value);
+        private static void TestTransparentTextInput()
+        {
+            foreach (float zoom in new[] { 1F, 0.5F })
+            using (var host = new Form { ClientSize = new Size(850, 500) })
+            using (var canvas = new AnnotationCanvas(new Bitmap(850, 500)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image))
+                {
+                    g.Clear(Color.FromArgb(30, 34, 40));
+                    using (var pen = new Pen(Color.FromArgb(62, 70, 80)))
+                    { for (int x = 0; x < 850; x += 20) g.DrawLine(pen, x, 0, x, 500); for (int y = 0; y < 500; y += 20) g.DrawLine(pen, 0, y, 850, y); }
+                }
+                host.Controls.Add(canvas); host.Show(); canvas.SetZoom(zoom); canvas.Tool = DrawTool.Text; canvas.Ink = Color.Red;
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, (int)(180 * zoom), (int)(120 * zoom));
+                var input = Field<InlineTextInput>(canvas, "textEditor");
+                foreach (char character in "中文  Abc") SendMessage(input.Handle, 0x102, new IntPtr(character), new IntPtr(1));
+                Application.DoEvents();
+                var mark = canvas.Marks[0];
+                Assert(mark.Text == "中文  Abc", "Native character input was lost or duplicated.");
+                var expectedCaret = TextGeometry.World(mark, TextGeometry.Caret(mark, mark.Text.Length));
+                Assert(Math.Abs(input.Left - expectedCaret.X * zoom) <= 1 && Math.Abs(input.Top - expectedCaret.Y * zoom) <= 1,
+                    "IME anchor moved to the canvas origin instead of following the visible caret.");
+                var originalFont = input.Font;
+                SendMessage(input.Handle, 0x102, new IntPtr('1'), new IntPtr(1));
+                Assert(object.ReferenceEquals(input.Font, originalFont), "Typing recreated the font and interrupted IME composition.");
+                Assert(TextGeometry.Size(mark).Width < 160, "Short text left a large empty tail.");
+                var gap = TextGeometry.Caret(mark, 3); gap.Y += TextGeometry.LineHeight(mark) / 2;
+                using (var screenshot = new Bitmap(canvas.Width, canvas.Height))
+                {
+                    canvas.DrawToBitmap(screenshot, canvas.ClientRectangle);
+                    int x = (int)Math.Round((mark.Points[0].X + gap.X) * zoom), y = (int)Math.Round((mark.Points[0].Y + gap.Y) * zoom);
+                    var pixel = screenshot.GetPixel(x, y);
+                    Assert(pixel.R < 100 && pixel.G < 100 && pixel.B < 100, "Editing covered the screenshot with an opaque background.");
+                    int redNearText = 0, redAtOrigin = 0;
+                    for (int sy = 0; sy < screenshot.Height; sy++) for (int sx = 0; sx < screenshot.Width; sx++)
+                    {
+                        var color = screenshot.GetPixel(sx, sy);
+                        if (color.R > 150 && color.G < 100 && color.B < 100)
+                        { if (sx > 170 * zoom && sy > 110 * zoom) redNearText++; if (sx < 80 * zoom && sy < 80 * zoom) redAtOrigin++; }
+                    }
+                    Assert(redNearText > 15 && redAtOrigin == 0, "Typed text appeared at the top-left instead of its image position.");
+                    if (zoom == 1) screenshot.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-text-transparent-options.png"));
+                }
+                input.Text = "长文字长文字长文字长文字长文字";
+                float longWidth = TextGeometry.Size(mark).Width;
+                Assert(Math.Abs(longWidth - input.Text.Length * mark.FontSize - 6) < 12, "CJK text measurement accumulated excess width: " + longWidth);
+                input.Text = "短";
+                Assert(TextGeometry.Size(mark).Width < 40, "Deleting text did not shrink the frame.");
+                input.Text = "第一行\r\n第二行";
+                Assert(Math.Abs(TextGeometry.Size(mark).Height - (2 * TextGeometry.LineHeight(mark) + 4)) < 1, "Multiline height did not fit its content.");
+                var from = TextGeometry.World(mark, TextGeometry.Caret(mark, 1));
+                var to = TextGeometry.World(mark, TextGeometry.Caret(mark, 2));
+                from.Y += 10; to.Y += 10;
+                TextGesture(canvas, from, to);
+                Assert(input.SelectedText == "一", "Mouse selection did not track the painted characters.");
+                input.Select(input.TextLength, 0); input.Composition = "ceshi";
+                typeof(InlineTextInput).GetMethod("NotifyInputState", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(input, null);
+                var display = (Mark)typeof(AnnotationCanvas).GetMethod("EditingTextMark", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(canvas, null);
+                Assert(display.Text.EndsWith("ceshi") && !mark.Text.Contains("ceshi"), "IME preview was not shown separately from committed text.");
+                input.Composition = "";
+                canvas.CommitTextEdit();
+                using (var exported = canvas.Render()) Assert(exported.GetPixel(0, 0).ToArgb() == canvas.Image.GetPixel(0, 0).ToArgb(), "Input chrome leaked into export.");
+                host.Close();
+            }
+        }
         private static void TestTextTransform()
         {
             foreach (float zoom in new[] { 1F, 0.5F })

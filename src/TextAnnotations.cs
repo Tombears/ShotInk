@@ -17,8 +17,54 @@ namespace ShotInk
             using (var g = Graphics.FromImage(bitmap))
             using (var font = Font(mark, 1))
             {
-                var size = g.MeasureString(string.IsNullOrEmpty(mark.Text) ? "文" : mark.Text + " ", font, int.MaxValue, StringFormat.GenericTypographic);
-                return new SizeF(Math.Max(FontSize(mark) * 2, size.Width + 8), Math.Max(FontSize(mark) * 1.5F, size.Height + 6));
+                var lines = (mark.Text ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                float width = 0;
+                foreach (var line in lines) width = Math.Max(width, Advance(g, font, line));
+                return new SizeF(Math.Max(FontSize(mark) / 2, width) + 6, font.GetHeight(g) * lines.Length + 4);
+            }
+        }
+        private static float Advance(Graphics g, Font font, string text)
+        {
+            if (text.Length == 0) return 0;
+            using (var format = Format()) return g.MeasureString(text, font, new SizeF(1000000, 1000000), format).Width;
+        }
+        internal static StringFormat Format()
+        { var format = new StringFormat(StringFormat.GenericTypographic); format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap; return format; }
+        internal static PointF Caret(Mark mark, int index)
+        {
+            string text = mark.Text ?? ""; index = Math.Max(0, Math.Min(index, text.Length));
+            int line = 0, start = 0;
+            for (int i = 0; i < index; i++)
+                if (text[i] == '\n' || text[i] == '\r')
+                { if (text[i] == '\r' && i + 1 < index && text[i + 1] == '\n') i++; line++; start = i + 1; }
+            using (var bitmap = new Bitmap(1, 1)) using (var g = Graphics.FromImage(bitmap)) using (var font = Font(mark, 1))
+                return new PointF(3 + Advance(g, font, text.Substring(start, index - start)), 2 + line * font.GetHeight(g));
+        }
+        internal static float LineHeight(Mark mark)
+        { using (var font = Font(mark, 1)) return font.GetHeight(); }
+        internal static int CharacterAt(Mark mark, PointF local)
+        {
+            string text = mark.Text ?? ""; float height = LineHeight(mark);
+            int line = Math.Max(0, (int)Math.Floor((local.Y - 2) / height));
+            int start = 0, current = 0;
+            for (int i = 0; i < text.Length && current < line; i++)
+                if (text[i] == '\n' || text[i] == '\r')
+                { if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n') i++; start = i + 1; current++; }
+            int end = start;
+            while (end < text.Length && text[end] != '\r' && text[end] != '\n') end++;
+            using (var bitmap = new Bitmap(1, 1)) using (var g = Graphics.FromImage(bitmap)) using (var font = Font(mark, 1))
+            {
+                int low = start, high = end; float x = local.X - 3;
+                while (low < high)
+                {
+                    int middle = low + (high - low) / 2;
+                    if (Advance(g, font, text.Substring(start, middle - start)) < x) low = middle + 1; else high = middle;
+                }
+                int nearest = low;
+                if (nearest > start && Math.Abs(Advance(g, font, text.Substring(start, nearest - start - 1)) - x) <
+                    Math.Abs(Advance(g, font, text.Substring(start, nearest - start)) - x)) nearest--;
+                if (nearest > start && nearest < text.Length && char.IsLowSurrogate(text[nearest]) && char.IsHighSurrogate(text[nearest - 1])) nearest--;
+                return nearest;
             }
         }
         internal static SizeF Size(Mark mark) { return mark.TextSize.IsEmpty ? Measure(mark) : mark.TextSize; }
@@ -60,7 +106,8 @@ namespace ShotInk
                 g.TranslateTransform(center.X, center.Y); g.RotateTransform(mark.TextAngle);
                 using (var font = Font(mark, 1))
                 using (var brush = new SolidBrush(mark.Color))
-                    g.DrawString(mark.Text ?? "", font, brush, new PointF(-size.Width / 2 + 3, -size.Height / 2 + 2), StringFormat.GenericTypographic);
+                using (var format = Format())
+                    g.DrawString(mark.Text ?? "", font, brush, new PointF(-size.Width / 2 + 3, -size.Height / 2 + 2), format);
             }
             finally { g.Restore(state); }
         }
@@ -71,8 +118,10 @@ namespace ShotInk
         internal float TextFontSize = 24;
         internal FontStyle TextFontStyle = FontStyle.Regular;
         private Mark selectedText;
-        private TextBox textEditor;
+        private InlineTextInput textEditor;
         private Font textEditorFont;
+        private bool selectingAnnotationText;
+        private int annotationTextAnchor;
         private List<Mark> beforeTextEdit;
         private Mark editOriginal;
         private bool newText;
@@ -115,7 +164,21 @@ namespace ShotInk
         { return Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)); }
         private void TextMouseDown(MouseEventArgs e)
         {
-            Focus(); var point = ImagePoint(e.Location); int hit = HitTextHandle(point);
+            var point = ImagePoint(e.Location); int hit = HitTextHandle(point);
+            if (textEditor != null && hit == -1)
+            {
+                var local = TextGeometry.Local(selectedText, point); var size = TextGeometry.Size(selectedText);
+                float margin = 5 / Zoom;
+                if (local.X > margin && local.Y > margin && local.X < size.Width - margin && local.Y < size.Height - margin)
+                {
+                    int index = TextGeometry.CharacterAt(selectedText, local);
+                    annotationTextAnchor = (ModifierKeys & Keys.Shift) != 0 ? textEditor.SelectionStart : index;
+                    textEditor.Select(Math.Min(annotationTextAnchor, index), Math.Abs(index - annotationTextAnchor));
+                    if (e.Clicks > 1) textEditor.SelectAll();
+                    textEditor.Focus(); selectingAnnotationText = true; Capture = true; UpdateTextEditor(); Invalidate(); return;
+                }
+            }
+            Focus();
             if (hit != -2)
             {
                 if (e.Clicks > 1 && hit == -1) { BeginTextEdit(selectedText, false); return; }
@@ -146,29 +209,41 @@ namespace ShotInk
             CommitTextEdit(); beforeTextEdit = Snapshot(); editOriginal = mark.Clone(); newText = isNew;
             if (isNew) Marks.Add(mark);
             selectedText = mark;
-            textEditor = new TextBox { Name = "annotation-text-input", Multiline = true, AcceptsReturn = true,
-                WordWrap = false, BorderStyle = BorderStyle.FixedSingle, ScrollBars = ScrollBars.None,
-                BackColor = Color.White, ForeColor = mark.Color, Text = mark.Text ?? "" };
+            textEditor = new InlineTextInput { Name = "annotation-text-input", Text = mark.Text ?? "" };
             textEditor.TextChanged += delegate
             {
                 if (textEditor == null || selectedText == null) return;
-                selectedText.Text = textEditor.Text; selectedText.TextSize = TextGeometry.Measure(selectedText);
+                selectedText.Text = textEditor.Text;
                 UpdateTextEditor(); NotifyChanged();
             };
-            Controls.Add(textEditor); UpdateTextEditor(); textEditor.BringToFront(); textEditor.Focus(); textEditor.Select(textEditor.TextLength, 0); Invalidate();
+            textEditor.InputStateChanged += delegate { UpdateTextEditor(); Invalidate(); };
+            UpdateTextEditor(); Controls.Add(textEditor); textEditor.Select(textEditor.TextLength, 0); textEditor.Focus(); UpdateTextEditor(); Invalidate();
             NotifyTextAnnotationSelected();
         }
         private void UpdateTextEditor()
         {
             if (textEditor == null || selectedText == null) return;
-            var previousFont = textEditorFont;
-            textEditorFont = TextGeometry.Font(selectedText, Zoom); textEditor.Font = textEditorFont;
-            if (previousFont != null) previousFont.Dispose();
+            float pixels = Math.Max(1, TextGeometry.FontSize(selectedText) * Zoom);
+            if (textEditorFont == null || Math.Abs(textEditorFont.Size - pixels) > 0.01F || textEditorFont.Style != selectedText.TextStyle)
+            {
+                var previousFont = textEditorFont;
+                textEditorFont = TextGeometry.Font(selectedText, Zoom); textEditor.Font = textEditorFont;
+                if (previousFont != null) previousFont.Dispose();
+            }
             textEditor.ForeColor = selectedText.Color;
-            var origin = selectedText.Points[0]; var size = TextGeometry.Size(selectedText);
-            int x = Math.Max(0, Math.Min(Width - 20, (int)(origin.X * Zoom) + 4)), y = Math.Max(0, Math.Min(Height - 20, (int)(origin.Y * Zoom) + 4));
-            textEditor.Bounds = new Rectangle(x, y, Math.Max(20, Math.Min(Width - x, (int)Math.Ceiling(size.Width * Zoom) - 8)),
-                Math.Max(20, Math.Min(Height - y, (int)Math.Ceiling(size.Height * Zoom) - 8)));
+            var display = EditingTextMark(); selectedText.TextSize = TextGeometry.Measure(display); display.TextSize = selectedText.TextSize;
+            int caret = textEditor.SelectionStart + textEditor.Composition.Length;
+            var position = TextGeometry.World(display, TextGeometry.Caret(display, caret));
+            textEditor.Bounds = new Rectangle(Math.Max(0, Math.Min(Width - 1, (int)Math.Round(position.X * Zoom))),
+                Math.Max(0, Math.Min(Height - 1, (int)Math.Round(position.Y * Zoom))), 1, Math.Max(1, (int)Math.Ceiling(TextGeometry.LineHeight(display) * Zoom)));
+            textEditor.PositionIme();
+        }
+        private Mark EditingTextMark()
+        {
+            if (textEditor == null || selectedText == null || textEditor.Composition.Length == 0) return selectedText;
+            var display = selectedText.Clone(); string text = display.Text ?? "";
+            int start = Math.Min(textEditor.SelectionStart, text.Length), length = Math.Min(textEditor.SelectionLength, text.Length - start);
+            display.Text = text.Remove(start, length).Insert(start, textEditor.Composition); return display;
         }
         internal void CommitTextEdit()
         {
@@ -190,6 +265,12 @@ namespace ShotInk
         private void TextMouseMove(MouseEventArgs e)
         {
             var point = ImagePoint(e.Location);
+            if (selectingAnnotationText && textEditor != null)
+            {
+                int index = TextGeometry.CharacterAt(selectedText, TextGeometry.Local(selectedText, point));
+                textEditor.Select(Math.Min(annotationTextAnchor, index), Math.Abs(index - annotationTextAnchor));
+                UpdateTextEditor(); Invalidate(); return;
+            }
             if (textHandle == -2 || selectedText == null)
             {
                 int hit = HitTextHandle(point);
@@ -228,12 +309,51 @@ namespace ShotInk
         }
         private void TextMouseUp(MouseEventArgs e)
         {
+            if (selectingAnnotationText) { TextMouseMove(e); selectingAnnotationText = false; Capture = false; return; }
             if (textHandle == -2) return;
             TextMouseMove(e); bool transformed = textTransformed; EndTextTransform(); Capture = false;
             if (transformed) NotifyTextAnnotationSelected();
         }
         private void EndTextTransform()
-        { textHandle = -2; beforeTextTransform = null; transformOriginal = null; textTransformed = false; }
+        { textHandle = -2; beforeTextTransform = null; transformOriginal = null; textTransformed = false; selectingAnnotationText = false; }
+        private void DrawEditingText(Graphics g)
+        {
+            if (textEditor == null || selectedText == null) return;
+            var display = EditingTextMark(); float height = TextGeometry.LineHeight(display);
+            int start = textEditor.SelectionStart, end = start + textEditor.SelectionLength;
+            if (textEditor.Composition.Length == 0 && end > start)
+            {
+                for (int index = start; index < end;)
+                {
+                    int lineEnd = index;
+                    while (lineEnd < end && display.Text[lineEnd] != '\r' && display.Text[lineEnd] != '\n') lineEnd++;
+                    var from = TextGeometry.Caret(display, index); var to = TextGeometry.Caret(display, lineEnd);
+                    float right = to.X + (lineEnd < end ? TextGeometry.FontSize(display) / 2 : 0);
+                    using (var brush = new SolidBrush(Color.FromArgb(85, Color.DodgerBlue)))
+                        g.FillPolygon(brush, new[] { TextGeometry.World(display, from), TextGeometry.World(display, new PointF(right, from.Y)),
+                            TextGeometry.World(display, new PointF(right, from.Y + height)), TextGeometry.World(display, new PointF(from.X, from.Y + height)) });
+                    index = lineEnd;
+                    if (index < end && display.Text[index] == '\r') index++;
+                    if (index < end && display.Text[index] == '\n') index++;
+                }
+            }
+            if (textEditor.Composition.Length > 0)
+            {
+                var from = TextGeometry.Caret(display, start); var to = TextGeometry.Caret(display, start + textEditor.Composition.Length);
+                using (var pen = new Pen(display.Color, 1 / Zoom))
+                    g.DrawLine(pen, TextGeometry.World(display, new PointF(from.X, from.Y + height)), TextGeometry.World(display, new PointF(to.X, to.Y + height)));
+            }
+            if (textEditor.Focused && textEditor.CaretVisible)
+            {
+                var caret = TextGeometry.Caret(display, start + textEditor.Composition.Length);
+                using (var outline = new Pen(Color.FromArgb(180, Color.White), 3 / Zoom))
+                using (var pen = new Pen(display.Color, 1 / Zoom))
+                {
+                    var from = TextGeometry.World(display, caret); var to = TextGeometry.World(display, new PointF(caret.X, caret.Y + height));
+                    g.DrawLine(outline, from, to); g.DrawLine(pen, from, to);
+                }
+            }
+        }
         private void DrawTextSelection(Graphics g)
         {
             if (Tool != DrawTool.Text || selectedText == null) return;

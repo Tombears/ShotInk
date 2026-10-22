@@ -243,7 +243,8 @@ namespace ShotInk
             e.Graphics.ScaleTransform(Zoom, Zoom);
             e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            foreach (var mark in Marks) if (textEditor == null || mark != selectedText) DrawMark(e.Graphics, mark);
+            foreach (var mark in Marks) DrawMark(e.Graphics, textEditor != null && mark == selectedText ? EditingTextMark() : mark);
+            DrawEditingText(e.Graphics);
             DrawTextSelection(e.Graphics);
             if (active != null)
             {
