@@ -74,9 +74,3 @@ OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime �
 如果已经运行官方 Snipaste 等使用相同快捷键的程序，工作台会提示快捷键冲突，可使用按钮或托盘菜单。
 
 截图和设置目录：`%LOCALAPPDATA%\ShotInk`。从旧版升级时，如果存在 `%LOCALAPPDATA%\SnipasteLite` 且尚无新目录，会继续使用旧目录，保留截图历史与设置。应用本身不会向网络上传截图；GitHub 上传脚本只上传本项目源码，构建产物和运行数据均不纳入 Git。
-
-## 提交与发布
-
-每次修改完成并通过必要检查后提交源码。小修复或样式微调保持版本号，替换最新 Release 的安装包并更新说明；新增较多功能或较大改动时才创建新版本。`main` 分支的 Windows 构建、界面检查、启动脚本检查和真实 OCR 检查全部通过后，自动更新 Release。
-
-替换安装包时保留已有标签和历史版本，说明末尾记录实际构建的源码提交。版本号在 `src/AssemblyInfo.cs` 中统一维护，中文说明位于 `releases/v版本号.md`。
