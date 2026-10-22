@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$AssetDirectory,
     [string]$Repository = $env:GITHUB_REPOSITORY,
