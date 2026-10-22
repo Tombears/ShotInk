@@ -41,7 +41,8 @@ for options in configurations:
             for run in range(3):
                 request_id += 1
                 started = time.perf_counter()
-                process.stdin.write(json.dumps({"id": request_id, "png": base64.b64encode(png).decode("ascii")}) + "\n")
+                preamble = "\ufeff" if request_id == 1 else ""
+                process.stdin.write(preamble + json.dumps({"id": request_id, "png": base64.b64encode(png).decode("ascii")}) + "\n")
                 process.stdin.flush()
                 document = json.loads(process.stdout.readline())
                 elapsed = (time.perf_counter() - started) * 1000

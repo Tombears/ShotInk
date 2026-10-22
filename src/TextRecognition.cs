@@ -87,8 +87,8 @@ namespace ShotInk
                     int id = ++requestId;
                     await worker.StandardInput.WriteLineAsync("{\"id\":" + id + ",\"png\":\"" + Convert.ToBase64String(png) + "\"}");
                     var result = Parse(await ReadLine(60000));
-                    if (result.Id != id) { ResetWorker(); throw new InvalidOperationException("文字识别响应不匹配，请重试。"); }
                     if (!string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException(result.Error);
+                    if (result.Id != id) { ResetWorker(); throw new InvalidOperationException("文字识别响应不匹配，请重试。"); }
                     if (result.Width != image.Width || result.Height != image.Height) throw new InvalidOperationException("文字坐标与图片尺寸不匹配。");
                     lastHash = hash; lastResult = result;
                     cancellation.ThrowIfCancellationRequested();

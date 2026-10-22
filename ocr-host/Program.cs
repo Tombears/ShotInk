@@ -43,7 +43,9 @@ while (Console.ReadLine() is { } requestLine)
     int id = 0;
     try
     {
-        var request = JsonSerializer.Deserialize<Request>(requestLine, json) ?? throw new InvalidDataException("Empty request");
+        // .NET Framework's redirected UTF-8 stdin may emit a preamble before
+        // the first request. Console.ReadLine preserves it in redirected input.
+        var request = JsonSerializer.Deserialize<Request>(requestLine.TrimStart('\uFEFF'), json) ?? throw new InvalidDataException("Empty request");
         id = request.Id;
         using var image = SKBitmap.Decode(Convert.FromBase64String(request.Png)) ?? throw new InvalidDataException("Invalid image");
         var clock = Stopwatch.StartNew();

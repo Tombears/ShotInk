@@ -10,6 +10,7 @@ namespace ShotInk
         {
             try
             {
+                Console.InputEncoding = new System.Text.UTF8Encoding(true);
                 using (var recognizer = new RapidTextRecognizer())
                 using (var image = new Bitmap(args[0]))
                 {
