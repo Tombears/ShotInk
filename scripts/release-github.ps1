@@ -32,12 +32,16 @@ $latest = $releases | Where-Object { -not $_.draft -and -not $_.prerelease -and 
     Sort-Object { [version]$_.tag_name.Substring(1) } -Descending | Select-Object -First 1
 if ($latest -and [version]$latest.tag_name.Substring(1) -gt [version]$version) { Write-Host 'A newer version already exists; skipping old-version publication.'; return }
 $existing = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
-if ($existing -and $existing.immutable) { throw 'The existing release is immutable; its assets cannot be replaced.' }
 $body = Join-Path ([IO.Path]::GetTempPath()) ('ShotInk-release-' + [Guid]::NewGuid().ToString('N') + '.md')
 try {
-    $source = "`n`n安装包源码：[$Commit](https://github.com/$Repository/commit/$Commit)。`n"
-    [IO.File]::WriteAllText($body, ([IO.File]::ReadAllText($notes).TrimEnd() + $source), (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($body, ([IO.File]::ReadAllText($notes).TrimEnd() + "`n"), (New-Object Text.UTF8Encoding($false)))
     if ($existing) {
+        if ($existing.immutable) {
+            # GitHub permits editing notes on immutable releases, but locks assets.
+            & gh release edit $tag --repo $Repository --title $version --notes-file $body
+            if ($LASTEXITCODE -ne 0) { throw 'Release notes update failed.' }
+            throw 'Release notes updated. GitHub has made this release immutable; its existing assets cannot be replaced.'
+        }
         & gh release upload $tag $exe $zip --repo $Repository --clobber
         if ($LASTEXITCODE -ne 0) { throw 'Release asset replacement failed.' }
         & gh release edit $tag --repo $Repository --title $version --notes-file $body --draft=false --latest

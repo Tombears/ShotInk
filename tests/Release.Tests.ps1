@@ -5,12 +5,13 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('ShotInk-release-tests-' + [Gui
 $originalRef = $env:GITHUB_REF
 $originalRefName = $env:GITHUB_REF_NAME
 $originalExitCode = $global:LASTEXITCODE
-$state = @{ Calls = @(); Releases = @(); Head = 'current'; UploadFails = $false }
+$state = @{ Calls = @(); Releases = @(); Head = 'current'; UploadFails = $false; Notes = '' }
 function Assert-Release([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 function gh {
     $arguments = @($args)
     $state.Calls += ,$arguments
     $global:LASTEXITCODE = 0
+    if ($arguments -contains '--notes-file') { $state.Notes = [IO.File]::ReadAllText($arguments[[Array]::IndexOf($arguments, '--notes-file') + 1]) }
     if ($arguments[0] -eq 'api') {
         if ($arguments[1] -like '*/git/ref/heads/main') { return $state.Head }
         return ConvertTo-Json -InputObject @($state.Releases) -Depth 5 -Compress
@@ -35,6 +36,7 @@ try {
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current
     Assert-Release ((Calls-For create).Count -eq 1 -and (Calls-For edit).Count -eq 1) 'A new version did not create and publish a draft.'
     Assert-Release ((Calls-For create)[0] -contains '--draft') 'New release was visible before its assets were ready.'
+    Assert-Release ($state.Notes.Trim() -eq 'Release notes') 'Internal publication details were appended to the user-facing release notes.'
 
     $state.Calls = @(); $state.Releases = @(@{ tag_name = $tag; draft = $false; prerelease = $false; immutable = $false })
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current
@@ -52,7 +54,7 @@ try {
     $state.Calls = @(); $state.Releases = @(@{ tag_name = $tag; immutable = $true })
     $blocked = $false
     try { & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current } catch { $blocked = $_.Exception.Message -like '*immutable*' }
-    Assert-Release ($blocked -and (Calls-For upload).Count -eq 0) 'Immutable release assets were modified.'
+    Assert-Release ($blocked -and (Calls-For upload).Count -eq 0 -and (Calls-For edit).Count -eq 1 -and $state.Notes.Trim() -eq 'Release notes') 'Immutable releases did not update their editable notes while preserving locked assets.'
 
     $state.Calls = @(); $state.Releases = @(@{ tag_name = $tag; immutable = $false }); $state.UploadFails = $true
     $blocked = $false
