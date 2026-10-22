@@ -9,7 +9,12 @@ import json
 import pathlib
 import struct
 import subprocess
+import sys
 import time
+
+# Windows CI may default redirected output to cp1252; OCR reports contain Chinese.
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--host", required=True)
