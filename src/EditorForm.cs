@@ -20,6 +20,17 @@ namespace ShotInk
         internal bool Freehand;
         internal int MosaicSize;
         internal float BrushSize = 24;
+        internal float FontSize;
+        internal FontStyle TextStyle = FontStyle.Regular;
+        internal SizeF TextSize;
+        internal float TextAngle;
+        internal Mark Clone()
+        {
+            var copy = new Mark { Tool = Tool, Color = Color, Width = Width, Text = Text, Freehand = Freehand,
+                MosaicSize = MosaicSize, BrushSize = BrushSize, FontSize = FontSize, TextStyle = TextStyle,
+                TextSize = TextSize, TextAngle = TextAngle };
+            copy.Points.AddRange(Points); return copy;
+        }
         internal readonly List<PointF> Points = new List<PointF>();
         internal RectangleF Bounds
         {
@@ -36,7 +47,7 @@ namespace ShotInk
         }
     }
 
-    internal sealed class AnnotationCanvas : Control
+    internal sealed partial class AnnotationCanvas : Control
     {
         internal Bitmap Image { get; private set; }
         internal readonly List<Mark> Marks = new List<Mark>();
@@ -44,7 +55,7 @@ namespace ShotInk
         internal DrawTool Tool
         {
             get { return tool; }
-            set { CancelGesture(); tool = value; ClearTextRecognition(); UpdateToolCursor(); }
+            set { CommitTextEdit(); EndTextTransform(); selectedText = null; CancelGesture(); tool = value; ClearTextRecognition(); UpdateToolCursor(); }
         }
         internal ApplyMode MosaicMode = ApplyMode.Brush;
         internal ApplyMode EraserMode = ApplyMode.Brush;
@@ -67,7 +78,7 @@ namespace ShotInk
         internal void SetTextRecognition(OcrDocument document)
         {
             if (document.Width != Image.Width || document.Height != Image.Height) throw new InvalidOperationException("文字坐标与图片尺寸不匹配。");
-            CancelGesture(); tool = DrawTool.None; recognition = new OcrSelectionModel(document); UpdateToolCursor(); NotifyTextSelection();
+            CommitTextEdit(); selectedText = null; CancelGesture(); tool = DrawTool.None; recognition = new OcrSelectionModel(document); UpdateToolCursor(); NotifyTextSelection();
         }
         private void ClearTextRecognition()
         { if (recognition == null) return; recognition = null; selectingText = false; NotifyTextSelection(); }
@@ -107,6 +118,7 @@ namespace ShotInk
 
         internal void SetZoom(float value)
         {
+            CommitTextEdit();
             Zoom = Math.Max(0.05F, Math.Min(3F, value));
             Size = new Size(Math.Max(1, (int)Math.Ceiling(Image.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(Image.Height * Zoom)));
             Invalidate();
@@ -117,11 +129,12 @@ namespace ShotInk
         private bool BrushTool
         { get { return Tool == DrawTool.Mosaic && MosaicMode == ApplyMode.Brush || Tool == DrawTool.Eraser && EraserMode == ApplyMode.Brush; } }
         private float CurrentBrushSize { get { return Tool == DrawTool.Eraser ? EraserBrushSize : MosaicBrushSize; } }
-        internal void UpdateToolCursor() { Cursor = HasTextRecognition ? Cursors.IBeam : Tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; Invalidate(); }
+        internal void UpdateToolCursor() { Cursor = HasTextRecognition || Tool == DrawTool.Text ? Cursors.IBeam : Tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; Invalidate(); }
         private void CancelGesture() { active = null; selectingText = false; Capture = false; Invalidate(); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if (e.Button == MouseButtons.Left && Tool == DrawTool.Text) { TextMouseDown(e); return; }
             base.OnMouseDown(e);
             if (e.Button == MouseButtons.Left && recognition != null)
             {
@@ -133,13 +146,6 @@ namespace ShotInk
             var point = ImagePoint(e.Location);
             active = new Mark { Tool = Tool, Color = Ink, Width = Stroke, Freehand = BrushTool, MosaicSize = MosaicSize, BrushSize = CurrentBrushSize };
             active.Points.Add(point);
-            if (Tool == DrawTool.Text)
-            {
-                var text = TextPrompt.Ask(FindForm());
-                if (!string.IsNullOrWhiteSpace(text)) { active.Text = text; AddMark(active); }
-                active = null;
-                return;
-            }
             active.Points.Add(point);
             Capture = true;
             Invalidate();
@@ -153,6 +159,7 @@ namespace ShotInk
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (Tool == DrawTool.Text) { TextMouseMove(e); return; }
             hoverPoint = ImagePoint(e.Location); hovering = true;
             if (selectingText && recognition != null)
             {
@@ -168,11 +175,13 @@ namespace ShotInk
         protected override void OnMouseCaptureChanged(EventArgs e)
         {
             base.OnMouseCaptureChanged(e);
+            if (!Capture) EndTextTransform();
             if (!Capture) { selectingText = false; if (active != null) { active = null; Invalidate(); } }
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (Tool == DrawTool.Text && e.Button == MouseButtons.Left) { TextMouseUp(e); return; }
             if (selectingText && recognition != null && e.Button == MouseButtons.Left)
             {
                 OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
@@ -189,6 +198,7 @@ namespace ShotInk
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
             base.OnMouseDoubleClick(e);
+            if (Tool == DrawTool.Text && e.Button == MouseButtons.Left && selectedText != null) BeginTextEdit(selectedText);
             if (recognition != null && e.Button == MouseButtons.Left) { recognition.SelectWord(ImagePoint(e.Location), true); NotifyTextSelection(); }
         }
 
@@ -196,24 +206,28 @@ namespace ShotInk
         {
             SaveUndo(); Marks.Add(mark); NotifyChanged();
         }
-        private void SaveUndo() { undo.Push(new List<Mark>(Marks)); redo.Clear(); }
+        private List<Mark> Snapshot() { return Marks.ConvertAll(delegate(Mark mark) { return mark.Tool == DrawTool.Text ? mark.Clone() : mark; }); }
+        private void SaveUndo() { undo.Push(Snapshot()); redo.Clear(); }
         internal void Undo()
         {
+            CommitTextEdit(); EndTextTransform(); selectedText = null;
             CancelGesture();
             if (!CanUndo) return;
-            redo.Push(new List<Mark>(Marks));
+            redo.Push(Snapshot());
             if (undo.Count > 0) { var state = undo.Pop(); Marks.Clear(); Marks.AddRange(state); }
             else Marks.RemoveAt(Marks.Count - 1);
             NotifyChanged();
         }
         internal void Redo()
         {
+            CommitTextEdit(); EndTextTransform(); selectedText = null;
             CancelGesture();
             if (redo.Count == 0) return;
-            undo.Push(new List<Mark>(Marks)); var state = redo.Pop(); Marks.Clear(); Marks.AddRange(state); NotifyChanged();
+            undo.Push(Snapshot()); var state = redo.Pop(); Marks.Clear(); Marks.AddRange(state); NotifyChanged();
         }
         internal void Reframe(Bitmap image, Point shift)
         {
+            CommitTextEdit(); EndTextTransform(); selectedText = null;
             Revision++; ClearTextRecognition();
             var unique = new HashSet<Mark>(Marks);
             foreach (var state in undo) unique.UnionWith(state);
@@ -229,7 +243,8 @@ namespace ShotInk
             e.Graphics.ScaleTransform(Zoom, Zoom);
             e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            foreach (var mark in Marks) DrawMark(e.Graphics, mark);
+            foreach (var mark in Marks) if (textEditor == null || mark != selectedText) DrawMark(e.Graphics, mark);
+            DrawTextSelection(e.Graphics);
             if (active != null)
             {
                 DrawMark(e.Graphics, active);
@@ -341,8 +356,7 @@ namespace ShotInk
                         if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
                         break;
                     case DrawTool.Text:
-                        using (var font = new Font("Microsoft YaHei UI", Math.Max(14, mark.Width * 6), FontStyle.Bold, GraphicsUnit.Pixel))
-                        using (var brush = new SolidBrush(mark.Color)) g.DrawString(mark.Text, font, brush, first);
+                        TextGeometry.Draw(g, mark);
                         break;
                 }
             }
@@ -350,6 +364,7 @@ namespace ShotInk
 
         internal Bitmap Render()
         {
+            CommitTextEdit(); EndTextTransform();
             var result = new Bitmap(Image.Width, Image.Height, PixelFormat.Format24bppRgb);
             using (var g = Graphics.FromImage(result))
             {
@@ -360,7 +375,7 @@ namespace ShotInk
             return result;
         }
 
-        protected override void Dispose(bool disposing) { if (disposing) Image.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { if (textEditorFont != null) { textEditorFont.Dispose(); textEditorFont = null; } Image.Dispose(); } base.Dispose(disposing); }
     }
 
     internal sealed class EditorForm : Form
@@ -482,6 +497,7 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (canvas.HandleTextKey(e)) return;
             if (canvas.HandleRecognitionKey(e)) return;
             if (e.Control && e.KeyCode == Keys.S) { SaveImage(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.C) { CopyImage(); e.SuppressKeyPress = true; }
@@ -493,17 +509,4 @@ namespace ShotInk
         { if (disposing && recognition != null) recognition.Dispose(); base.Dispose(disposing); }
     }
 
-    internal static class TextPrompt
-    {
-        internal static string Ask(IWin32Window owner)
-        {
-            using (var dialog = new Form { Text = "添加文字", ClientSize = new Size(390, 180), FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, Font = new Font("Microsoft YaHei UI", 10) })
-            {
-                var input = new TextBox { Multiline = true, Location = new Point(14, 14), Size = new Size(362, 105) };
-                var ok = Theme.Button("添加", true, 84); ok.Location = new Point(292, 130); ok.DialogResult = DialogResult.OK;
-                dialog.Controls.Add(input); dialog.Controls.Add(ok); dialog.AcceptButton = ok;
-                return dialog.ShowDialog(owner) == DialogResult.OK ? input.Text : null;
-            }
-        }
-    }
 }

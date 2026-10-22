@@ -8,6 +8,9 @@ namespace ShotInk
     {
         internal Color Ink = Color.FromArgb(239, 64, 76);
         internal float Stroke = 3;
+        internal float TextFontSize = 24;
+        internal FontStyle TextFontStyle = FontStyle.Regular;
+        private AnnotationCanvas boundCanvas;
         internal ApplyMode MosaicMode = ApplyMode.Brush;
         internal ApplyMode EraserMode = ApplyMode.Brush;
         internal int MosaicSize = 14;
@@ -26,10 +29,22 @@ namespace ShotInk
 
         internal void ApplyTo(AnnotationCanvas canvas)
         {
+            if (boundCanvas != canvas)
+            {
+                if (boundCanvas != null) boundCanvas.TextAnnotationSelected -= ReadTextSettings;
+                boundCanvas = canvas; canvas.TextAnnotationSelected += ReadTextSettings;
+            }
             canvas.Ink = Ink; canvas.Stroke = Stroke;
+            canvas.ApplyTextSettings(TextFontSize, TextFontStyle, Ink);
             canvas.MosaicMode = MosaicMode; canvas.EraserMode = EraserMode;
             canvas.MosaicSize = MosaicSize; canvas.MosaicBrushSize = MosaicBrushSize; canvas.EraserBrushSize = EraserBrushSize;
             canvas.UpdateToolCursor();
+        }
+        private void ReadTextSettings(Mark mark)
+        {
+            Ink = mark.Color; TextFontSize = TextGeometry.FontSize(mark); TextFontStyle = mark.TextStyle;
+            boundCanvas.Ink = Ink; boundCanvas.TextFontSize = TextFontSize; boundCanvas.TextFontStyle = TextFontStyle;
+            ShowTool(DrawTool.Text);
         }
 
         internal void UseDefaultMode(DrawTool tool)
@@ -56,6 +71,16 @@ namespace ShotInk
             }
             else if (tool != DrawTool.None)
             {
+                if (tool == DrawTool.Text)
+                {
+                    var text = Row(); Caption(text, "字号");
+                    var size = new NumericUpDown { Name = "text-font-size", AccessibleName = "文字字号", Minimum = 6, Maximum = 300,
+                        DecimalPlaces = 1, Value = Math.Max(6, Math.Min(300, (decimal)TextFontSize)), Width = 65, Margin = new Padding(1, 3, 5, 0) };
+                    size.ValueChanged += delegate { TextFontSize = (float)size.Value; NotifySettings(); };
+                    text.Controls.Add(size);
+                    Choice(text, "粗体", "text-bold", (TextFontStyle & FontStyle.Bold) != 0, delegate { TextFontStyle ^= FontStyle.Bold; NotifySettings(); ShowTool(tool); });
+                    Choice(text, "斜体", "text-italic", (TextFontStyle & FontStyle.Italic) != 0, delegate { TextFontStyle ^= FontStyle.Italic; NotifySettings(); ShowTool(tool); });
+                }
                 if (tool == DrawTool.Rectangle || tool == DrawTool.Ellipse)
                 {
                     var modes = Row();
@@ -81,10 +106,13 @@ namespace ShotInk
                 var custom = new Button { Text = "…", Width = 27, Height = 24, Margin = new Padding(3, 2, 6, 0), FlatStyle = FlatStyle.Flat };
                 custom.Click += delegate { using (var dialog = new ColorDialog { Color = Ink, FullOpen = true }) if (dialog.ShowDialog(FindForm()) == DialogResult.OK) { Ink = dialog.Color; NotifySettings(); } };
                 colors.Controls.Add(custom);
-                colors.Controls.Add(new Label { Text = "粗细", AutoSize = true, Margin = new Padding(1, 7, 3, 0) });
-                var stroke = new NumericUpDown { Minimum = 1, Maximum = 12, Value = (decimal)Stroke, Width = 45, Margin = new Padding(1, 3, 0, 0) };
-                stroke.ValueChanged += delegate { Stroke = (float)stroke.Value; NotifySettings(); };
-                colors.Controls.Add(stroke);
+                if (tool != DrawTool.Text)
+                {
+                    colors.Controls.Add(new Label { Text = "粗细", AutoSize = true, Margin = new Padding(1, 7, 3, 0) });
+                    var stroke = new NumericUpDown { Minimum = 1, Maximum = 12, Value = (decimal)Stroke, Width = 45, Margin = new Padding(1, 3, 0, 0) };
+                    stroke.ValueChanged += delegate { Stroke = (float)stroke.Value; NotifySettings(); };
+                    colors.Controls.Add(stroke);
+                }
             }
             Height = Controls.Count * 30;
             Visible = tool != DrawTool.None;

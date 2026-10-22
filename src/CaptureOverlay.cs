@@ -243,6 +243,7 @@ namespace ShotInk
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (canvas != null && canvas.HandleTextKey(e)) return;
             base.OnKeyDown(e);
             if (canvas != null && canvas.HandleRecognitionKey(e)) return;
             if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; Close(); return; }

@@ -49,7 +49,7 @@ namespace ShotInk
             AddTool("pen", "画笔", DrawTool.Pen);
             AddTool("highlight", "荧光笔", DrawTool.Highlight);
             AddTool("mosaic", "马赛克", DrawTool.Mosaic);
-            AddTool("text", "文字", DrawTool.Text);
+            AddTool("text", "文字：单击输入，拖边框移动，拖角点缩放，顶部手柄旋转，双击 / F2 编辑", DrawTool.Text);
             AddTool("eraser", "橡皮擦：画笔 / 选框", DrawTool.Eraser);
             recognize = Button("ocr", "文字识别：在图片上选择并复制文字", delegate { if (RecognitionClicked != null) RecognitionClicked(); });
             recognize.Name = "recognize-text";

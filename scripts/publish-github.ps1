@@ -52,13 +52,13 @@ try {
         & gh repo create $fullName "--$Visibility" --description 'Windows screenshot, annotation, desktop pinning and scrolling capture tool' --source $projectRoot --remote origin
         if ($LASTEXITCODE -ne 0) { throw 'GitHub repository creation failed.' }
     } else {
-        $url = "https://github.com/$fullName.git"
-        if ($remote -and $remote.Trim().TrimEnd('/') -ne $url -and $remote.Trim() -ne "git@github.com:$fullName.git") { throw 'Origin points to a different repository; no remote was changed.' }
+        $url = "git@github.com:$fullName.git"
+        if ($remote -and $remote.Trim().TrimEnd('/') -ne $url -and $remote.Trim().TrimEnd('/') -ne "https://github.com/$fullName.git") { throw 'Origin points to a different repository; no remote was changed.' }
         if (-not $remote) { & git remote add origin $url; if ($LASTEXITCODE -ne 0) { throw 'Cannot add origin.' } }
     }
-    # Use the authenticated CLI for this push without modifying global credentials
-    # or writing an access token into the repository.
-    & git -c 'credential.helper=' -c 'credential.helper=!gh auth git-credential' push -u origin HEAD
+    & git remote set-url origin "git@github.com:$fullName.git"
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot configure SSH origin.' }
+    & git push -u origin HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Push failed. Remote history was preserved; no force push was attempted.' }
     Write-Host "Uploaded: https://github.com/$fullName"
 } finally { Pop-Location }

@@ -26,6 +26,8 @@ namespace ShotInk
                 Run("height limit rejects oversized first frame", TestInitialLimit);
                 Run("accumulated height is bounded", TestAccumulatedLimit);
                 Run("annotations render at original resolution and undo", TestAnnotations);
+                Run("inline text supports multiline input, settings, cancellation and export", TestInlineText);
+                Run("text moves, scales and rotates with independent undo at different zooms", TestTextTransform);
                 Run("mosaic covers partial edge blocks", TestMosaic);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
@@ -175,6 +177,102 @@ namespace ShotInk
                 canvas.Undo(); Assert(canvas.Marks.Count == 0, "Undo failed.");
             }
         }
+        private static void TestInlineText()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(30, 30, 900, 560)))
+            {
+                overlay.Show(); Select(overlay);
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                var options = Field<AnnotationOptions>(toolbar, "options"); toolbar.SelectTool(DrawTool.Text);
+                Option<NumericUpDown>(options, "text-font-size").Value = 32;
+                options.Ink = Color.Blue; options.ApplyTo(canvas);
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 100, 80);
+                var input = Field<TextBox>(canvas, "textEditor");
+                Assert(input != null && input.Parent == canvas && input.Multiline, "Text tool did not open a native inline editor.");
+                input.Text = "中文 Abc123\r\n第二行";
+                Assert(canvas.Marks[0].FontSize == 32 && canvas.Marks[0].Color == Color.Blue, "Text ignored selected size or color.");
+                Option<NumericUpDown>(options, "text-font-size").Value = 40;
+                Assert(canvas.Marks[0].FontSize == 40 && input.Font.Size > 39, "Text settings did not update the active editor.");
+                ToolPreview(overlay, "text-input");
+                input.Focus(); var enter = new KeyEventArgs(Keys.Enter);
+                Assert(canvas.HandleTextKey(enter) && !enter.SuppressKeyPress && !overlay.IsDisposed, "Enter exported the screenshot instead of allowing a newline.");
+                var copy = new KeyEventArgs(Keys.Control | Keys.C);
+                Assert(canvas.HandleTextKey(copy) && !copy.SuppressKeyPress, "Copy shortcut was intercepted while typing.");
+                using (var rendered = canvas.Render())
+                {
+                    Assert(Field<TextBox>(canvas, "textEditor") == null && canvas.Marks.Count == 1, "Export lost or duplicated the pending text.");
+                    Assert(canvas.Marks[0].Text.Contains("第二行"), "Export lost multiline text.");
+                    canvas.Tool = DrawTool.None;
+                    using (var withoutSelection = canvas.Render()) EqualPixels(rendered, withoutSelection, rendered.Height);
+                }
+                toolbar.SelectTool(DrawTool.Text);
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 120, 90); Mouse(canvas, "OnMouseUp", MouseButtons.Left, 120, 90);
+                canvas.Marks[0].TextAngle = 20; ToolPreview(overlay, "text-transform"); canvas.Marks[0].TextAngle = 0;
+                canvas.Undo(); Assert(canvas.Marks.Count == 0, "Typing and changing settings were not undone as one edit.");
+                canvas.Redo(); Assert(canvas.Marks.Count == 1 && canvas.Marks[0].FontSize == 40, "Redo lost text or formatting.");
+                toolbar.SelectTool(DrawTool.Text);
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 420, 250);
+                input = Field<TextBox>(canvas, "textEditor"); input.Text = "取消"; input.Focus();
+                canvas.HandleTextKey(new KeyEventArgs(Keys.Escape));
+                Assert(canvas.Marks.Count == 1 && !overlay.IsDisposed, "Cancelling text closed the screenshot or retained the draft.");
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 420, 250); canvas.CommitTextEdit();
+                Assert(canvas.Marks.Count == 1, "Empty editor created a text annotation.");
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 120, 90);
+                Mouse(canvas, "OnMouseUp", MouseButtons.Left, 120, 90);
+                Mouse(canvas, "OnMouseDoubleClick", MouseButtons.Left, 120, 90);
+                input = Field<TextBox>(canvas, "textEditor"); input.Text = "修改后的内容"; input.Focus();
+                canvas.HandleTextKey(new KeyEventArgs(Keys.Escape));
+                Assert(canvas.Marks[0].Text.Contains("第二行"), "Cancelling re-edit did not restore the previous text.");
+                overlay.Close();
+            }
+        }
+        private static void TextGesture(AnnotationCanvas canvas, PointF from, PointF to)
+        { Gesture(canvas, new Point((int)Math.Round(from.X * canvas.Zoom), (int)Math.Round(from.Y * canvas.Zoom)), new Point((int)Math.Round(to.X * canvas.Zoom), (int)Math.Round(to.Y * canvas.Zoom))); }
+        private static void TestTextTransform()
+        {
+            foreach (float zoom in new[] { 1F, 0.5F })
+            using (var host = new Form { ClientSize = new Size(900, 650) })
+            using (var canvas = new AnnotationCanvas(new Bitmap(900, 650)))
+            {
+                host.Controls.Add(canvas); host.Show(); canvas.SetZoom(zoom); canvas.Tool = DrawTool.Text;
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                var text = new Mark { Tool = DrawTool.Text, Text = "可编辑文字 Abc", Color = Color.Red, FontSize = 30, TextAngle = 0 };
+                text.Points.Add(new PointF(200, 200)); text.TextSize = TextGeometry.Measure(text); canvas.AddMark(text);
+                var center = TextGeometry.Center(text);
+                TextGesture(canvas, center, new PointF(center.X + 35, center.Y + 25));
+                Assert(Math.Abs(text.Points[0].X - 235) < 2 && Math.Abs(text.Points[0].Y - 225) < 2, "Text move ignored image coordinates.");
+                canvas.Undo(); Assert(canvas.Marks[0].Points[0] == new PointF(200, 200), "Move corrupted an undo snapshot.");
+                canvas.Redo(); text = canvas.Marks[0];
+                TextGesture(canvas, TextGeometry.Center(text), TextGeometry.Center(text));
+                var corners = TextGeometry.Corners(text); var size = TextGeometry.Size(text);
+                TextGesture(canvas, corners[2], new PointF(corners[2].X + size.Width * 0.5F, corners[2].Y + size.Height * 0.5F));
+                Assert(Math.Abs(text.FontSize - 45) < 1, "Corner scaling did not scale the text.");
+                Assert(DistanceForTest(TextGeometry.Corners(text)[0], corners[0]) < 2, "Scaling moved the opposite corner.");
+                canvas.Undo(); Assert(Math.Abs(canvas.Marks[0].FontSize - 30) < 0.1, "Scale undo lost the old font size.");
+                canvas.Redo(); text = canvas.Marks[0]; TextGesture(canvas, TextGeometry.Center(text), TextGeometry.Center(text));
+                center = TextGeometry.Center(text);
+                var rotation = TextGeometry.World(text, new PointF(TextGeometry.Size(text).Width / 2, -24 / zoom));
+                float radius = (float)DistanceForTest(center, rotation);
+                TextGesture(canvas, rotation, new PointF(center.X + radius, center.Y));
+                Assert(Math.Abs(text.TextAngle - 90) < 2, "Rotation handle did not rotate around the text center.");
+                var local = new PointF(12, 14); var roundTrip = TextGeometry.Local(text, TextGeometry.World(text, local));
+                Assert(DistanceForTest(local, roundTrip) < 0.01, "Rotated text hit-testing does not invert the drawing transform.");
+                using (var rotated = canvas.Render())
+                {
+                    canvas.Tool = DrawTool.None;
+                    using (var plain = canvas.Render()) EqualPixels(rotated, plain, plain.Height);
+                    int red = 0;
+                    for (int y = 0; y < rotated.Height; y++) for (int x = 0; x < rotated.Width; x++)
+                    { var pixel = rotated.GetPixel(x, y); if (pixel.R > 180 && pixel.G < 100) red++; }
+                    Assert(red > 100, "Rotated text was absent from exported pixels.");
+                }
+                canvas.Undo(); Assert(Math.Abs(canvas.Marks[0].TextAngle) < 0.1, "Rotation undo failed.");
+                canvas.Redo(); Assert(Math.Abs(canvas.Marks[0].TextAngle - 90) < 2, "Rotation redo failed.");
+                host.Close();
+            }
+        }
+        private static double DistanceForTest(PointF a, PointF b)
+        { return Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)); }
         private static void TestMosaic()
         {
             using (var canvas = new AnnotationCanvas(Pattern(90, 100, 32)))
