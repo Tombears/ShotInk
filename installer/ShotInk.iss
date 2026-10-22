@@ -8,6 +8,7 @@
 [Setup]
 AppId={{C4996033-2445-4AF4-9497-F490EFD46448}
 AppName=ShotInk
+AppMutex=Local\SnipasteLite.Desktop
 AppVersion={#AppVersion}
 AppVerName=ShotInk {#AppVersion}
 VersionInfoVersion={#AppVersion}.0

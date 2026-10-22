@@ -7,7 +7,7 @@ New-Item -ItemType Directory -Path $redist -Force | Out-Null
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $dependencies = @(
     @{ Name = 'NDP48-x86-x64-AllOS-ENU.exe'; Url = 'https://go.microsoft.com/fwlink/?linkid=2088631'; MinimumBytes = 50000000 },
-    @{ Name = 'VC_redist.x64.exe'; Url = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'; MinimumBytes = 10000000 }
+    @{ Name = 'VC_redist.x64.exe'; Url = 'https://aka.ms/vc14/vc_redist.x64.exe'; MinimumBytes = 10000000 }
 )
 foreach ($dependency in $dependencies) {
     $path = Join-Path $redist $dependency.Name
