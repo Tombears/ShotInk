@@ -27,7 +27,10 @@ if ($env:GITHUB_REF -eq 'refs/heads/main') {
 }
 $allJson = & gh api ('repos/' + $Repository + '/releases?per_page=100')
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect existing releases.' }
-$releases = @($allJson | ConvertFrom-Json)
+# Windows PowerShell returns a root JSON array as one pipeline item. Iterate
+# explicitly so filtering and immutable checks always see individual releases.
+$releases = @()
+foreach ($release in (ConvertFrom-Json -InputObject ($allJson -join "`n"))) { $releases += $release }
 $latest = $releases | Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -match '^v\d+\.\d+\.\d+$' } |
     Sort-Object { [version]$_.tag_name.Substring(1) } -Descending | Select-Object -First 1
 if ($latest -and [version]$latest.tag_name.Substring(1) -gt [version]$version) { Write-Host 'A newer version already exists; skipping old-version publication.'; return }

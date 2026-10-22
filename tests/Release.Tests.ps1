@@ -38,7 +38,10 @@ try {
     Assert-Release ((Calls-For create)[0] -contains '--draft') 'New release was visible before its assets were ready.'
     Assert-Release ($state.Notes.Trim() -eq 'Release notes') 'Internal publication details were appended to the user-facing release notes.'
 
-    $state.Calls = @(); $state.Releases = @(@{ tag_name = $tag; draft = $false; prerelease = $false; immutable = $false })
+    $state.Calls = @(); $state.Releases = @(
+        @{ tag_name = $tag; draft = $false; prerelease = $false; immutable = $false },
+        @{ tag_name = 'v0.1.0'; draft = $false; prerelease = $false; immutable = $false }
+    )
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current
     Assert-Release ((Calls-For create).Count -eq 0 -and (Calls-For upload).Count -eq 1 -and (Calls-For edit).Count -eq 1) 'A small update created another release or failed to replace existing assets.'
     Assert-Release ((Calls-For upload)[0] -contains '--clobber') 'Existing asset names were not replaced.'
