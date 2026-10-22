@@ -1,0 +1,41 @@
+{
+  "source_commit": "9d1f9f1f6c3ec6f0da123a420842390de9b97268",
+  "files": [
+    {
+      "name": "PP-OCRv6_det_tiny.onnx",
+      "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/9d1f9f1f6c3ec6f0da123a420842390de9b97268/RapidOcrNet/models/v6/PP-OCRv6_det_tiny.onnx",
+      "sha256": "f42c0fbd294d95eac1a550e131b277dac97462c8025fa4b6c3cec1b7894bd3d5",
+      "bytes": 1829618
+    },
+    {
+      "name": "PP-OCRv6_rec_tiny.onnx",
+      "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/9d1f9f1f6c3ec6f0da123a420842390de9b97268/RapidOcrNet/models/v6/PP-OCRv6_rec_tiny.onnx",
+      "sha256": "e16e242de5937ad92609223f19bc2aff3727ee40b095f996907c24749bad251b",
+      "bytes": 4489813
+    },
+    {
+      "name": "ppocrv6_tiny_dict.txt",
+      "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/9d1f9f1f6c3ec6f0da123a420842390de9b97268/RapidOcrNet/models/v6/ppocrv6_tiny_dict.txt",
+      "sha256": "c5cbe34ef40c29c4df07ed012bf96569cb69a2d2a01a07027e9f13cb832bd9cd",
+      "bytes": 27156
+    },
+    {
+      "name": "PP-OCRv6_det_small.onnx",
+      "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/9d1f9f1f6c3ec6f0da123a420842390de9b97268/RapidOcrNet/models/v6/PP-OCRv6_det_small.onnx",
+      "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+      "bytes": 9929594
+    },
+    {
+      "name": "PP-OCRv6_rec_small.onnx",
+      "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/9d1f9f1f6c3ec6f0da123a420842390de9b97268/RapidOcrNet/models/v6/PP-OCRv6_rec_small.onnx",
+      "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+      "bytes": 21234383
+    },
+    {
+      "name": "ppocrv6_dict.txt",
+      "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/9d1f9f1f6c3ec6f0da123a420842390de9b97268/RapidOcrNet/models/v6/ppocrv6_dict.txt",
+      "sha256": "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
+      "bytes": 74947
+    }
+  ]
+}

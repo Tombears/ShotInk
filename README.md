@@ -4,7 +4,7 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 查看版本说明，在 **Assets** 中下载 [ShotInk.exe](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk.exe)，双击即可运行。也可下载 `ShotInk-portable.zip`，解压后运行其中的程序。
+前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 查看最新版本，推荐下载 [ShotInk-portable.zip](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip)，完整解压后运行 `ShotInk.exe`，保留同目录的 `ocr` 文件夹。单独的 [ShotInk.exe](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk.exe) 可截图、标注，文字识别需要配套组件。
 
 支持 Windows 10 / 11，需要 .NET Framework 4.8。
 
@@ -13,6 +13,8 @@
 - **区域截图**：`F1` 拖选区域，松开鼠标后保持屏幕选区，并在选区下方显示浮动图标工具栏。支持拖动选区、八个手柄调整大小、跨显示器选区和像素尺寸提示。
 - **浮动工具栏**：矩形 / 椭圆、箭头 / 直线、画笔、荧光笔、马赛克、文字、橡皮擦、撤销、重做、取消、贴图、保存、复制。单击工具立即启用默认模式，并展开对应选项；重复单击保持工具启用。
 - **马赛克与橡皮擦**：均支持「画笔 / 选框」，默认使用画笔。马赛克的第一条滑条控制颗粒大小，第二条控制画笔直径；橡皮擦提供独立的画笔大小滑条，按涂抹或框选范围恢复原图。每次操作支持整体撤销和重做；历史图片和长截图编辑器也提供相同选项。
+- **图片选字**：点击橡皮擦右侧的「方框＋文」，直接在图片上拖选文字；支持中英文、数字和标点，可跨行选择表格的一列。单击选择英文词，双击选择整行，`Ctrl+A` 全选，`Ctrl+C` 复制选中文字。选字高亮不进入导出图片，点击绘图工具或 `Esc` 返回标注。
+- **滑条手柄**：椭圆形手柄带渐变高光和阴影，支持拖动、点击轨道、方向键及滚轮调整。
 - **标注导出**：直接在选区上绘制，`Enter` / 双击未选择绘图工具的选区 / `Ctrl+C` 复制并结束，`Ctrl+S` 保存 PNG；工具栏、边框和手柄均不进入导出图片。长图和历史图片继续使用可缩放编辑器。
 - **桌面贴图**：`F3` 将剪贴板图片置顶。拖动位置，滚轮缩放，右键切换半透明，双击或 `Esc` 关闭。
 - **滚动长截图**：`Ctrl+Alt+L` 选择内容区域，支持自动滚动和手动滚动后逐屏采集，匹配重叠区域后拼接。
@@ -22,7 +24,7 @@
 
 ## 运行
 
-Windows 10 / 11，安装系统自带或微软提供的 **.NET Framework 4.8**。无需 Node.js、Python、.NET SDK、管理员权限或额外 NuGet 依赖。
+Windows 10 / 11，安装系统自带或微软提供的 **.NET Framework 4.8**。OCR 便携组件支持 Windows x64，并随包携带 .NET 8 运行时和识别模型；用户无需安装 Python、.NET SDK 或单独下载模型。ONNX Runtime 还需要 [Microsoft Visual C++ 2015–2022 x64 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)，系统未安装时需先安装。首次使用 OCR 会加载模型，之后复用同一进程；截图全程在本地处理。
 
 双击 `dist\ShotInk.exe`。也可以在项目目录运行：
 
@@ -30,13 +32,15 @@ Windows 10 / 11，安装系统自带或微软提供的 **.NET Framework 4.8**。
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-首次运行脚本会自动编译。源码构建：
+运行脚本会检查源码内容；首次运行或源码变化后自动重新编译。更新源码后请先从系统托盘退出正在运行的程序，再运行脚本，避免继续使用旧 EXE。工作台标题会显示当前程序版本。源码构建还需要 **.NET SDK 8 或更新版本**，首次构建需联网还原锁定的 NuGet 依赖并下载校验模型：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 ```
 
-产物为 `dist\ShotInk.exe` 和 `ShotInk-portable.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。
+产物为 `dist\ShotInk.exe`、`dist\ocr\` 和 `ShotInk-portable.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）；OCR 组件通过 `scripts\build-ocr.ps1` 构建。主程序保持 .NET Framework 4.8。
+
+OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](docs/ocr.md)。
 
 ## 普通截图操作
 
@@ -70,3 +74,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 如果已经运行官方 Snipaste 等使用相同快捷键的程序，工作台会提示快捷键冲突，可使用按钮或托盘菜单。
 
 截图和设置目录：`%LOCALAPPDATA%\ShotInk`。从旧版升级时，如果存在 `%LOCALAPPDATA%\SnipasteLite` 且尚无新目录，会继续使用旧目录，保留截图历史与设置。应用本身不会向网络上传截图；GitHub 上传脚本只上传本项目源码，构建产物和运行数据均不纳入 Git。
+
+## 提交与发布
+
+每次修改完成并通过必要检查后提交源码。小修复或样式微调保持版本号，替换最新 Release 的安装包并更新说明；新增较多功能或较大改动时才创建新版本。`main` 分支的 Windows 构建、界面检查、启动脚本检查和真实 OCR 检查全部通过后，自动更新 Release。
+
+替换安装包时保留已有标签和历史版本，说明末尾记录实际构建的源码提交。版本号在 `src/AssemblyInfo.cs` 中统一维护，中文说明位于 `releases/v版本号.md`。

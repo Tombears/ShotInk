@@ -33,7 +33,7 @@ namespace ShotInk
             dataRoot = storageRoot ?? ResolveDataRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             historyRoot = Path.Combine(dataRoot, "captures");
             Directory.CreateDirectory(historyRoot);
-            Text = "ShotInk · 截图与长截图";
+            Text = "ShotInk " + Application.ProductVersion + " · 截图与长截图";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9);
             Size = new Size(1080, 730);

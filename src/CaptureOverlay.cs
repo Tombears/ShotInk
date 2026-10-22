@@ -23,6 +23,7 @@ namespace ShotInk
         private bool completed;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
+        private TextRecognitionSession recognition;
         internal event Action<Rectangle, Bitmap> Selected;
         internal event Action<Bitmap, CaptureAction> Completed;
         internal event Action Cancelled;
@@ -157,9 +158,9 @@ namespace ShotInk
             canvas.MouseDown += delegate(object sender, MouseEventArgs e)
             {
                 if (e.Button == MouseButtons.Right) { Close(); return; }
-                if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None) BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
+                if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
             };
-            canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None) Finish(CaptureAction.Copy); };
+            canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
             Controls.Add(canvas);
             toolbar = new CaptureToolbar();
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
@@ -169,6 +170,13 @@ namespace ShotInk
             toolbar.CancelClicked += delegate { Close(); };
             toolbar.FinishClicked += Finish;
             toolbar.LayoutChanged += PositionToolbar;
+            recognition = new TextRecognitionSession(this, canvas.Render, delegate { return canvas.Revision; }, toolbar.SetRecognitionBusy,
+                delegate(OcrDocument document) { toolbar.SelectTool(DrawTool.None); canvas.SetTextRecognition(document); canvas.Focus(); });
+            toolbar.RecognitionClicked += async delegate { await recognition.RecognizeAsync(); };
+            toolbar.RecognitionHovered += delegate { RapidTextRecognizer.Shared.WarmUpAsync(); };
+            toolbar.CopySelectedText += delegate { canvas.CopyRecognizedText(false); };
+            toolbar.CopyAllText += delegate { canvas.CopyRecognizedText(true); };
+            canvas.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
             canvas.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
             Controls.Add(toolbar);
             SyncSettings();
@@ -205,6 +213,7 @@ namespace ShotInk
         private void ClearSelection()
         {
             ready = false;
+            if (recognition != null) { recognition.Dispose(); recognition = null; }
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); canvas = null; }
             if (toolbar != null) { Controls.Remove(toolbar); toolbar.Dispose(); toolbar = null; }
             selection = Rectangle.Empty; sizeHint.Hide();
@@ -235,6 +244,7 @@ namespace ShotInk
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+            if (canvas != null && canvas.HandleRecognitionKey(e)) return;
             if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; Close(); return; }
             if (!ready) return;
             if ((e.Control && e.KeyCode == Keys.C) || e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Finish(CaptureAction.Copy); }
@@ -249,7 +259,7 @@ namespace ShotInk
             return index == 1 || index == 5 ? Cursors.SizeNS : Cursors.SizeWE;
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
-        protected override void Dispose(bool disposing) { if (disposing) desktop.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

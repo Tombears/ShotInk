@@ -14,10 +14,12 @@ namespace ShotInk
         private readonly AnnotationOptions options;
         private readonly ToolStripButton undo;
         private readonly ToolStripButton redo;
+        private readonly ToolStripButton recognize;
+        private readonly OcrSelectionActions textActions;
+        private DrawTool currentTool = DrawTool.None;
+        private bool textSelection;
         private readonly Dictionary<DrawTool, ToolStripItem> tools = new Dictionary<DrawTool, ToolStripItem>();
         private readonly List<Image> icons = new List<Image>();
-        private DrawTool shapeTool = DrawTool.Rectangle;
-        private DrawTool lineTool = DrawTool.Arrow;
         internal void ApplyTo(AnnotationCanvas canvas) { options.ApplyTo(canvas); }
         internal event Action<DrawTool> ToolChanged;
         internal event Action SettingsChanged;
@@ -26,6 +28,10 @@ namespace ShotInk
         internal event Action CancelClicked;
         internal event Action<CaptureAction> FinishClicked;
         internal event Action LayoutChanged;
+        internal event Action RecognitionClicked;
+        internal event Action RecognitionHovered;
+        internal event Action CopySelectedText;
+        internal event Action CopyAllText;
 
         internal CaptureToolbar()
         {
@@ -36,15 +42,18 @@ namespace ShotInk
                 BackColor = BackColor, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
             strip.Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) { RoundedEdges = false };
             AddTool("move", "移动选区", DrawTool.None);
-            var shape = Button("shape", "形状：单击使用，下面可选矩形 / 椭圆", delegate { SelectTool(shapeTool); });
+            var shape = Button("shape", "形状：单击使用矩形，下面可切换椭圆", delegate { ActivateTool(DrawTool.Rectangle); });
             tools.Add(DrawTool.Rectangle, shape); tools.Add(DrawTool.Ellipse, shape);
-            var arrow = Button("arrow", "线条：单击使用，下面可选箭头 / 直线", delegate { SelectTool(lineTool); });
+            var arrow = Button("arrow", "线条：单击使用箭头，下面可切换直线", delegate { ActivateTool(DrawTool.Arrow); });
             tools.Add(DrawTool.Arrow, arrow); tools.Add(DrawTool.Line, arrow);
             AddTool("pen", "画笔", DrawTool.Pen);
             AddTool("highlight", "荧光笔", DrawTool.Highlight);
             AddTool("mosaic", "马赛克", DrawTool.Mosaic);
             AddTool("text", "文字", DrawTool.Text);
             AddTool("eraser", "橡皮擦：画笔 / 选框", DrawTool.Eraser);
+            recognize = Button("ocr", "文字识别：在图片上选择并复制文字", delegate { if (RecognitionClicked != null) RecognitionClicked(); });
+            recognize.Name = "recognize-text";
+            recognize.MouseEnter += delegate { if (RecognitionHovered != null) RecognitionHovered(); };
             strip.Items.Add(new ToolStripSeparator());
             undo = Button("undo", "撤销 (Ctrl+Z)", delegate { if (UndoClicked != null) UndoClicked(); });
             redo = Button("redo", "重做 (Ctrl+Y)", delegate { if (RedoClicked != null) RedoClicked(); });
@@ -62,6 +71,11 @@ namespace ShotInk
             options.SettingsChanged += delegate { if (SettingsChanged != null) SettingsChanged(); };
             options.ToolChanged += SelectTool;
             Controls.Add(options);
+            textActions = new OcrSelectionActions { Location = new Point(5, 35), Width = width - 8, Visible = false };
+            textActions.CopySelected += delegate { if (CopySelectedText != null) CopySelectedText(); };
+            textActions.CopyAll += delegate { if (CopyAllText != null) CopyAllText(); };
+            textActions.ExitSelection += delegate { SelectTool(DrawTool.None); };
+            Controls.Add(textActions);
             Size = new Size(width + 2, 35);
         }
 
@@ -72,12 +86,12 @@ namespace ShotInk
             button.Click += delegate { clicked(); };
             strip.Items.Add(button); return button;
         }
-        private void AddTool(string icon, string hint, DrawTool tool) { tools.Add(tool, Button(icon, hint, delegate { SelectTool(tool); })); }
+        private void ActivateTool(DrawTool tool) { options.UseDefaultMode(tool); SelectTool(tool); }
+        private void AddTool(string icon, string hint, DrawTool tool) { tools.Add(tool, Button(icon, hint, delegate { ActivateTool(tool); })); }
         private Image Icon(string name) { var image = ToolbarIcons.Create(name); icons.Add(image); return image; }
         internal void SelectTool(DrawTool tool)
         {
-            if (tool == DrawTool.Rectangle || tool == DrawTool.Ellipse) shapeTool = tool;
-            if (tool == DrawTool.Arrow || tool == DrawTool.Line) lineTool = tool;
+            currentTool = tool; textSelection = false; textActions.Hide(); recognize.Checked = false;
             foreach (var pair in tools)
             {
                 pair.Value.BackColor = Color.Transparent;
@@ -91,6 +105,25 @@ namespace ShotInk
             options.ShowTool(tool);
             Height = tool == DrawTool.None ? 35 : options.Bottom + 3;
             if (ToolChanged != null) ToolChanged(tool);
+            if (LayoutChanged != null) LayoutChanged();
+        }
+        internal void SetRecognitionBusy(bool busy)
+        { recognize.Enabled = !busy; recognize.ToolTipText = busy ? "正在识别文字…" : "文字识别：在图片上选择并复制文字"; }
+        internal void SetTextSelection(bool enabled, bool hasSelection)
+        {
+            textActions.SetSelection(hasSelection);
+            if (enabled)
+            {
+                foreach (var pair in tools)
+                { pair.Value.BackColor = Color.Transparent; ((ToolStripButton)pair.Value).Checked = false; }
+                textSelection = true; recognize.Checked = true; options.Hide(); textActions.Show(); Height = textActions.Bottom + 3;
+            }
+            else if (textSelection)
+            {
+                textSelection = false; recognize.Checked = false; textActions.Hide(); options.ShowTool(currentTool);
+                if (tools.ContainsKey(currentTool)) ((ToolStripButton)tools[currentTool]).Checked = true;
+                Height = currentTool == DrawTool.None ? 35 : options.Bottom + 3;
+            }
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void UpdateHistory(bool canUndo, bool canRedo) { undo.Enabled = canUndo; redo.Enabled = canRedo; }
@@ -144,6 +177,15 @@ namespace ShotInk
                         g.DrawRectangle(pen, 4, 4, 12, 12); g.FillRectangle(brush, 4, 4, 6, 6); g.FillRectangle(brush, 10, 10, 6, 6); break;
                     case "text": g.DrawLine(pen, 4, 4, 16, 4); g.DrawLine(pen, 10, 4, 10, 16); g.DrawLine(pen, 7, 16, 13, 16); break;
                     case "eraser": g.DrawPolygon(pen, new[] { new Point(3, 12), new Point(11, 4), new Point(17, 10), new Point(10, 17), new Point(8, 17) }); g.DrawLine(pen, 7, 8, 13, 14); break;
+                    case "ocr":
+                        g.DrawRectangle(pen, 2, 2, 16, 16);
+                        // Four strokes of 文 keep the small icon legible at any
+                        // system font setting and avoid font fallback glyphs.
+                        g.DrawLine(pen, 10, 4, 11, 5);
+                        g.DrawLine(pen, 5, 7, 15, 7);
+                        g.DrawBezier(pen, 12, 8, 12, 10, 9, 13, 5, 15);
+                        g.DrawBezier(pen, 7, 8, 8, 11, 11, 14, 15, 15);
+                        break;
                     case "undo": case "redo":
                         if (name == "redo") { g.TranslateTransform(20, 0); g.ScaleTransform(-1, 1); }
                         g.DrawBezier(pen, 5, 7, 15, 5, 17, 10, 14, 16); g.FillPolygon(brush, new[] { new Point(2, 8), new Point(8, 3), new Point(8, 12) }); break;

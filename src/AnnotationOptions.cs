@@ -32,6 +32,12 @@ namespace ShotInk
             canvas.UpdateToolCursor();
         }
 
+        internal void UseDefaultMode(DrawTool tool)
+        {
+            if (tool == DrawTool.Mosaic) MosaicMode = ApplyMode.Brush;
+            if (tool == DrawTool.Eraser) EraserMode = ApplyMode.Brush;
+        }
+
         internal void ShowTool(DrawTool tool)
         {
             SuspendLayout();
@@ -41,6 +47,7 @@ namespace ShotInk
                 bool mosaic = tool == DrawTool.Mosaic;
                 var mode = mosaic ? MosaicMode : EraserMode;
                 var modes = Row();
+                Caption(modes, mosaic ? "马赛克" : "橡皮擦");
                 Choice(modes, "画笔", "mode-brush", mode == ApplyMode.Brush, delegate { SetMode(tool, ApplyMode.Brush); });
                 Choice(modes, "选框", "mode-rectangle", mode == ApplyMode.Rectangle, delegate { SetMode(tool, ApplyMode.Rectangle); });
                 if (mosaic) Slider("马赛克大小", "mosaic-size", 4, 48, MosaicSize, true, delegate(int value) { MosaicSize = value; NotifySettings(); });
@@ -52,12 +59,14 @@ namespace ShotInk
                 if (tool == DrawTool.Rectangle || tool == DrawTool.Ellipse)
                 {
                     var modes = Row();
+                    Caption(modes, "形状");
                     Choice(modes, "矩形", "shape-rectangle", tool == DrawTool.Rectangle, delegate { ChooseTool(DrawTool.Rectangle); });
                     Choice(modes, "椭圆", "shape-ellipse", tool == DrawTool.Ellipse, delegate { ChooseTool(DrawTool.Ellipse); });
                 }
                 if (tool == DrawTool.Arrow || tool == DrawTool.Line)
                 {
                     var modes = Row();
+                    Caption(modes, "线条");
                     Choice(modes, "箭头", "line-arrow", tool == DrawTool.Arrow, delegate { ChooseTool(DrawTool.Arrow); });
                     Choice(modes, "直线", "line-straight", tool == DrawTool.Line, delegate { ChooseTool(DrawTool.Line); });
                 }
@@ -87,6 +96,10 @@ namespace ShotInk
             var row = new FlowLayoutPanel { Height = 30, Width = Width, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty };
             Controls.Add(row); return row;
         }
+        private static void Caption(FlowLayoutPanel row, string text)
+        {
+            row.Controls.Add(new Label { Text = text, Width = 80, Height = 25, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(3, 2, 0, 0) });
+        }
         private static void Choice(FlowLayoutPanel row, string text, string name, bool selected, Action clicked)
         {
             var button = new Button { Name = name, Text = text, Width = 58, Height = 25, Margin = new Padding(2, 2, 3, 0), FlatStyle = FlatStyle.Flat,
@@ -99,8 +112,8 @@ namespace ShotInk
         {
             var row = Row();
             row.Controls.Add(new Label { Text = label, Width = 80, Height = 24, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(3, 3, 0, 0), Enabled = enabled });
-            var slider = new TrackBar { Name = name, Minimum = minimum, Maximum = maximum, Value = value, Width = 216, Height = 27,
-                AutoSize = false, TickStyle = TickStyle.None, SmallChange = 1, LargeChange = 4, Margin = new Padding(0, 1, 0, 0), Enabled = enabled };
+            var slider = new OvalSlider { Name = name, AccessibleName = label, Minimum = minimum, Maximum = maximum, Value = value, Width = 216, Height = 27,
+                SmallChange = 1, LargeChange = 4, Margin = new Padding(0, 1, 0, 0), Enabled = enabled };
             var number = new Label { Text = value + " px", Width = 56, Height = 24, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(1, 3, 0, 0), Enabled = enabled };
             slider.ValueChanged += delegate { number.Text = slider.Value + " px"; changed(slider.Value); };
             row.Controls.Add(slider); row.Controls.Add(number);

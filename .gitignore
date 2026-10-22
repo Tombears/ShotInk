@@ -13,3 +13,6 @@ bin/
 .env.*
 *.key
 *.pem
+ocr-host/bin/
+ocr-host/obj/
+ocr-host/models/

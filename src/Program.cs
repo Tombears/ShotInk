@@ -15,7 +15,7 @@ namespace ShotInk
             {
                 if (!first)
                 {
-                    MessageBox.Show("ShotInk 已在运行，请从系统托盘打开。", "ShotInk");
+                    MessageBox.Show("ShotInk 已在运行。若要使用刚编译或下载的程序，请先从系统托盘退出正在运行的 ShotInk，再重新启动。\n\n本次启动：" + Application.ProductVersion + "\n" + Application.ExecutablePath, "ShotInk");
                     return;
                 }
                 Native.EnableDpiAwareness();
@@ -25,6 +25,7 @@ namespace ShotInk
                 {
                     MessageBox.Show(e.Exception.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 };
+                Application.ApplicationExit += delegate { RapidTextRecognizer.Shared.Dispose(); };
                 Application.Run(new MainForm());
             }
         }

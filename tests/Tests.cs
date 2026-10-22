@@ -29,9 +29,13 @@ namespace ShotInk
                 Run("mosaic covers partial edge blocks", TestMosaic);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
+                Run("oval sliders support bounded dragging and keyboard adjustments", TestOvalSlider);
+                Run("OCR selection preserves columns, punctuation and screenshot pixels", TestOcrSelection);
+                Run("OCR requests suppress reentry and ignore stale or cancelled results", TestOcrSession);
                 Run("mosaic brush follows continuous strokes and keeps sizes independent", TestMosaicBrush);
                 Run("mosaic selection ignores brush size and respects pixel size", TestMosaicSelection);
                 Run("eraser brush and selection restore only the requested pixels", TestEraserModes);
+                Run("overlapping eraser strokes preserve coverage without deleting the whole line", TestEraserOverlap);
                 Run("highlighter remains translucent and preserves the original", TestHighlighter);
                 Run("floating selection stays open and exports only edited pixels", TestFloatingSelection);
                 Run("selection resize and toolbar stay within display bounds", TestSelectionGeometry);
@@ -243,31 +247,51 @@ namespace ShotInk
                 var canvas = Field<AnnotationCanvas>(overlay, "canvas");
                 var tools = Field<System.Collections.Generic.Dictionary<DrawTool, ToolStripItem>>(toolbar, "tools");
                 var options = Field<AnnotationOptions>(toolbar, "options");
+                var strip = Field<ToolStrip>(toolbar, "strip");
+                var recognize = Field<ToolStripButton>(toolbar, "recognize");
+                Assert(strip.Items.IndexOf(recognize) == strip.Items.IndexOf(tools[DrawTool.Eraser]) + 1, "OCR button is not immediately right of the eraser.");
+                int requests = 0;
+                using (var isolated = new CaptureToolbar())
+                {
+                    isolated.RecognitionClicked += delegate { requests++; };
+                    Field<ToolStripButton>(isolated, "recognize").PerformClick();
+                }
+                Assert(requests == 1, "OCR button did not request recognition.");
+                toolbar.SetRecognitionBusy(true); Assert(!recognize.Enabled, "Busy OCR button allowed duplicate clicks.");
+                toolbar.SetRecognitionBusy(false);
                 tools[DrawTool.Mosaic].PerformClick();
                 Assert(canvas.Tool == DrawTool.Mosaic && canvas.MosaicMode == ApplyMode.Brush && options.Visible, "Mosaic required a second click to activate the brush.");
                 ToolPreview(overlay, "mosaic");
                 var sliders = options.Controls.Find("mosaic-size", true);
-                Assert(sliders.Length == 1 && Option<TrackBar>(options, "mosaic-size").Parent.Top < Option<TrackBar>(options, "mosaic-brush-size").Parent.Top, "Mosaic sliders are missing or out of order.");
-                Option<TrackBar>(options, "mosaic-size").Value = 22;
-                Option<TrackBar>(options, "mosaic-brush-size").Value = 50;
+                Assert(sliders.Length == 1 && Option<OvalSlider>(options, "mosaic-size").Parent.Top < Option<OvalSlider>(options, "mosaic-brush-size").Parent.Top, "Mosaic sliders are missing or out of order.");
+                Option<OvalSlider>(options, "mosaic-size").Value = 22;
+                Option<OvalSlider>(options, "mosaic-brush-size").Value = 50;
                 Assert(canvas.MosaicSize == 22 && canvas.MosaicBrushSize == 50, "Mosaic sliders did not update separate settings.");
                 Option<Button>(options, "mode-rectangle").PerformClick();
-                Assert(canvas.MosaicMode == ApplyMode.Rectangle && !Option<TrackBar>(options, "mosaic-brush-size").Enabled, "Mosaic selection mode did not activate.");
+                Assert(canvas.MosaicMode == ApplyMode.Rectangle && !Option<OvalSlider>(options, "mosaic-brush-size").Enabled, "Mosaic selection mode did not activate.");
+                tools[DrawTool.Mosaic].PerformClick();
+                Assert(canvas.MosaicMode == ApplyMode.Brush && Option<OvalSlider>(options, "mosaic-brush-size").Enabled, "Mosaic main button did not immediately restore its default brush.");
                 tools[DrawTool.Eraser].PerformClick();
                 Assert(canvas.Tool == DrawTool.Eraser && canvas.EraserMode == ApplyMode.Brush && options.Visible, "Eraser required a second click to activate the brush.");
                 ToolPreview(overlay, "eraser");
-                Option<TrackBar>(options, "eraser-brush-size").Value = 62;
+                Option<OvalSlider>(options, "eraser-brush-size").Value = 62;
                 Assert(canvas.EraserBrushSize == 62 && canvas.MosaicBrushSize == 50 && canvas.MosaicSize == 22, "Eraser size changed mosaic settings.");
                 Option<Button>(options, "mode-rectangle").PerformClick();
                 Assert(canvas.EraserMode == ApplyMode.Rectangle, "Eraser selection mode did not activate.");
+                tools[DrawTool.Eraser].PerformClick();
+                Assert(canvas.EraserMode == ApplyMode.Brush && canvas.Cursor == Cursors.Cross, "Eraser main button did not immediately restore its default brush.");
                 tools[DrawTool.Rectangle].PerformClick();
                 Assert(canvas.Tool == DrawTool.Rectangle && options.Visible, "Shape button did not select its default tool.");
                 Option<Button>(options, "shape-ellipse").PerformClick();
                 Assert(canvas.Tool == DrawTool.Ellipse, "Shape options did not switch to ellipse.");
+                tools[DrawTool.Rectangle].PerformClick();
+                Assert(canvas.Tool == DrawTool.Rectangle && canvas.Cursor == Cursors.Cross, "Shape button did not immediately restore its default rectangle.");
                 tools[DrawTool.Arrow].PerformClick();
                 Assert(canvas.Tool == DrawTool.Arrow, "Arrow button did not select its default tool.");
                 Option<Button>(options, "line-straight").PerformClick();
                 Assert(canvas.Tool == DrawTool.Line, "Line options did not switch to straight line.");
+                tools[DrawTool.Arrow].PerformClick();
+                Assert(canvas.Tool == DrawTool.Arrow && canvas.Cursor == Cursors.Cross, "Line button did not immediately restore its default arrow.");
                 tools[DrawTool.Pen].PerformClick(); tools[DrawTool.Pen].PerformClick();
                 Assert(canvas.Tool == DrawTool.Pen && options.Visible, "Clicking an active tool disabled it instead of showing options.");
                 tools[DrawTool.None].PerformClick();
@@ -275,6 +299,130 @@ namespace ShotInk
                 overlay.Close();
             }
         }
+        private static void TestOvalSlider()
+        {
+            using (var slider = new OvalSlider { Minimum = 4, Maximum = 48, Value = 14 })
+            {
+                int changes = 0; slider.ValueChanged += delegate { changes++; };
+                var thumb = slider.ThumbBounds;
+                Assert(thumb.Width > thumb.Height, "Slider thumb is not an ellipse.");
+                Mouse(slider, "OnMouseDown", MouseButtons.Left, (int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2));
+                Mouse(slider, "OnMouseMove", MouseButtons.Left, 10000, 13);
+                Mouse(slider, "OnMouseUp", MouseButtons.Left, 10000, 13);
+                Assert(slider.Value == 48 && changes > 0 && !slider.Capture, "Slider drag did not clamp at its maximum or release capture.");
+                Mouse(slider, "OnMouseDown", MouseButtons.Left, 0, 13); Mouse(slider, "OnMouseUp", MouseButtons.Left, 0, 13);
+                Assert(slider.Value == 4, "Track click did not reach the minimum.");
+                Key(slider, Keys.Right); Assert(slider.Value == 5, "Arrow key did not increment the slider.");
+                Key(slider, Keys.PageUp); Assert(slider.Value == 9, "Page Up did not apply the large increment.");
+                Key(slider, Keys.End); Assert(slider.Value == 48, "End key did not reach the maximum.");
+                slider.Enabled = false; Mouse(slider, "OnMouseDown", MouseButtons.Left, 0, 13); Key(slider, Keys.Home);
+                Assert(slider.Value == 48, "Disabled slider changed its value.");
+                slider.Enabled = true; slider.Minimum = 7; slider.Maximum = 7;
+                Assert(slider.Value == 7 && !float.IsNaN(slider.ThumbBounds.X), "Zero-range slider produced invalid geometry.");
+            }
+        }
+        private static void Key(Control control, Keys key)
+        { control.GetType().GetMethod("OnKeyDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(control, new object[] { new KeyEventArgs(key) }); }
+        private static OcrLine RecognizedLine(string text, int left, int top)
+        {
+            var characters = new OcrCharacter[text.Length];
+            for (int i = 0; i < text.Length; i++) characters[i] = new OcrCharacter { Text = text[i].ToString(), Start = i, Length = 1, Box = new[] { (float)(left + i * 10), (float)top, 10F, 20F } };
+            return new OcrLine { Text = text, Box = new[] { (float)left, (float)top, (float)(text.Length * 10), 20F }, Characters = characters };
+        }
+        private static OcrDocument SelectionDocument(int width, int height)
+        {
+            return new OcrDocument { Width = width, Height = height, Lines = new[] {
+                RecognizedLine("编号A01", 10, 10), RecognizedLine("release-sit", 200, 10),
+                RecognizedLine("编号B02", 10, 50), RecognizedLine("hotfix-20261021", 200, 50),
+                RecognizedLine("中文123，A_B-9.50!", 10, 100) } };
+        }
+        private static void TestOcrSelection()
+        {
+            var model = new OcrSelectionModel(SelectionDocument(700, 370));
+            model.SelectRectangle(new RectangleF(195, 0, 170, 80));
+            Assert(model.SelectedText == "release-sit" + Environment.NewLine + "hotfix-20261021", "Column selection included neighboring table cells.");
+            model.SelectWord(new PointF(225, 20), false);
+            Assert(model.SelectedText == "release-sit", "Click did not select a punctuation-bearing English word.");
+            model.SelectRectangle(new RectangleF(200, 60, 150, 0));
+            Assert(model.SelectedText == "hotfix-20261021", "A horizontal drag with no vertical motion selected no text.");
+            model.SelectWord(new PointF(35, 110), true);
+            Assert(model.SelectedText == "中文123，A_B-9.50!", "Line selection lost Chinese, digits or punctuation.");
+            model.SelectAll(); Assert(model.SelectedText.StartsWith("编号A01\trelease-sit"), "Copy-all did not preserve table columns.");
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600)))
+            {
+                Select(overlay);
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                canvas.SetTextRecognition(SelectionDocument(700, 370));
+                var before = Field<Rectangle>(overlay, "selection");
+                Gesture(canvas, new Point(195, 0), new Point(365, 80));
+                Assert(canvas.HasSelectedText && Field<Rectangle>(overlay, "selection") == before, "Selecting text moved the screenshot selection.");
+                var copyAll = new KeyEventArgs(Keys.Control | Keys.A);
+                Assert(canvas.HandleRecognitionKey(copyAll) && copyAll.SuppressKeyPress, "OCR mode did not consume select-all.");
+                using (var image = canvas.Render()) EqualPixels(canvas.Image, image, image.Height);
+                canvas.SetZoom(0.5F);
+                Gesture(canvas, new Point(98, 0), new Point(182, 40));
+                Assert(Field<OcrSelectionModel>(canvas, "recognition").SelectedText == "release-sit" + Environment.NewLine + "hotfix-20261021", "Zoomed selection used screen coordinates as image coordinates.");
+                canvas.GetType().GetMethod("OnMouseDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(canvas,
+                    new object[] { new MouseEventArgs(MouseButtons.Left, 2, 18, 55, 0) });
+                Mouse(canvas, "OnMouseDoubleClick", MouseButtons.Left, 18, 55); Mouse(canvas, "OnMouseUp", MouseButtons.Left, 18, 55);
+                Assert(Field<OcrSelectionModel>(canvas, "recognition").SelectedText == "中文123，A_B-9.50!", "Mouse-up replaced double-click line selection with a single word.");
+                Field<CaptureToolbar>(overlay, "toolbar").SelectTool(DrawTool.Pen);
+                Assert(!canvas.HasTextRecognition && canvas.Tool == DrawTool.Pen, "Drawing tools did not exit OCR selection.");
+            }
+        }
+        private sealed class FakeRecognizer : ITextRecognizer
+        {
+            internal readonly System.Threading.Tasks.TaskCompletionSource<OcrDocument> Completion = new System.Threading.Tasks.TaskCompletionSource<OcrDocument>();
+            internal int Calls;
+            internal System.Threading.CancellationToken Token;
+            public System.Threading.Tasks.Task<OcrDocument> RecognizeAsync(Bitmap image, System.Threading.CancellationToken cancellation)
+            { Calls++; Token = cancellation; Assert(image.Width == 20 && image.Height == 20, "OCR received the wrong snapshot."); return Completion.Task; }
+        }
+        private static void Pump(System.Threading.Tasks.Task task)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); System.Threading.Thread.Sleep(1); }
+            Assert(task.IsCompleted, "OCR continuation did not complete."); task.GetAwaiter().GetResult();
+        }
+        private static void TestOcrSession()
+        {
+            using (var owner = new Form())
+            {
+                int revision = 1, results = 0, errors = 0; bool busy = false;
+                var engine = new FakeRecognizer();
+                using (var session = new TextRecognitionSession(owner, delegate { return new Bitmap(20, 20); }, delegate { return revision; }, delegate(bool state) { busy = state; }, engine,
+                    delegate { results++; }, delegate { errors++; }))
+                {
+                    var request = session.RecognizeAsync(); session.RecognizeAsync().GetAwaiter().GetResult();
+                    Assert(engine.Calls == 1 && busy, "OCR did not suppress duplicate requests.");
+                    engine.Completion.SetResult(SelectionDocument(20, 20)); Pump(request);
+                    Assert(results == 1 && errors == 0 && !busy, "OCR success did not restore the button and publish its result.");
+                }
+                engine = new FakeRecognizer();
+                using (var session = new TextRecognitionSession(owner, delegate { return new Bitmap(20, 20); }, delegate { return revision; }, delegate(bool state) { busy = state; }, engine,
+                    delegate { results++; }, delegate { errors++; }))
+                {
+                    var request = session.RecognizeAsync(); revision++;
+                    engine.Completion.SetResult(SelectionDocument(20, 20)); Pump(request);
+                    Assert(results == 1 && errors == 1 && !busy, "OCR result was applied to a changed screenshot.");
+                }
+                engine = new FakeRecognizer();
+                var cancelled = new TextRecognitionSession(owner, delegate { return new Bitmap(20, 20); }, delegate { return revision; }, delegate(bool state) { busy = state; }, engine,
+                    delegate { results++; }, delegate { errors++; });
+                var pending = cancelled.RecognizeAsync(); cancelled.Dispose();
+                Assert(engine.Token.IsCancellationRequested, "Closing OCR did not cancel its request.");
+                engine.Completion.SetResult(SelectionDocument(20, 20)); Pump(pending);
+                Assert(results == 1 && errors == 1, "Late OCR result escaped cancellation.");
+                engine = new FakeRecognizer();
+                using (var session = new TextRecognitionSession(owner, delegate { return new Bitmap(20, 20); }, delegate { return revision; }, delegate(bool state) { busy = state; }, engine,
+                    delegate { results++; }, delegate { errors++; }))
+                {
+                    var failed = session.RecognizeAsync(); engine.Completion.SetException(new InvalidOperationException("model missing")); Pump(failed);
+                    Assert(errors == 2 && !busy, "OCR failure left the UI busy.");
+                }
+            }
+        }
+
         private static void TestMosaicBrush()
         {
             using (var canvas = new AnnotationCanvas(Pattern(160, 140, 31)))
@@ -362,6 +510,25 @@ namespace ShotInk
                 canvas.Redo();
                 canvas.Undo();
                 using (var image = canvas.Render()) Assert(image.GetPixel(50, 50).ToArgb() != canvas.Image.GetPixel(50, 50).ToArgb(), "Undo did not restore erased mosaic.");
+            }
+        }
+
+        private static void TestEraserOverlap()
+        {
+            using (var canvas = new AnnotationCanvas(new Bitmap(160, 120)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                var line = new Mark { Tool = DrawTool.Line, Color = Color.Red, Width = 6 };
+                line.Points.Add(new PointF(10, 50)); line.Points.Add(new PointF(150, 50)); canvas.AddMark(line);
+                canvas.Tool = DrawTool.Eraser; canvas.EraserBrushSize = 12;
+                Gesture(canvas, new Point(60, 20), new Point(100, 80), new Point(60, 80), new Point(100, 20), new Point(60, 20));
+                using (var image = canvas.Render())
+                {
+                    Assert(image.GetPixel(80, 50).ToArgb() == Color.White.ToArgb(), "Overlapping brush paths cancelled the erased intersection.");
+                    Assert(image.GetPixel(20, 50).G < 40 && image.GetPixel(140, 50).G < 40, "Erasing an intersection removed the whole line.");
+                }
+                canvas.Undo();
+                using (var image = canvas.Render()) Assert(image.GetPixel(80, 50).G < 40, "Undo did not restore the erased intersection.");
             }
         }
 
