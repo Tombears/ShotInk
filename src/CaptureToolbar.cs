@@ -177,7 +177,7 @@ namespace ShotInk
         {
             var image = new Bitmap(20, 20);
             using (var g = Graphics.FromImage(image))
-            using (var pen = new Pen(Color.FromArgb(65, 68, 74), 1.6F))
+            using (var pen = new Pen(Color.FromArgb(65, 68, 74), 1.7F))
             using (var brush = new SolidBrush(pen.Color))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -185,25 +185,50 @@ namespace ShotInk
                 switch (name)
                 {
                     case "scroll":
-                        g.DrawRectangle(pen, 5, 3, 10, 14); g.DrawLine(pen, 8, 7, 12, 7); g.DrawLine(pen, 8, 10, 12, 10);
-                        g.DrawLines(pen, new[] { new Point(2, 6), new Point(2, 14), new Point(0, 12) });
-                        g.DrawLines(pen, new[] { new Point(17, 6), new Point(17, 14), new Point(19, 12) }); break;
+                        g.DrawLines(pen, new[] { new Point(6, 2), new Point(3, 2), new Point(3, 18), new Point(6, 18) });
+                        g.DrawLines(pen, new[] { new Point(14, 2), new Point(17, 2), new Point(17, 18), new Point(14, 18) });
+                        g.DrawLine(pen, 7, 4, 13, 4);
+                        g.DrawLine(pen, 10, 8, 10, 16);
+                        g.DrawLines(pen, new[] { new Point(7, 13), new Point(10, 16), new Point(13, 13) }); break;
                     case "move":
                         g.DrawLine(pen, 10, 2, 10, 18); g.DrawLine(pen, 2, 10, 18, 10);
                         g.DrawLines(pen, new[] { new Point(7, 5), new Point(10, 2), new Point(13, 5) });
                         g.DrawLines(pen, new[] { new Point(7, 15), new Point(10, 18), new Point(13, 15) });
                         g.DrawLines(pen, new[] { new Point(5, 7), new Point(2, 10), new Point(5, 13) });
                         g.DrawLines(pen, new[] { new Point(15, 7), new Point(18, 10), new Point(15, 13) }); break;
-                    case "shape": g.DrawRectangle(pen, 3, 4, 11, 9); g.FillEllipse(Brushes.White, 9, 10, 8, 6); g.DrawEllipse(pen, 9, 10, 8, 6); break;
-                    case "arrow": g.DrawLines(pen, new[] { new Point(3, 14), new Point(8, 8), new Point(11, 11), new Point(17, 4) }); g.DrawLines(pen, new[] { new Point(12, 4), new Point(17, 4), new Point(17, 9) }); break;
-                    case "pen": g.DrawPolygon(pen, new[] { new Point(4, 13), new Point(13, 4), new Point(16, 7), new Point(7, 16), new Point(3, 17) }); g.DrawLine(pen, 11, 6, 14, 9); break;
-                    case "highlight": g.DrawPolygon(pen, new[] { new Point(5, 12), new Point(12, 3), new Point(17, 8), new Point(9, 15) }); g.DrawLines(pen, new[] { new Point(5, 12), new Point(3, 16), new Point(8, 16), new Point(9, 15) }); g.DrawLine(pen, 5, 18, 15, 18); break;
+                    case "shape":
+                        g.DrawLines(pen, new[] { new Point(7, 13), new Point(3, 13), new Point(3, 3), new Point(13, 3), new Point(13, 7) });
+                        g.DrawEllipse(pen, 8, 9, 9, 8); break;
+                    case "arrow":
+                        g.DrawLine(pen, 3, 17, 17, 3);
+                        g.DrawLines(pen, new[] { new Point(9, 3), new Point(17, 3), new Point(17, 11) }); break;
+                    case "pen":
+                        g.DrawPolygon(pen, new[] { new Point(3, 17), new Point(4, 12), new Point(13, 3), new Point(17, 7), new Point(8, 16) });
+                        g.DrawLine(pen, 11, 5, 15, 9); g.DrawLine(pen, 4, 12, 8, 16); break;
+                    case "highlight":
+                        g.DrawPolygon(pen, new[] { new Point(5, 10), new Point(11, 3), new Point(17, 8), new Point(11, 14) });
+                        g.DrawLines(pen, new[] { new Point(5, 10), new Point(3, 15), new Point(8, 15), new Point(11, 14) });
+                        g.DrawLine(pen, 7, 8, 13, 12);
+                        g.FillRectangle(brush, 3, 17, 14, 2); break;
                     case "mosaic":
-                        g.DrawRectangle(pen, 4, 4, 12, 12); g.FillRectangle(brush, 4, 4, 6, 6); g.FillRectangle(brush, 10, 10, 6, 6); break;
+                        // Separate pixels read as mosaic rather than a checkerboard.
+                        using (var mid = new SolidBrush(Color.FromArgb(130, 133, 138)))
+                        using (var light = new SolidBrush(Color.FromArgb(190, 193, 198)))
+                        {
+                            g.FillRectangle(brush, 3, 3, 4, 4); g.FillRectangle(mid, 8, 3, 4, 4); g.FillRectangle(light, 13, 3, 4, 4);
+                            g.FillRectangle(mid, 3, 8, 4, 4); g.FillRectangle(light, 8, 8, 4, 4); g.FillRectangle(brush, 13, 8, 4, 4);
+                            g.FillRectangle(light, 3, 13, 4, 4); g.FillRectangle(brush, 8, 13, 4, 4); g.FillRectangle(mid, 13, 13, 4, 4);
+                        }
+                        break;
                     case "text": g.DrawLine(pen, 4, 4, 16, 4); g.DrawLine(pen, 10, 4, 10, 16); g.DrawLine(pen, 7, 16, 13, 16); break;
-                    case "eraser": g.DrawPolygon(pen, new[] { new Point(3, 12), new Point(11, 4), new Point(17, 10), new Point(10, 17), new Point(8, 17) }); g.DrawLine(pen, 7, 8, 13, 14); break;
+                    case "eraser":
+                        g.DrawPolygon(pen, new[] { new Point(3, 12), new Point(11, 4), new Point(17, 10), new Point(10, 17), new Point(8, 17) });
+                        g.DrawLine(pen, 7, 8, 13, 14); g.DrawLine(pen, 10, 17, 18, 17); break;
                     case "ocr":
-                        g.DrawRectangle(pen, 2, 2, 16, 16);
+                        g.DrawLines(pen, new[] { new Point(6, 2), new Point(2, 2), new Point(2, 6) });
+                        g.DrawLines(pen, new[] { new Point(14, 2), new Point(18, 2), new Point(18, 6) });
+                        g.DrawLines(pen, new[] { new Point(2, 14), new Point(2, 18), new Point(6, 18) });
+                        g.DrawLines(pen, new[] { new Point(14, 18), new Point(18, 18), new Point(18, 14) });
                         // Four strokes of 文 keep the small icon legible at any
                         // system font setting and avoid font fallback glyphs.
                         g.DrawLine(pen, 10, 4, 11, 5);
@@ -213,11 +238,18 @@ namespace ShotInk
                         break;
                     case "undo": case "redo":
                         if (name == "redo") { g.TranslateTransform(20, 0); g.ScaleTransform(-1, 1); }
-                        g.DrawBezier(pen, 5, 7, 15, 5, 17, 10, 14, 16); g.FillPolygon(brush, new[] { new Point(2, 8), new Point(8, 3), new Point(8, 12) }); break;
-                    case "cancel": g.DrawLine(pen, 6, 6, 14, 14); g.DrawLine(pen, 14, 6, 6, 14); break;
-                    case "pin": g.FillPolygon(brush, new[] { new Point(12, 3), new Point(17, 8), new Point(14, 9), new Point(11, 13), new Point(11, 16), new Point(4, 9), new Point(7, 9), new Point(11, 6) }); g.DrawLine(pen, 8, 12, 3, 17); break;
-                    case "save": g.DrawPolygon(pen, new[] { new Point(4, 3), new Point(14, 3), new Point(17, 6), new Point(17, 17), new Point(4, 17) }); g.DrawRectangle(pen, 7, 3, 6, 5); g.DrawRectangle(pen, 7, 12, 7, 5); break;
-                    case "copy": g.DrawRectangle(pen, 7, 6, 9, 11); g.DrawLines(pen, new[] { new Point(5, 14), new Point(3, 14), new Point(3, 3), new Point(12, 3), new Point(12, 4) }); break;
+                        g.DrawBezier(pen, 3, 8, 17, 5, 19, 15, 11, 17);
+                        g.DrawLines(pen, new[] { new Point(7, 3), new Point(3, 8), new Point(8, 12) }); break;
+                    case "cancel": g.DrawLine(pen, 5, 5, 15, 15); g.DrawLine(pen, 15, 5, 5, 15); break;
+                    case "pin":
+                        g.DrawPolygon(pen, new[] { new Point(12, 3), new Point(17, 8), new Point(14, 8), new Point(11, 12), new Point(11, 15), new Point(5, 9), new Point(8, 9), new Point(12, 6) });
+                        g.DrawLine(pen, 8, 12, 3, 17); break;
+                    case "save":
+                        g.DrawPolygon(pen, new[] { new Point(3, 3), new Point(14, 3), new Point(17, 6), new Point(17, 17), new Point(3, 17) });
+                        g.DrawRectangle(pen, 6, 3, 7, 5); g.DrawRectangle(pen, 6, 12, 8, 5); break;
+                    case "copy":
+                        g.DrawRectangle(pen, 7, 7, 10, 10);
+                        g.DrawLines(pen, new[] { new Point(4, 13), new Point(3, 13), new Point(3, 3), new Point(13, 3), new Point(13, 4) }); break;
                 }
             }
             return image;
