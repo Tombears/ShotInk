@@ -11,6 +11,8 @@ namespace ShotInk
         private Panel longViewport;
         private bool longLimitReached;
         private bool scrollEscapeRegistered;
+        private ScrollWheelRouter scrollWheel;
+        private bool longAlignmentLost;
         internal Func<Rectangle, Bitmap> CaptureScrollFrame = Native.Capture;
         private void ResetRecognitionSession()
         {
@@ -38,16 +40,18 @@ namespace ShotInk
                 var surface = new Region(ClientRectangle); var hole = selection; hole.Inflate(5, 5);
                 surface.Exclude(hole); surface.Union(toolbar.Bounds);
                 var previous = Region; Region = surface; if (previous != null) previous.Dispose();
+                Capture = false; Native.ReleaseCapture();
                 scrollEscapeRegistered = Native.RegisterHotKey(Handle, 1001, 0x4000, (uint)Keys.Escape);
                 Native.FocusAt(new Point(region.Left + region.Width / 2, region.Top + region.Height / 2));
                 Native.RaiseWithoutActivation(Handle);
                 await Task.Delay(60);
                 if (IsDisposed || !object.ReferenceEquals(scrollSession, session)) return;
+                scrollWheel = new ScrollWheelRouter(Handle, region, session);
                 using (var result = await session.RunAsync())
                 {
                     if (IsDisposed || !object.ReferenceEquals(scrollSession, session)) return;
                     ResetCaptureRegion();
-                    longLimitReached = result.LimitReached; ShowLongPreview(result.TakeImage());
+                    longLimitReached = result.LimitReached; longAlignmentLost = result.AlignmentLost; ShowLongPreview(result.TakeImage());
                 }
             }
             catch (OperationCanceledException) { }
@@ -71,6 +75,7 @@ namespace ShotInk
         { if (scrollSession != null) { toolbar.SetScrollFinishing(); scrollSession.Finish(); } }
         private void ResetCaptureRegion()
         {
+            if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; }
             if (IsDisposed || !IsHandleCreated) return;
             var previous = Region; Region = null; if (previous != null) previous.Dispose();
             Native.ExcludeFromCapture(Handle, false);

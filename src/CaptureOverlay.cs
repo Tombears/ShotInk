@@ -216,6 +216,7 @@ namespace ShotInk
             sizeHint.Visible = selection.Width > 0 && selection.Height > 0;
             sizeHint.Text = (longViewport == null ? selection.Width : canvas.Image.Width) + " × " + (longViewport == null ? selection.Height : canvas.Image.Height) + " px";
             if (longLimitReached) sizeHint.Text += " · 达到上限，已自动完成";
+            else if (longAlignmentLost) sizeHint.Text += " · 页面变化过大，已保留可拼接部分";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
             sizeHint.BringToFront();
             var points = SelectionGeometry.Handles(selection);
@@ -249,7 +250,7 @@ namespace ShotInk
             if (recognition != null) { recognition.Dispose(); recognition = null; }
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); canvas = null; }
             if (longViewport != null) { Controls.Remove(longViewport); longViewport.Dispose(); longViewport = null; }
-            longLimitReached = false;
+            longLimitReached = false; longAlignmentLost = false;
             if (toolbar != null) { Controls.Remove(toolbar); toolbar.Dispose(); toolbar = null; }
             selection = Rectangle.Empty; sizeHint.Hide();
             foreach (var grip in grips) grip.Hide();
@@ -298,7 +299,7 @@ namespace ShotInk
             return index == 1 || index == 5 ? Cursors.SizeNS : Cursors.SizeWE;
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
-        protected override void Dispose(bool disposing) { if (disposing) { if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

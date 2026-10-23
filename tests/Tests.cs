@@ -20,6 +20,7 @@ namespace ShotInk
                 Application.SetCompatibleTextRenderingDefault(false);
                 Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
+                Run("text pages with whitespace and small overlaps preserve every row", TestDocumentStitch);
                 Run("unchanged frame does not duplicate content", TestUnchanged);
                 Run("unrelated frames are rejected", TestUnrelated);
                 Run("changed frame dimensions are rejected", TestDimensions);
@@ -36,8 +37,10 @@ namespace ShotInk
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
                 Run("history defaults to ten and its on-screen limit persists and prunes only history", TestHistoryLimit);
                 Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
+                Run("slow stitching retains every queued overlap frame under pressure", TestScrollBackPressure);
                 Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
                 Run("integrated scroll capture restores tools and edits within a fixed viewport", TestIntegratedScroll);
+                Run("an unrecoverable page jump stops with a visible partial-capture notice", TestScrollGap);
                 Run("shortcut changes restore existing bindings on a registration conflict", TestHotkeyRollback);
                 Run("configured save paths work without prompts in screenshots and the editor", TestSavePreferences);
                 Run("OCR highlights form continuous bands without gaps or darker seams", TestOcrHighlight);
@@ -216,7 +219,29 @@ namespace ShotInk
                     session.Finish(); Pump(task);
                     using (var result = task.Result)
                     { Assert(!result.LimitReached && result.Frames == 8, "Scroll frames were duplicated or lost."); EqualPixels(content, result.Image, 560); }
-                    Assert(session.PeakPendingFrames <= 2 && ScrollCaptureSession.PollInterval == 10, "Capture cadence or queue bound is incorrect.");
+                    Assert(session.PeakPendingFrames <= ScrollCaptureSession.QueueCapacity && ScrollCaptureSession.PollInterval == 10, "Capture cadence or queue bound is incorrect.");
+                }
+            }
+        }
+        private static void TestScrollBackPressure()
+        {
+            using (var content = Pattern(100, 960, 225))
+            {
+                int captures = 0;
+                using (var session = new ScrollCaptureSession(delegate
+                {
+                    int index = Math.Min(19, System.Threading.Interlocked.Increment(ref captures) - 1);
+                    return content.Clone(new Rectangle(0, index * 40, 100, 200), PixelFormat.Format24bppRgb);
+                }))
+                {
+                    session.BeforeStitch = delegate { System.Threading.Thread.Sleep(45); };
+                    var task = session.RunAsync(); WaitUntil(delegate { return captures >= 20; }); session.Finish(); Pump(task);
+                    using (var result = task.Result)
+                    {
+                        Assert(result.Frames == 20 && !result.AlignmentLost, "Overload dropped an intermediate overlap frame.");
+                        EqualPixels(content, result.Image, content.Height);
+                    }
+                    Assert(session.PeakPendingFrames > 2 && session.PeakPendingFrames <= ScrollCaptureSession.QueueCapacity, "The pressure test did not fill the bounded FIFO queue.");
                 }
             }
         }
@@ -300,6 +325,23 @@ namespace ShotInk
                     if (available) Native.UnregisterHotKey(probe.Handle, 1001);
                     Assert(available, "Cancellation left the temporary Escape shortcut registered.");
                 }
+            }
+        }
+        private static void TestScrollGap()
+        {
+            using (var before = Pattern(700, 370, 227))
+            using (var after = Pattern(700, 370, 228))
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                int changed = 0;
+                overlay.CaptureScrollFrame = delegate { return new Bitmap(System.Threading.Volatile.Read(ref changed) == 0 ? before : after); };
+                overlay.Show(); Select(overlay);
+                var task = overlay.CaptureLongAsync();
+                WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Frames == 1; });
+                System.Threading.Volatile.Write(ref changed, 1); Pump(task);
+                Assert(Field<Label>(overlay, "sizeHint").Text.Contains("页面变化过大"), "A missing overlap was silently exported as a complete capture.");
+                using (var result = Field<AnnotationCanvas>(overlay, "canvas").Render()) EqualPixels(before, result, before.Height);
+                overlay.Close();
             }
         }
         private static void TestHotkeyRollback()
@@ -427,6 +469,38 @@ namespace ShotInk
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < actual.Width; x++)
                     Assert(expected.GetPixel(x, y).ToArgb() == actual.GetPixel(x, y).ToArgb(), "Pixel mismatch at " + x + ", " + y);
+        }
+        private static void TestDocumentStitch()
+        {
+            using (var content = new Bitmap(1280, 1800, PixelFormat.Format24bppRgb))
+            using (var font = new Font("Microsoft YaHei UI", 13))
+            using (var stitcher = new VerticalStitcher())
+            {
+                using (var graphics = Graphics.FromImage(content))
+                {
+                    graphics.Clear(Color.White);
+                    for (int row = 0; row < 55; row++)
+                    {
+                        int y = 15 + row * 32;
+                        graphics.DrawString("第 " + row + " 行：截图页面内容 / Document " + (row * 731) + "  " + new string((char)('A' + row % 26), 8 + row % 19), font, Brushes.Black, 75, y);
+                        if (row % 7 == 0) graphics.FillRectangle(Brushes.SteelBlue, 920, y, 100 + row, 15);
+                    }
+                }
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                foreach (int offset in new[] { 0, 45, 135, 250, 365, 480, 600, 720, 840, 960, 1080 })
+                    using (var frame = content.Clone(new Rectangle(0, offset, 1280, 720), PixelFormat.Format24bppRgb))
+                        Assert(stitcher.Add(frame) == StitchStatus.Added, "A text page failed to match at offset " + offset + ".");
+                Console.WriteLine("Text-page matching: " + clock.ElapsedMilliseconds + " ms for 11 frames at 1280 x 720.");
+                using (var result = stitcher.Build()) EqualPixels(content, result, content.Height);
+            }
+            using (var content = Pattern(180, 420, 226))
+            using (var stitcher = new VerticalStitcher())
+            {
+                foreach (int offset in new[] { 0, 180 })
+                    using (var frame = content.Clone(new Rectangle(0, offset, 180, 240), PixelFormat.Format24bppRgb))
+                        Assert(stitcher.Add(frame) == StitchStatus.Added, "A valid narrow overlap was rejected.");
+                using (var result = stitcher.Build()) EqualPixels(content, result, content.Height);
+            }
         }
         private static void TestStitch()
         {
@@ -1168,6 +1242,7 @@ namespace ShotInk
         }
         private static void TestLiveIntegratedScroll()
         {
+            var oldCursor = Cursor.Position;
             using (var scene = new ScrollTestWindow())
             {
                 scene.Show(); scene.Activate(); scene.Refresh(); Application.DoEvents();
@@ -1178,16 +1253,21 @@ namespace ShotInk
                     Mouse(overlay, "OnMouseDown", MouseButtons.Left, 80, 70); Mouse(overlay, "OnMouseUp", MouseButtons.Left, 360, 310);
                     var task = overlay.CaptureLongAsync();
                     WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 240; });
-                    for (int i = 1; i <= 4; i++)
-                    {
-                        MouseWheel(scene, -120); scene.Refresh(); int expected = 240 + i * 105;
-                        WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == expected; });
-                    }
+                    var liveToolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                    // Keep the pointer above the finish button, where ordinary wheel routing targets the overlay.
+                    Cursor.Position = scene.PointToScreen(new Point(100, 100));
+                    InjectWheel(0x0800, 0, 0, -120, UIntPtr.Zero);
+                    WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 345; });
+                    Cursor.Position = liveToolbar.PointToScreen(new Point(20, 15));
+                    for (int i = 0; i < 3; i++) InjectWheel(0x0800, 0, 0, -120, UIntPtr.Zero);
+                    WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 660; });
+                    Assert(Field<ScrollCaptureSession>(overlay, "scrollSession").Frames == 5, "Real rapid wheel input skipped a viewport before sampling it.");
                     Option<Button>(Field<CaptureToolbar>(overlay, "toolbar"), "finish-scroll-capture").PerformClick(); Pump(task);
                     var canvas = Field<AnnotationCanvas>(overlay, "canvas");
                     using (var image = canvas.Render()) EqualPixels(scene.Content, image, 660);
                     MouseWheel(canvas, -120); Assert(canvas.DocumentOffsetY > 0 && canvas.Height == 240, "Live preview did not stay inside its frame.");
                     ToolPreview(overlay, "integrated-long"); overlay.Close();
+                    Assert(Field<ScrollWheelRouter>(overlay, "scrollWheel") == null, "Completion left the wheel hook active.");
                 }
                 scene.Close();
             }
@@ -1209,7 +1289,10 @@ namespace ShotInk
                 }
                 scene.Close();
             }
+            Cursor.Position = oldCursor;
         }
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "mouse_event")]
+        private static extern void InjectWheel(uint flags, uint dx, uint dy, int delta, UIntPtr extra);
         private sealed class ScrollTestWindow : Form
         {
             internal readonly Bitmap Content = Pattern(280, 660, 41);

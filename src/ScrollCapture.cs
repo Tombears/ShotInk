@@ -12,15 +12,17 @@ namespace ShotInk
     {
         internal Bitmap Image;
         internal bool LimitReached;
+        internal bool AlignmentLost;
         internal int Frames;
         internal Bitmap TakeImage() { var image = Image; Image = null; return image; }
         public void Dispose() { if (Image != null) Image.Dispose(); }
     }
 
-    // Sampling and stitching run independently; at most two frames are pending.
+    // Preserve sampled frames in order. Back pressure never replaces an overlap frame.
     internal sealed class ScrollCaptureSession : IDisposable
     {
         internal const int PollInterval = 10;
+        internal const int QueueCapacity = 8;
         private readonly Func<Bitmap> capture;
         private readonly int heightLimit;
         private readonly long pixelLimit;
@@ -34,6 +36,13 @@ namespace ShotInk
         private int disposed;
         private int stitchedHeight;
         private int stitchedFrames;
+        private int capturedVersion, processedVersion, lastChangedAt = Environment.TickCount, alignmentLost;
+        internal Action BeforeStitch;
+        internal bool IsFinishing { get { return finishRequested; } }
+        internal bool IsCaughtUp { get { return Volatile.Read(ref processedVersion) > 0 && Volatile.Read(ref processedVersion) == Volatile.Read(ref capturedVersion); } }
+        internal int PendingFrames { get { return Volatile.Read(ref capturedVersion) - Volatile.Read(ref processedVersion); } }
+        internal int StableMilliseconds { get { return unchecked(Environment.TickCount - Volatile.Read(ref lastChangedAt)); } }
+        internal bool AlignmentLost { get { return Volatile.Read(ref alignmentLost) != 0; } }
         internal int Height { get { return Volatile.Read(ref stitchedHeight); } }
         internal int Frames { get { return Volatile.Read(ref stitchedFrames); } }
         internal int PeakPendingFrames { get; private set; }
@@ -57,6 +66,12 @@ namespace ShotInk
                         {
                             long sampleStarted = clock.ElapsedMilliseconds;
                             token.ThrowIfCancellationRequested();
+                            while (true)
+                            {
+                                lock (gate) { if (pending.Count < QueueCapacity) break; }
+                                if (finishRequested) return;
+                                await Task.Delay(1, token).ConfigureAwait(false);
+                            }
                             var frame = capture();
                             try
                             {
@@ -66,12 +81,9 @@ namespace ShotInk
                                     first = false; previous = signature;
                                     lock (gate)
                                     {
-                                        if (pending.Count == 2)
-                                        {
-                                            var oldest = pending.Dequeue(); pending.Dequeue().Dispose();
-                                            pending.Enqueue(oldest); pending.Enqueue(frame);
-                                        }
-                                        else { pending.Enqueue(frame); changed.Release(); }
+                                        pending.Enqueue(frame);
+                                        Interlocked.Increment(ref capturedVersion); Volatile.Write(ref lastChangedAt, Environment.TickCount);
+                                        changed.Release();
                                         frame = null; PeakPendingFrames = Math.Max(PeakPendingFrames, pending.Count);
                                     }
                                 }
@@ -100,14 +112,16 @@ namespace ShotInk
                             }
                             if (frame == null) continue;
                             StitchStatus status;
-                            using (frame) status = stitcher.Add(frame);
+                            using (frame) { if (BeforeStitch != null) BeforeStitch(); status = stitcher.Add(frame); }
+                            Volatile.Write(ref alignmentLost, status == StitchStatus.Unmatched ? 1 : 0);
                             Volatile.Write(ref stitchedHeight, stitcher.Height); Volatile.Write(ref stitchedFrames, stitcher.Frames);
+                            Interlocked.Increment(ref processedVersion);
                             if (status == StitchStatus.LimitReached || stitcher.Height >= heightLimit || (long)stitcher.Width * stitcher.Height >= pixelLimit)
                             { limit = true; Finish(); break; }
                         }
                         await producer.ConfigureAwait(false); token.ThrowIfCancellationRequested();
                         if (stitcher.Frames == 0) throw new InvalidOperationException("选区超过长截图尺寸上限。");
-                        output = new ScrollCaptureResult { Image = stitcher.Build(), Frames = stitcher.Frames, LimitReached = limit };
+                        output = new ScrollCaptureResult { Image = stitcher.Build(), Frames = stitcher.Frames, LimitReached = limit, AlignmentLost = AlignmentLost };
                     }
                 }
                 catch (Exception error) { failure = error; }
