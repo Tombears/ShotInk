@@ -41,6 +41,7 @@ namespace ShotInk
         internal bool IsFinishing { get { return finishRequested; } }
         internal bool IsCaughtUp { get { return Volatile.Read(ref processedVersion) > 0 && Volatile.Read(ref processedVersion) == Volatile.Read(ref capturedVersion); } }
         internal int PendingFrames { get { return Volatile.Read(ref capturedVersion) - Volatile.Read(ref processedVersion); } }
+        internal int ProcessedVersion { get { return Volatile.Read(ref processedVersion); } }
         internal int StableMilliseconds { get { return unchecked(Environment.TickCount - Volatile.Read(ref lastChangedAt)); } }
         internal bool AlignmentLost { get { return Volatile.Read(ref alignmentLost) != 0; } }
         internal int Height { get { return Volatile.Read(ref stitchedHeight); } }

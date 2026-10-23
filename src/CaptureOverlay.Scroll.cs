@@ -14,6 +14,7 @@ namespace ShotInk
         private ScrollWheelRouter scrollWheel;
         private bool longAlignmentLost;
         internal Func<Rectangle, Bitmap> CaptureScrollFrame = Native.Capture;
+        internal bool InterceptScrollWheel = true;
         private void ResetRecognitionSession()
         {
             if (recognition != null) recognition.Dispose();
@@ -46,7 +47,8 @@ namespace ShotInk
                 Native.RaiseWithoutActivation(Handle);
                 await Task.Delay(60);
                 if (IsDisposed || !object.ReferenceEquals(scrollSession, session)) return;
-                scrollWheel = new ScrollWheelRouter(Handle, region, session);
+                Native.FlushDesktop();
+                scrollWheel = new ScrollWheelRouter(Handle, region, session, InterceptScrollWheel);
                 using (var result = await session.RunAsync())
                 {
                     if (IsDisposed || !object.ReferenceEquals(scrollSession, session)) return;
@@ -83,6 +85,8 @@ namespace ShotInk
         }
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == 0x020A && scrollWheel != null)
+            { scrollWheel.QueueWheel(unchecked((short)(message.WParam.ToInt64() >> 16))); return; }
             if (message.Msg == Native.HotKeyMessage && message.WParam.ToInt32() == 1001 && scrollSession != null) { Close(); return; }
             base.WndProc(ref message);
         }

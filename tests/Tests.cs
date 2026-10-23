@@ -279,6 +279,7 @@ namespace ShotInk
             using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
             {
                 int offset = 0; Rectangle sampled = Rectangle.Empty;
+                overlay.InterceptScrollWheel = false;
                 overlay.CaptureScrollFrame = delegate(Rectangle region) { sampled = region; return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 700, 370), PixelFormat.Format24bppRgb); };
                 overlay.Show(); Select(overlay);
                 var selection = Field<Rectangle>(overlay, "selection"); var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
@@ -310,6 +311,7 @@ namespace ShotInk
             using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
             {
                 int exports = 0, cancellations = 0;
+                overlay.InterceptScrollWheel = false;
                 overlay.Completed += delegate(Bitmap image, CaptureAction action) { exports++; image.Dispose(); };
                 overlay.Cancelled += delegate { cancellations++; };
                 overlay.CaptureScrollFrame = delegate { return new Bitmap(content); };
@@ -334,6 +336,7 @@ namespace ShotInk
             using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
             {
                 int changed = 0;
+                overlay.InterceptScrollWheel = false;
                 overlay.CaptureScrollFrame = delegate { return new Bitmap(System.Threading.Volatile.Read(ref changed) == 0 ? before : after); };
                 overlay.Show(); Select(overlay);
                 var task = overlay.CaptureLongAsync();
@@ -1214,6 +1217,7 @@ namespace ShotInk
             var oldCursor = Cursor.Position;
             using (var scene = new ScrollTestWindow())
             {
+                scene.WheelRenderDelay = 120;
                 scene.Show(); scene.Activate(); scene.Refresh(); Application.DoEvents();
                 WaitUntil(delegate
                 {
@@ -1242,26 +1246,26 @@ namespace ShotInk
         }
         private static void TestLiveIntegratedScroll()
         {
-            var oldCursor = Cursor.Position;
             using (var scene = new ScrollTestWindow())
             {
+                scene.WheelRenderDelay = 120;
                 scene.Show(); scene.Activate(); scene.Refresh(); Application.DoEvents();
                 var bounds = new Rectangle(20, 20, 900, 600);
                 using (var overlay = new CaptureOverlay(false, Native.Capture(bounds), bounds))
                 {
+                    overlay.InterceptScrollWheel = false;
                     overlay.Show();
                     Mouse(overlay, "OnMouseDown", MouseButtons.Left, 80, 70); Mouse(overlay, "OnMouseUp", MouseButtons.Left, 360, 310);
                     var task = overlay.CaptureLongAsync();
                     WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 240; });
-                    var liveToolbar = Field<CaptureToolbar>(overlay, "toolbar");
-                    // Keep the pointer above the finish button, where ordinary wheel routing targets the overlay.
-                    Cursor.Position = scene.PointToScreen(new Point(100, 100));
-                    InjectWheel(0x0800, 0, 0, -120, UIntPtr.Zero);
-                    WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 345; });
-                    Cursor.Position = liveToolbar.PointToScreen(new Point(20, 15));
-                    for (int i = 0; i < 3; i++) InjectWheel(0x0800, 0, 0, -120, UIntPtr.Zero);
-                    WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 660; });
-                    Assert(Field<ScrollCaptureSession>(overlay, "scrollSession").Frames == 5, "Real rapid wheel input skipped a viewport before sampling it.");
+                    // Deliver native wheel messages without relying on the shared desktop's mouse position.
+                    SendMessage(overlay.Handle, 0x020A, new IntPtr(-120 << 16), IntPtr.Zero);
+                    WaitUntil(delegate { return task.IsCompleted || Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 345; });
+                    Assert(!task.IsCompleted, "Delayed first wheel ended capture: " + Field<Label>(overlay, "sizeHint").Text);
+                    for (int i = 0; i < 3; i++) SendMessage(overlay.Handle, 0x020A, new IntPtr(-120 << 16), IntPtr.Zero);
+                    WaitUntil(delegate { return task.IsCompleted || Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 660; });
+                    Assert(!task.IsCompleted, "Delayed wheel burst ended capture: " + Field<Label>(overlay, "sizeHint").Text);
+                    Assert(Field<ScrollCaptureSession>(overlay, "scrollSession").Frames == 5, "Rapid native wheel input skipped a viewport before sampling it.");
                     Option<Button>(Field<CaptureToolbar>(overlay, "toolbar"), "finish-scroll-capture").PerformClick(); Pump(task);
                     var canvas = Field<AnnotationCanvas>(overlay, "canvas");
                     using (var image = canvas.Render()) EqualPixels(scene.Content, image, 660);
@@ -1278,6 +1282,7 @@ namespace ShotInk
                 scene.Show(); scene.Refresh(); Application.DoEvents();
                 using (var overlay = new CaptureOverlay(false, Native.Capture(scene.Bounds), scene.Bounds))
                 {
+                    overlay.InterceptScrollWheel = false;
                     overlay.Show(); Mouse(overlay, "OnMouseDown", MouseButtons.Left, 0, 0); Mouse(overlay, "OnMouseUp", MouseButtons.Left, 900, 600);
                     var task = overlay.CaptureLongAsync();
                     WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 600; });
@@ -1289,14 +1294,14 @@ namespace ShotInk
                 }
                 scene.Close();
             }
-            Cursor.Position = oldCursor;
         }
-        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "mouse_event")]
-        private static extern void InjectWheel(uint flags, uint dx, uint dy, int delta, UIntPtr extra);
         private sealed class ScrollTestWindow : Form
         {
             internal readonly Bitmap Content = Pattern(280, 660, 41);
+            internal int WheelRenderDelay;
             private int offset;
+            private int pendingOffset;
+            private readonly Timer delayedWheel = new Timer();
             internal ScrollTestWindow()
             {
                 AutoScaleMode = AutoScaleMode.None;
@@ -1307,10 +1312,16 @@ namespace ShotInk
                 DoubleBuffered = true;
                 TopMost = true;
                 ShowInTaskbar = false;
+                delayedWheel.Tick += delegate { delayedWheel.Stop(); offset = Math.Min(Content.Height - ClientSize.Height, offset + pendingOffset); pendingOffset = 0; Invalidate(); };
             }
             protected override void OnPaint(PaintEventArgs e) { e.Graphics.DrawImageUnscaled(Content, 0, -offset); }
-            protected override void OnMouseWheel(MouseEventArgs e) { offset = Math.Min(Content.Height - ClientSize.Height, offset + 105); Invalidate(); base.OnMouseWheel(e); }
-            protected override void Dispose(bool disposing) { if (disposing) Content.Dispose(); base.Dispose(disposing); }
+            protected override void OnMouseWheel(MouseEventArgs e)
+            {
+                if (WheelRenderDelay == 0) { offset = Math.Min(Content.Height - ClientSize.Height, offset + 105); Invalidate(); }
+                else { pendingOffset += 105; if (!delayedWheel.Enabled) { delayedWheel.Interval = WheelRenderDelay; delayedWheel.Start(); } }
+                base.OnMouseWheel(e);
+            }
+            protected override void Dispose(bool disposing) { if (disposing) { delayedWheel.Dispose(); Content.Dispose(); } base.Dispose(disposing); }
         }
         private static void Preview(string root)
         {
