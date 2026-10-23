@@ -24,13 +24,16 @@ namespace ShotInk
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
         private TextRecognitionSession recognition;
+        private readonly AppSettings settings;
         internal event Action<Rectangle, Bitmap> Selected;
         internal event Action<Bitmap, CaptureAction> Completed;
         internal event Action Cancelled;
 
         internal CaptureOverlay(bool scrolling) : this(scrolling, Native.Capture(SystemInformation.VirtualScreen), SystemInformation.VirtualScreen) { }
-        internal CaptureOverlay(bool scrolling, Bitmap frozenDesktop, Rectangle bounds)
+        internal CaptureOverlay(bool scrolling, AppSettings settings) : this(scrolling, Native.Capture(SystemInformation.VirtualScreen), SystemInformation.VirtualScreen, settings) { }
+        internal CaptureOverlay(bool scrolling, Bitmap frozenDesktop, Rectangle bounds, AppSettings settings = null)
         {
+            this.settings = settings ?? new AppSettings();
             this.scrolling = scrolling;
             desktop = frozenDesktop;
             screenBounds = bounds;
@@ -66,8 +69,24 @@ namespace ShotInk
             if (selection.Width > 0 && selection.Height > 0)
             {
                 g.DrawImage(desktop, selection, selection, GraphicsUnit.Pixel);
+                if (dragging && ready && canvas != null)
+                {
+                    var state = g.Save(); g.SetClip(selection, CombineMode.Intersect);
+                    var shift = dragMode == -1 ? Point.Empty : new Point(dragOriginal.Left - selection.Left, dragOriginal.Top - selection.Top);
+                    g.TranslateTransform(selection.Left + shift.X, selection.Top + shift.Y); canvas.DrawAnnotations(g); g.Restore(state);
+                }
                 using (var pen = new Pen(Color.FromArgb(38, 139, 255), 2))
                     g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
+                if (dragging)
+                {
+                    string size = selection.Width + " × " + selection.Height + " px";
+                    var extent = TextRenderer.MeasureText(size, sizeHint.Font);
+                    var hint = new Rectangle(Math.Max(0, Math.Min(selection.Left, Width - extent.Width - 8)), Math.Max(0, selection.Top - extent.Height - 7), extent.Width + 8, extent.Height + 4);
+                    using (var brush = new SolidBrush(sizeHint.BackColor)) g.FillRectangle(brush, hint);
+                    TextRenderer.DrawText(g, size, sizeHint.Font, hint, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    if (ready) foreach (var point in SelectionGeometry.Handles(selection))
+                    { g.FillEllipse(Brushes.DodgerBlue, point.X - 4, point.Y - 4, 8, 8); g.DrawEllipse(Pens.White, point.X - 4, point.Y - 4, 8, 8); }
+                }
             }
             if (!ready && !dragging)
             {
@@ -103,8 +122,10 @@ namespace ShotInk
         {
             if (!ready) return;
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
+            if (canvas != null) { canvas.CommitTextEdit(); canvas.Hide(); }
+            sizeHint.Hide(); foreach (var grip in grips) grip.Hide();
             if (toolbar != null) toolbar.Hide();
-            Capture = true;
+            Capture = true; Invalidate(true);
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -113,18 +134,12 @@ namespace ShotInk
             pointer = e.Location;
             if (dragging)
             {
-                var previous = selection;
                 if (dragMode == -2)
                     selection = Rectangle.FromLTRB(Math.Max(0, Math.Min(anchor.X, e.X)), Math.Max(0, Math.Min(anchor.Y, e.Y)), Math.Min(Width, Math.Max(anchor.X, e.X)), Math.Min(Height, Math.Max(anchor.Y, e.Y)));
                 else
                 {
                     var delta = new Point(e.X - anchor.X, e.Y - anchor.Y);
                     selection = dragMode == -1 ? SelectionGeometry.Move(dragOriginal, delta, ClientRectangle) : SelectionGeometry.Resize(dragOriginal, dragMode, delta, ClientRectangle);
-                    if (selection != previous && canvas != null)
-                    {
-                        canvas.Reframe(desktop.Clone(selection, desktop.PixelFormat), dragMode == -1 ? Point.Empty : new Point(previous.Left - selection.Left, previous.Top - selection.Top));
-                        canvas.Location = selection.Location;
-                    }
                 }
                 UpdateSelectionChrome();
             }
@@ -147,8 +162,14 @@ namespace ShotInk
                 return;
             }
             if (!ready) PrepareEditor();
+            else if (canvas != null)
+            {
+                if (selection != dragOriginal)
+                    canvas.Reframe(desktop.Clone(selection, desktop.PixelFormat), dragMode == -1 ? Point.Empty : new Point(dragOriginal.Left - selection.Left, dragOriginal.Top - selection.Top));
+                canvas.Location = selection.Location; canvas.Show();
+            }
             UpdateSelectionChrome();
-            toolbar.Show(); PositionToolbar();
+            toolbar.Show(); PositionToolbar(); Invalidate(true);
         }
 
         private void PrepareEditor()
@@ -162,7 +183,7 @@ namespace ShotInk
             };
             canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
             Controls.Add(canvas);
-            toolbar = new CaptureToolbar();
+            toolbar = new CaptureToolbar(settings);
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
             toolbar.SettingsChanged += delegate { SyncSettings(); };
             toolbar.UndoClicked += delegate { canvas.Undo(); };
@@ -197,6 +218,7 @@ namespace ShotInk
 
         private void UpdateSelectionChrome()
         {
+            if (dragging) return;
             sizeHint.Visible = selection.Width > 0 && selection.Height > 0;
             sizeHint.Text = selection.Width + " × " + selection.Height + " px";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
@@ -207,6 +229,21 @@ namespace ShotInk
                 grips[i].Visible = ready;
                 grips[i].Location = new Point(points[i].X - 4, points[i].Y - 4);
                 grips[i].BringToFront();
+            }
+        }
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (dragging && !Capture)
+            {
+                dragging = false;
+                if (ready)
+                {
+                    selection = dragOriginal; if (canvas != null) canvas.Show();
+                    UpdateSelectionChrome(); if (toolbar != null) { toolbar.Show(); PositionToolbar(); }
+                }
+                else selection = Rectangle.Empty;
+                Invalidate(true);
             }
         }
 
@@ -228,11 +265,8 @@ namespace ShotInk
             {
                 try
                 {
-                    using (var dialog = new SaveFileDialog { Filter = "PNG 图片 (*.png)|*.png", FileName = "截图_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png", InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures) })
-                    {
-                        if (dialog.ShowDialog(this) != DialogResult.OK) { image.Dispose(); return; }
-                        image.Save(dialog.FileName, ImageFormat.Png);
-                    }
+                    string path;
+                    if (!ImageExport.Save(this, image, settings, out path)) { image.Dispose(); return; }
                 }
                 catch (Exception ex) { image.Dispose(); MessageBox.Show(this, ex.Message, "无法保存图片"); return; }
             }

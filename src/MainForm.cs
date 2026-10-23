@@ -24,13 +24,23 @@ namespace ShotInk
         private Icon appIcon;
         private bool captureBusy;
         private bool quitting;
-        private readonly List<int> hotkeys = new List<int>();
+        private HotkeyBindings hotkeys;
+        private readonly AppSettings settings;
+        private readonly Timer settingsTimer;
+        private bool settingsDirty;
+        private readonly Label shortcuts;
+        private readonly List<Button> actionCards = new List<Button>();
+        private string SettingsPath { get { return Path.Combine(dataRoot, "settings.ini"); } }
 
         internal MainForm() : this(null, true) { }
         internal MainForm(string storageRoot, bool integrateDesktop)
         {
             desktopIntegration = integrateDesktop;
             dataRoot = storageRoot ?? ResolveDataRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            settings = AppSettings.Load(SettingsPath);
+            settingsTimer = new Timer { Interval = 350 };
+            settingsTimer.Tick += delegate { settingsTimer.Stop(); PersistSettings(); };
+            settings.Changed += delegate { settingsDirty = true; settingsTimer.Stop(); settingsTimer.Start(); };
             historyRoot = Path.Combine(dataRoot, "captures");
             Directory.CreateDirectory(historyRoot);
             Text = "ShotInk " + Application.ProductVersion + " · 截图与长截图";
@@ -47,8 +57,11 @@ namespace ShotInk
             var edition = Theme.Label("S H O T I N K   /   W I N D O W S", 8, Color.FromArgb(149, 163, 194)); edition.Location = new Point(27, 75); sidebar.Controls.Add(edition);
             var nav = Theme.Label("●   截图工作台", 11, Color.FromArgb(170, 181, 255)); nav.Location = new Point(25, 145); sidebar.Controls.Add(nav);
             var sub = Theme.Label("捕捉 · 标注 · 贴图", 9, Color.FromArgb(149, 163, 194)); sub.Location = new Point(25, 180); sidebar.Controls.Add(sub);
-            var shortcuts = Theme.Label("全局快捷键\n\nF1           区域截图\nF3           剪贴板贴图\nCtrl Alt L   长截图", 9, Color.FromArgb(185, 197, 219));
+            shortcuts = Theme.Label("", 9, Color.FromArgb(185, 197, 219));
+            shortcuts.MaximumSize = new Size(152, 0);
             shortcuts.Location = new Point(25, 292); sidebar.Controls.Add(shortcuts);
+            var preferences = Theme.Button("设置", false, 145); preferences.Location = new Point(25, 460);
+            preferences.Click += delegate { OpenSettings(); }; sidebar.Controls.Add(preferences);
             var local = Theme.Label("所有截图保存在本机\n无需登录 · 无云端上传", 8, Color.FromArgb(130, 148, 176)); local.Location = new Point(25, 540); sidebar.Controls.Add(local);
             Controls.Add(sidebar);
 
@@ -83,8 +96,8 @@ namespace ShotInk
             var recent = Theme.Label("最近截图", 12, Theme.Ink); recent.Margin = new Padding(0, 10, 12, 0); historyBar.Controls.Add(recent);
             var folder = Theme.Button("打开文件夹", false, 108); folder.Click += delegate { Process.Start("explorer.exe", historyRoot); }; historyBar.Controls.Add(folder);
             var refresh = Theme.Button("刷新", false, 62); refresh.Click += delegate { LoadHistory(); }; historyBar.Controls.Add(refresh);
-            autoSave = new CheckBox { Text = "自动保存（保留 100 张）", AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(12, 15, 0, 0), Checked = ReadAutoSave() };
-            autoSave.CheckedChanged += delegate { try { File.WriteAllText(Path.Combine(dataRoot, "settings.ini"), autoSave.Checked ? "save=1" : "save=0"); } catch (IOException) { } catch (UnauthorizedAccessException) { } };
+            autoSave = new CheckBox { Text = "保存历史（保留 100 张）", AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(12, 15, 0, 0), Checked = settings.AutoHistory };
+            autoSave.CheckedChanged += delegate { settings.AutoHistory = autoSave.Checked; settings.NotifyChanged(); };
             historyBar.Controls.Add(autoSave); content.Controls.Add(historyBar, 0, 3);
 
             thumbnails = new ImageList { ImageSize = new Size(150, 94), ColorDepth = ColorDepth.Depth32Bit };
@@ -96,6 +109,7 @@ namespace ShotInk
             notice.Dock = DockStyle.Fill; notice.Padding = new Padding(0, 13, 0, 0); content.Controls.Add(notice, 0, 5);
             LoadHistory();
             if (desktopIntegration) SetupTray();
+            RefreshShortcutLabels();
         }
 
         internal static string ResolveDataRoot(string localApplicationData)
@@ -106,11 +120,40 @@ namespace ShotInk
             return !Directory.Exists(current) && Directory.Exists(legacy) ? legacy : current;
         }
 
-        private bool ReadAutoSave()
+        private void PersistSettings()
         {
-            try { var path = Path.Combine(dataRoot, "settings.ini"); return !File.Exists(path) || File.ReadAllText(path).Trim() != "save=0"; }
-            catch (IOException) { return true; }
-            catch (UnauthorizedAccessException) { return true; }
+            if (!settingsDirty) return;
+            try { settings.Save(SettingsPath); settingsDirty = false; }
+            catch (Exception ex) { if (notice != null) notice.Text = "设置保存失败：" + ex.Message; }
+        }
+        private void OpenSettings() { using (var dialog = new SettingsForm(settings, ApplySettings)) dialog.ShowDialog(this); }
+        internal string ApplySettings(AppSettings candidate)
+        {
+            try { candidate.Validate(); } catch (Exception ex) { return ex.Message; }
+            string error;
+            if (hotkeys != null && !settings.Shortcuts.SequenceEqual(candidate.Shortcuts))
+            { if (!hotkeys.TryApply(candidate.Shortcuts, delegate { candidate.Save(SettingsPath); }, out error)) return error; }
+            else try { candidate.Save(SettingsPath); } catch (Exception ex) { return "设置未保存：" + ex.Message; }
+            settings.CopyFrom(candidate); settingsDirty = false; settingsTimer.Stop();
+            RefreshShortcutLabels(); if (notice != null) notice.Text = "设置已保存并立即生效。"; return null;
+        }
+        private void RefreshShortcutLabels()
+        {
+            shortcuts.Text = "全局快捷键\n\n" + Shortcut.Display(settings.CaptureShortcut) + "  区域截图\n" + Shortcut.Display(settings.PinShortcut) + "  剪贴板贴图\n" + Shortcut.Display(settings.ScrollShortcut) + "  长截图";
+            if (actionCards.Count == 3)
+            {
+                actionCards[0].Text = "区域截图\n" + Shortcut.Display(settings.CaptureShortcut) + " · 自由选择截图范围";
+                actionCards[1].Text = "滚动长截图\n" + Shortcut.Display(settings.ScrollShortcut) + " · 自动拼接";
+                actionCards[2].Text = "剪贴板贴图\n" + Shortcut.Display(settings.PinShortcut) + " · 让图片悬浮在桌面";
+            }
+            if (tray != null)
+            {
+                var items = tray.ContextMenuStrip.Items;
+                items[1].Text = "区域截图  " + Shortcut.Display(settings.CaptureShortcut);
+                items[2].Text = "滚动长截图  " + Shortcut.Display(settings.ScrollShortcut);
+                items[3].Text = "剪贴板贴图  " + Shortcut.Display(settings.PinShortcut);
+                tray.Text = "ShotInk · 截图 / 长截图 / 贴图";
+            }
         }
 
         private Control ActionCard(string title, string subtitle, bool primary, Action action)
@@ -118,6 +161,7 @@ namespace ShotInk
             var button = Theme.Button(title + "\n" + subtitle, primary, 210);
             button.Dock = DockStyle.Fill; button.Height = 72; button.Font = new Font("Microsoft YaHei UI", 10); button.Margin = new Padding(0, 0, 10, 0);
             button.Click += delegate { action(); };
+            actionCards.Add(button);
             return button;
         }
 
@@ -129,6 +173,7 @@ namespace ShotInk
             menu.Items.Add("滚动长截图  Ctrl+Alt+L", null, delegate { BeginCapture(true); });
             menu.Items.Add("剪贴板贴图  F3", null, delegate { PinClipboard(); });
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("设置", null, delegate { ShowHome(); OpenSettings(); });
             menu.Items.Add("退出", null, delegate { Quit(); });
             tray = new NotifyIcon { Icon = appIcon, Text = "ShotInk · F1 截图 / Ctrl+Alt+L 长截图", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += delegate { ShowHome(); };
@@ -138,19 +183,15 @@ namespace ShotInk
         {
             base.OnHandleCreated(e);
             if (!desktopIntegration) return;
-            Register(1, 0x4000, Keys.F1, "F1");
-            Register(2, 0x4000, Keys.F3, "F3");
-            Register(3, 0x4003, Keys.L, "Ctrl+Alt+L");
-        }
-        private void Register(int id, uint modifiers, Keys key, string display)
-        {
-            if (Native.RegisterHotKey(Handle, id, modifiers, (uint)key)) hotkeys.Add(id);
-            else if (notice != null) notice.Text = display + " 已被其他程序占用，请使用工作台或托盘菜单截图。";
+            IntPtr window = Handle;
+            hotkeys = new HotkeyBindings(delegate(int id, Keys keys) { return Native.RegisterHotKey(window, id, Shortcut.Modifiers(keys), (uint)(keys & Keys.KeyCode)); },
+                delegate(int id) { Native.UnregisterHotKey(window, id); });
+            string conflicts = hotkeys.RegisterInitial(settings.Shortcuts);
+            if (conflicts.Length > 0 && notice != null) notice.Text = conflicts + " 已被占用，可在设置中修改，或使用工作台与托盘菜单。";
         }
         protected override void OnHandleDestroyed(EventArgs e)
         {
-            foreach (int id in hotkeys) Native.UnregisterHotKey(Handle, id);
-            hotkeys.Clear(); base.OnHandleDestroyed(e);
+            if (hotkeys != null) { hotkeys.Clear(); hotkeys = null; } base.OnHandleDestroyed(e);
         }
         protected override void WndProc(ref Message m)
         {
@@ -177,7 +218,7 @@ namespace ShotInk
             {
                 await Task.Delay(200);
                 if (IsDisposed) return;
-                var overlay = new CaptureOverlay(scroll);
+                var overlay = new CaptureOverlay(scroll, settings);
                 overlay.Cancelled += delegate { captureBusy = false; restoreWindows(); };
                 overlay.Completed += delegate(Bitmap image, CaptureAction action)
                 {
@@ -222,7 +263,7 @@ namespace ShotInk
                     }
                     catch (Exception ex) { notice.Text = "自动保存失败：" + ex.Message + "；仍可手动保存。"; }
                 }
-                if (openEditor) { var editor = new EditorForm(image, PinImage); editor.Show(); }
+                if (openEditor) { var editor = new EditorForm(image, PinImage, settings); editor.Show(); }
                 else if (pinImage) PinImage(image);
                 else image.Dispose();
             }
@@ -267,14 +308,14 @@ namespace ShotInk
         private void OpenHistory()
         {
             if (history.SelectedItems.Count == 0) return;
-            try { using (var source = Image.FromFile((string)history.SelectedItems[0].Tag)) new EditorForm(new Bitmap(source), PinImage).Show(); }
+            try { using (var source = Image.FromFile((string)history.SelectedItems[0].Tag)) new EditorForm(new Bitmap(source), PinImage, settings).Show(); }
             catch (Exception ex) { MessageBox.Show(ex.Message, "无法打开图片"); LoadHistory(); }
         }
         private void PinClipboard()
         {
             try
             {
-                if (!Clipboard.ContainsImage()) { MessageBox.Show("剪贴板中没有图片。先截图或复制一张图片，再按 F3。", "剪贴板贴图"); return; }
+                if (!Clipboard.ContainsImage()) { MessageBox.Show("剪贴板中没有图片。先截图或复制一张图片，再使用贴图快捷键。", "剪贴板贴图"); return; }
                 using (var source = Clipboard.GetImage()) if (source != null) PinImage(new Bitmap(source));
             }
             catch (System.Runtime.InteropServices.ExternalException) { MessageBox.Show("剪贴板正在被其他程序使用，请稍后重试。", "无法读取剪贴板"); }
@@ -291,13 +332,14 @@ namespace ShotInk
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (!quitting && desktopIntegration && e.CloseReason == CloseReason.UserClosing)
-            { e.Cancel = true; Hide(); if (tray != null) tray.ShowBalloonTip(1500, "ShotInk 仍在运行", "按 F1 截图，或从系统托盘退出。", ToolTipIcon.Info); }
+            { e.Cancel = true; Hide(); if (tray != null) tray.ShowBalloonTip(1500, "ShotInk 仍在运行", "截图快捷键：" + Shortcut.Display(settings.CaptureShortcut) + "；可从托盘打开设置或退出。", ToolTipIcon.Info); }
             base.OnFormClosing(e);
         }
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                settingsTimer.Stop(); PersistSettings(); settingsTimer.Dispose();
                 if (tray != null) { tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
                 if (thumbnails != null) thumbnails.Dispose();
                 if (appIcon != null) appIcon.Dispose();

@@ -33,7 +33,7 @@ namespace ShotInk
         internal event Action CopySelectedText;
         internal event Action CopyAllText;
 
-        internal CaptureToolbar()
+        internal CaptureToolbar(AppSettings settings = null)
         {
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.FromArgb(250, 250, 250);
@@ -67,7 +67,7 @@ namespace ShotInk
             foreach (ToolStripItem item in strip.Items) width += item is ToolStripSeparator ? 6 : item.Width;
             strip.Width = width;
             Controls.Add(strip);
-            options = new AnnotationOptions { Location = new Point(5, 35), Width = width - 8, Visible = false };
+            options = new AnnotationOptions(settings) { Location = new Point(5, 35), Width = width - 8, Visible = false };
             options.SettingsChanged += delegate { if (SettingsChanged != null) SettingsChanged(); };
             options.ToolChanged += SelectTool;
             Controls.Add(options);

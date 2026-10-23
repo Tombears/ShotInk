@@ -78,7 +78,7 @@ namespace ShotInk
         internal void SetTextRecognition(OcrDocument document)
         {
             if (document.Width != Image.Width || document.Height != Image.Height) throw new InvalidOperationException("文字坐标与图片尺寸不匹配。");
-            CommitTextEdit(); selectedText = null; CancelGesture(); tool = DrawTool.None; recognition = new OcrSelectionModel(document); UpdateToolCursor(); NotifyTextSelection();
+            CommitTextEdit(); selectedText = null; CancelGesture(); tool = DrawTool.None; recognition = new OcrSelectionModel(document); recognition.SelectAll(); UpdateToolCursor(); NotifyTextSelection();
         }
         private void ClearTextRecognition()
         { if (recognition == null) return; recognition = null; selectingText = false; NotifyTextSelection(); }
@@ -375,6 +375,8 @@ namespace ShotInk
             }
             return result;
         }
+        internal void DrawAnnotations(Graphics graphics)
+        { graphics.SmoothingMode = SmoothingMode.AntiAlias; foreach (var mark in Marks) DrawMark(graphics, mark); }
 
         protected override void Dispose(bool disposing) { if (disposing) { if (textEditorFont != null) { textEditorFont.Dispose(); textEditorFont = null; } Image.Dispose(); } base.Dispose(disposing); }
     }
@@ -391,10 +393,12 @@ namespace ShotInk
         private readonly OcrSelectionActions textActions;
         private readonly TextRecognitionSession recognition;
         private readonly Action<Bitmap> pin;
+        private readonly AppSettings settings;
         private bool dirty;
 
-        internal EditorForm(Bitmap image, Action<Bitmap> pin)
+        internal EditorForm(Bitmap image, Action<Bitmap> pin, AppSettings settings = null)
         {
+            this.settings = settings ?? new AppSettings();
             this.pin = pin;
             Text = "截图编辑 · ShotInk";
             Size = new Size(1100, 760);
@@ -431,7 +435,7 @@ namespace ShotInk
             canvas.Changed += delegate { dirty = true; UpdateStatus("已编辑"); };
             viewport.Controls.Add(canvas);
             status = Theme.Label("", 9, Theme.Muted); status.Dock = DockStyle.Bottom; status.Height = 34; status.Padding = new Padding(12, 8, 0, 0);
-            toolOptions = new AnnotationOptions { Location = new Point(9, 106), Width = 440 };
+            toolOptions = new AnnotationOptions(this.settings) { Location = new Point(9, 106), Width = 440 };
             toolOptions.SettingsChanged += delegate { toolOptions.ApplyTo(canvas); };
             toolOptions.ToolChanged += SelectTool;
             toolArea = new Panel { Dock = DockStyle.Top, BackColor = Color.White };
@@ -487,14 +491,15 @@ namespace ShotInk
         }
         private bool SaveImage()
         {
-            using (var dialog = new SaveFileDialog { Filter = "PNG 图片 (*.png)|*.png", FileName = "截图_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png", InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures) })
+            try
             {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return false;
-                using (var image = canvas.Render()) image.Save(dialog.FileName, ImageFormat.Png);
+                string path;
+                using (var image = canvas.Render()) if (!ImageExport.Save(this, image, settings, out path)) return false;
                 dirty = false;
-                UpdateStatus("已保存：" + Path.GetFileName(dialog.FileName));
+                UpdateStatus("已保存：" + Path.GetFileName(path));
                 return true;
             }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法保存图片"); return false; }
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {

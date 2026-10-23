@@ -32,6 +32,12 @@ namespace ShotInk
                 Run("mosaic covers partial edge blocks", TestMosaic);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
+                Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
+                Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
+                Run("shortcut changes restore existing bindings on a registration conflict", TestHotkeyRollback);
+                Run("configured save paths work without prompts in screenshots and the editor", TestSavePreferences);
+                Run("OCR highlights form continuous bands without gaps or darker seams", TestOcrHighlight);
+                Run("selection dragging repaints one surface and reframes once on release", TestSelectionDrag);
                 Run("oval sliders support bounded dragging and keyboard adjustments", TestOvalSlider);
                 Run("OCR selection preserves columns, punctuation and screenshot pixels", TestOcrSelection);
                 Run("OCR requests suppress reentry and ignore stale or cancelled results", TestOcrSession);
@@ -49,6 +55,7 @@ namespace ShotInk
                     Run("automatic wheel capture reconstructs a real scrolling window", TestAutomaticCapture);
                     Preview(args[1]);
                 }
+                if (args.Length == 1 && args[0] == "--drag-preview") Run("live selection dragging clears old borders on screen", TestLiveDrag);
                 Console.WriteLine("PASS: " + passed + " checks");
                 return 0;
             }
@@ -81,6 +88,178 @@ namespace ShotInk
         }
 
         private static void Run(string name, Action test) { test(); passed++; Console.WriteLine("PASS " + name); }
+        private static void TestIndependentToolSettings()
+        {
+            var settings = new AppSettings();
+            using (var options = new AnnotationOptions(settings) { Width = 440 })
+            using (var canvas = new AnnotationCanvas(new Bitmap(250, 150)))
+            {
+                canvas.Tool = DrawTool.Pen; options.ShowTool(DrawTool.Pen); options.ApplyTo(canvas);
+                options.Ink = Color.Blue; Option<NumericUpDown>(options, "tool-stroke").Value = 8; options.ApplyTo(canvas);
+                canvas.Tool = DrawTool.Rectangle; options.ShowTool(DrawTool.Rectangle); options.ApplyTo(canvas);
+                Assert(canvas.Stroke == 3 && canvas.Ink != Color.Blue, "Pen settings leaked into the rectangle tool.");
+                options.Ink = Color.Green; Option<NumericUpDown>(options, "tool-stroke").Value = 2; options.ApplyTo(canvas);
+                canvas.Tool = DrawTool.Ellipse; options.ShowTool(DrawTool.Ellipse); options.ApplyTo(canvas);
+                Assert(canvas.Stroke == 3 && canvas.Ink != Color.Green, "Shape variants share one profile.");
+                canvas.Tool = DrawTool.Pen; options.ShowTool(DrawTool.Pen); options.ApplyTo(canvas);
+                Assert(canvas.Stroke == 8 && canvas.Ink == Color.Blue, "Switching tools lost the pen profile.");
+                Gesture(canvas, new Point(10, 10), new Point(60, 50));
+                Assert(canvas.Marks[0].Width == 8 && canvas.Marks[0].Color == Color.Blue, "New marks ignored their tool profile.");
+                using (var editor = new EditorForm(new Bitmap(250, 150), delegate(Bitmap image) { image.Dispose(); }, settings))
+                {
+                    var next = Field<AnnotationOptions>(editor, "toolOptions");
+                    next.ShowTool(DrawTool.Pen); Assert(next.Stroke == 8 && next.Ink == Color.Blue, "A new editor lost the shared preferences.");
+                }
+            }
+        }
+        private static void TestSettings()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-settings-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+            try
+            {
+                string path = Path.Combine(root, "settings.ini"); File.WriteAllText(path, "save=0");
+                var settings = AppSettings.Load(path);
+                Assert(!settings.AutoHistory && settings.AskSaveLocation && settings.CaptureShortcut == Keys.F1, "Legacy settings were not migrated with defaults.");
+                settings.SaveDirectory = Path.Combine(root, "图片=测试"); settings.AskSaveLocation = false;
+                settings.CaptureShortcut = Keys.Control | Keys.Shift | Keys.F8; settings.PinShortcut = Keys.None;
+                settings.Tool(DrawTool.Pen).Ink = Color.Blue; settings.Tool(DrawTool.Pen).Width = 7;
+                settings.Tool(DrawTool.Text).FontSize = 42; settings.Tool(DrawTool.Mosaic).BrushSize = 76;
+                settings.Save(path); var restored = AppSettings.Load(path);
+                Assert(!restored.AutoHistory && !restored.AskSaveLocation && restored.SaveDirectory == settings.SaveDirectory, "Saving lost history or directory preferences.");
+                Assert(restored.CaptureShortcut == settings.CaptureShortcut && restored.PinShortcut == Keys.None, "Shortcut preferences were not persisted.");
+                Assert(restored.Tool(DrawTool.Pen).Ink.ToArgb() == Color.Blue.ToArgb() && restored.Tool(DrawTool.Pen).Width == 7 && restored.Tool(DrawTool.Text).FontSize == 42 && restored.Tool(DrawTool.Mosaic).BrushSize == 76, "Tool preferences were not restored independently.");
+                using (var dialog = new SettingsForm(restored, delegate { return null; }))
+                {
+                    Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.Control | Keys.Alt | Keys.F9);
+                    Option<CheckBox>(dialog, "ask-save-location").Checked = true;
+                    var candidate = dialog.ReadSettings();
+                    Assert(candidate.CaptureShortcut == (Keys.Control | Keys.Alt | Keys.F9) && candidate.AskSaveLocation && !restored.AskSaveLocation, "Editing the dialog mutated settings before save.");
+                    Option<ShortcutBox>(dialog, "hotkey-1").ShortcutValue = candidate.CaptureShortcut;
+                    bool rejected = false; try { dialog.ReadSettings(); } catch (ArgumentException) { rejected = true; }
+                    Assert(rejected, "Duplicate global shortcuts were accepted.");
+                }
+                using (var home = new MainForm(root, false))
+                {
+                    var candidate = restored.Clone(); candidate.PinShortcut = Keys.F7;
+                    Assert(home.ApplySettings(candidate) == null && AppSettings.Load(path).PinShortcut == Keys.F7, "Applying settings did not persist the new shortcuts.");
+                    Field<CheckBox>(home, "autoSave").Checked = true;
+                }
+                restored = AppSettings.Load(path);
+                Assert(restored.AutoHistory && restored.PinShortcut == Keys.F7 && restored.Tool(DrawTool.Pen).Width == 7, "History checkbox overwrote other settings.");
+                using (var dialog = new SettingsForm(restored, delegate { return null; }))
+                {
+                    dialog.Show(); Application.DoEvents(); using (var bitmap = new Bitmap(dialog.ClientSize.Width, dialog.ClientSize.Height))
+                    { dialog.DrawToBitmap(bitmap, dialog.ClientRectangle); bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-settings-options.png")); }
+                    dialog.Close();
+                }
+            }
+            finally { Directory.Delete(root, true); }
+        }
+        private static void TestHotkeyRollback()
+        {
+            var live = new System.Collections.Generic.Dictionary<int, Keys>(); Keys reserved = Keys.F12;
+            var bindings = new HotkeyBindings(delegate(int id, Keys key)
+            {
+                if (key == reserved || live.ContainsValue(key)) return false;
+                live.Add(id, key); return true;
+            }, delegate(int id) { live.Remove(id); });
+            var defaults = new AppSettings(); Assert(bindings.RegisterInitial(defaults.Shortcuts) == "", "Initial shortcuts failed.");
+            string error; Assert(!bindings.TryApply(new[] { Keys.F5, reserved, Keys.F6 }, out error) && error.Contains("F12"), "Conflict was not reported.");
+            Assert(live.Count == 3 && live[1] == Keys.F1 && live[2] == Keys.F3 && live[3] == defaults.ScrollShortcut, "Conflict discarded the previous shortcuts.");
+            Assert(bindings.TryApply(new[] { Keys.F3, Keys.F1, Keys.None }, out error) && live.Count == 2 && live[1] == Keys.F3 && live[2] == Keys.F1, "Swapping or clearing shortcuts failed.");
+            Assert(!bindings.TryApply(new[] { Keys.F7, Keys.F8, Keys.F9 }, delegate { throw new IOException("disk unavailable"); }, out error) &&
+                live.Count == 2 && live[1] == Keys.F3 && live[2] == Keys.F1, "Failed settings persistence left the new shortcuts active.");
+            bindings.Clear(); Assert(live.Count == 0, "Disposal leaked hotkey registrations.");
+        }
+        private static void TestSavePreferences()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-save-" + Guid.NewGuid().ToString("N"));
+            var settings = new AppSettings { SaveDirectory = root, AskSaveLocation = false };
+            try
+            {
+                using (var image = Pattern(120, 100, 22))
+                {
+                    string first, second = null; Assert(ImageExport.Save(null, image, settings, out first) && ImageExport.Save(null, image, settings, out second), "Direct save failed.");
+                    Assert(first != second && Path.GetDirectoryName(first) == root, "Repeated saves overwrote an image or ignored the chosen folder.");
+                    using (var saved = new Bitmap(first)) EqualPixels(image, saved, 100);
+                }
+                using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600), settings))
+                {
+                    int count = Directory.GetFiles(root, "*.png").Length; bool completed = false;
+                    overlay.Completed += delegate(Bitmap image, CaptureAction action) { completed = action == CaptureAction.Save; image.Dispose(); };
+                    overlay.Show(); Select(overlay); Key(overlay, Keys.Control | Keys.S);
+                    Assert(completed && Directory.GetFiles(root, "*.png").Length == count + 1, "Screenshot save did not honor the no-prompt preference.");
+                }
+                using (var editor = new EditorForm(new Bitmap(120, 100), delegate(Bitmap image) { image.Dispose(); }, settings))
+                {
+                    int count = Directory.GetFiles(root, "*.png").Length;
+                    Field<AnnotationCanvas>(editor, "canvas").AddMark(RectangleMark());
+                    bool saved = (bool)typeof(EditorForm).GetMethod("SaveImage", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(editor, null);
+                    Assert(saved && Directory.GetFiles(root, "*.png").Length == count + 1, "History/long-image editor ignored save preferences.");
+                }
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+        private static void TestOcrHighlight()
+        {
+            var line = new OcrLine { Text = "ab cd", Box = new[] { 10F, 10F, 55F, 14F }, Characters = new[] {
+                new OcrCharacter { Text = "a", Start = 0, Length = 1, Box = new[] { 10F, 10F, 9F, 10F } },
+                new OcrCharacter { Text = "b", Start = 1, Length = 1, Box = new[] { 22F, 12F, 9F, 10F } },
+                new OcrCharacter { Text = "c", Start = 3, Length = 1, Box = new[] { 44F, 11F, 9F, 10F } },
+                new OcrCharacter { Text = "d", Start = 4, Length = 1, Box = new[] { 56F, 10F, 9F, 10F } } } };
+            var next = new OcrLine { Text = "ok", Box = new[] { 75F, 10F, 20F, 14F } };
+            var column = new OcrLine { Text = "列", Box = new[] { 140F, 10F, 20F, 14F } };
+            var document = new OcrDocument { Width = 180, Height = 50, Lines = new[] { line, next, column } };
+            var model = new OcrSelectionModel(document); model.SelectAll();
+            using (var bitmap = new Bitmap(180, 50)) using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.White); model.Draw(g); int expected = bitmap.GetPixel(14, 16).ToArgb();
+                for (int x = 11; x < 95; x++) for (int y = 11; y < 24; y++) Assert(bitmap.GetPixel(x, y).ToArgb() == expected, "OCR highlight contains character/word gaps or overlapping alpha seams.");
+                Assert(bitmap.GetPixel(110, 16).ToArgb() == Color.White.ToArgb(), "OCR highlight filled the gap between distant columns.");
+            }
+            using (var canvas = new AnnotationCanvas(new Bitmap(180, 50)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                canvas.SetTextRecognition(document); Assert(canvas.HasSelectedText, "Recognition did not select all text immediately.");
+                using (var result = canvas.Render()) EqualPixels(canvas.Image, result, 50);
+            }
+        }
+        private static void DragSelection(CaptureOverlay overlay, int steps)
+        {
+            var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+            Mouse(canvas, "OnMouseDown", MouseButtons.Left, 200, 100);
+            for (int i = 1; i <= steps; i++) { Mouse(overlay, "OnMouseMove", MouseButtons.Left, 280 - 10 * i, 170 + 6 * i); overlay.Refresh(); Application.DoEvents(); }
+        }
+        private static void TestSelectionDrag()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                overlay.Show(); Select(overlay); var canvas = Field<AnnotationCanvas>(overlay, "canvas"); canvas.AddMark(RectangleMark());
+                int revision = canvas.Revision; var originalImage = canvas.Image;
+                DragSelection(overlay, 5);
+                Assert(!canvas.Visible && canvas.Revision == revision && object.ReferenceEquals(originalImage, canvas.Image), "Dragging rebuilt or moved a visible child canvas on each frame.");
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, 230, 200);
+                Assert(canvas.Visible && canvas.Revision == revision + 1 && canvas.Location == new Point(30, 100), "Drag completion did not reframe once at the final location.");
+                var selection = Field<Rectangle>(overlay, "selection"); revision = canvas.Revision; originalImage = canvas.Image;
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 100, 100); Mouse(overlay, "OnMouseMove", MouseButtons.Left, 170, 230); overlay.Capture = false;
+                Assert(canvas.Visible && Field<Rectangle>(overlay, "selection") == selection && canvas.Revision == revision && object.ReferenceEquals(canvas.Image, originalImage), "Lost capture left a hidden canvas or changed the screenshot.");
+                overlay.Close();
+            }
+        }
+        private static void TestLiveDrag()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                overlay.Show(); overlay.Activate(); Select(overlay); DragSelection(overlay, 5); overlay.Refresh(); Application.DoEvents();
+                using (var screenshot = Native.Capture(overlay.Bounds))
+                {
+                    foreach (var point in new[] { new Point(79, 180), new Point(780, 180), new Point(400, 69) })
+                    { var color = screenshot.GetPixel(point.X, point.Y); Assert(!(color.B > 180 && color.R < 100), "A previous selection border remained on screen."); }
+                    screenshot.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-drag-options.png"));
+                }
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, 230, 200); overlay.Close();
+            }
+        }
         private static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
         private static Bitmap Pattern(int width, int height, int seed)
         {

@@ -113,7 +113,22 @@ namespace ShotInk
         internal void Draw(Graphics graphics)
         {
             using (var blue = new SolidBrush(Color.FromArgb(85, 75, 153, 246)))
-                foreach (var glyph in selected) { var box = glyph.Character.Bounds; box.Inflate(0.6F, 0.6F); graphics.FillRectangle(blue, box); }
+                foreach (var row in selected.GroupBy(glyph => glyph.Line.Row))
+                {
+                    // Paint once per text run, including the spaces between glyphs.
+                    // Per-character alpha rectangles leave gaps and darker seams.
+                    var runs = row.GroupBy(glyph => glyph.Line).Select(line => RectangleF.FromLTRB(
+                        line.Min(glyph => glyph.Character.Bounds.Left), line.Key.Source.Bounds.Top,
+                        line.Max(glyph => glyph.Character.Bounds.Right), line.Key.Source.Bounds.Bottom)).OrderBy(box => box.Left);
+                    RectangleF band = RectangleF.Empty;
+                    foreach (var run in runs)
+                    {
+                        if (band.IsEmpty) band = run;
+                        else if (run.Left - band.Right <= Math.Max(band.Height, run.Height) * 1.25F) band = RectangleF.Union(band, run);
+                        else { band.Inflate(0.5F, 0.5F); graphics.FillRectangle(blue, band); band = run; }
+                    }
+                    if (!band.IsEmpty) { band.Inflate(0.5F, 0.5F); graphics.FillRectangle(blue, band); }
+                }
         }
     }
 

@@ -6,21 +6,24 @@ namespace ShotInk
 {
     internal sealed class AnnotationOptions : FlowLayoutPanel
     {
-        internal Color Ink = Color.FromArgb(239, 64, 76);
-        internal float Stroke = 3;
-        internal float TextFontSize = 24;
-        internal FontStyle TextFontStyle = FontStyle.Regular;
+        private readonly AppSettings settings;
+        private DrawTool currentTool = DrawTool.Rectangle;
+        internal Color Ink { get { return settings.Tool(currentTool).Ink; } set { settings.Tool(currentTool).Ink = value; } }
+        internal float Stroke { get { return settings.Tool(currentTool).Width; } set { settings.Tool(currentTool).Width = value; } }
+        internal float TextFontSize { get { return settings.Tool(DrawTool.Text).FontSize; } set { settings.Tool(DrawTool.Text).FontSize = value; } }
+        internal FontStyle TextFontStyle { get { return settings.Tool(DrawTool.Text).FontStyle; } set { settings.Tool(DrawTool.Text).FontStyle = value; } }
         private AnnotationCanvas boundCanvas;
         internal ApplyMode MosaicMode = ApplyMode.Brush;
         internal ApplyMode EraserMode = ApplyMode.Brush;
-        internal int MosaicSize = 14;
-        internal int MosaicBrushSize = 24;
-        internal int EraserBrushSize = 24;
+        internal int MosaicSize { get { return settings.Tool(DrawTool.Mosaic).MosaicSize; } set { settings.Tool(DrawTool.Mosaic).MosaicSize = value; } }
+        internal int MosaicBrushSize { get { return settings.Tool(DrawTool.Mosaic).BrushSize; } set { settings.Tool(DrawTool.Mosaic).BrushSize = value; } }
+        internal int EraserBrushSize { get { return settings.Tool(DrawTool.Eraser).BrushSize; } set { settings.Tool(DrawTool.Eraser).BrushSize = value; } }
         internal event Action SettingsChanged;
         internal event Action<DrawTool> ToolChanged;
 
-        internal AnnotationOptions()
+        internal AnnotationOptions(AppSettings settings = null)
         {
+            this.settings = settings ?? new AppSettings();
             FlowDirection = FlowDirection.TopDown;
             WrapContents = false;
             Margin = Padding.Empty;
@@ -42,8 +45,10 @@ namespace ShotInk
         }
         private void ReadTextSettings(Mark mark)
         {
+            currentTool = DrawTool.Text;
             Ink = mark.Color; TextFontSize = TextGeometry.FontSize(mark); TextFontStyle = mark.TextStyle;
             boundCanvas.Ink = Ink; boundCanvas.TextFontSize = TextFontSize; boundCanvas.TextFontStyle = TextFontStyle;
+            settings.NotifyChanged();
             ShowTool(DrawTool.Text);
         }
 
@@ -55,6 +60,7 @@ namespace ShotInk
 
         internal void ShowTool(DrawTool tool)
         {
+            currentTool = tool;
             SuspendLayout();
             while (Controls.Count > 0) { var control = Controls[0]; Controls.Remove(control); control.Dispose(); }
             if (tool == DrawTool.Mosaic || tool == DrawTool.Eraser)
@@ -109,7 +115,7 @@ namespace ShotInk
                 if (tool != DrawTool.Text)
                 {
                     colors.Controls.Add(new Label { Text = "粗细", AutoSize = true, Margin = new Padding(1, 7, 3, 0) });
-                    var stroke = new NumericUpDown { Minimum = 1, Maximum = 12, Value = (decimal)Stroke, Width = 45, Margin = new Padding(1, 3, 0, 0) };
+                    var stroke = new NumericUpDown { Name = "tool-stroke", Minimum = 1, Maximum = 12, Value = (decimal)Stroke, Width = 45, Margin = new Padding(1, 3, 0, 0) };
                     stroke.ValueChanged += delegate { Stroke = (float)stroke.Value; NotifySettings(); };
                     colors.Controls.Add(stroke);
                 }
@@ -151,7 +157,7 @@ namespace ShotInk
             if (tool == DrawTool.Mosaic) MosaicMode = mode; else EraserMode = mode;
             NotifySettings(); ShowTool(tool);
         }
-        private void NotifySettings() { if (SettingsChanged != null) SettingsChanged(); }
+        private void NotifySettings() { settings.NotifyChanged(); if (SettingsChanged != null) SettingsChanged(); }
         private void ChooseTool(DrawTool tool) { if (ToolChanged != null) ToolChanged(tool); }
     }
 }
