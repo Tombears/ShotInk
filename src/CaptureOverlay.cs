@@ -68,7 +68,7 @@ namespace ShotInk
             if (selection.Width > 0 && selection.Height > 0)
             {
                 g.DrawImage(desktop, selection, selection, GraphicsUnit.Pixel);
-                if (dragging && ready && canvas != null)
+                if (dragging && ready && canvas != null && longViewport == null)
                 {
                     var state = g.Save(); g.SetClip(selection, CombineMode.Intersect);
                     var shift = dragMode == -1 ? Point.Empty : new Point(dragOriginal.Left - selection.Left, dragOriginal.Top - selection.Top);
@@ -119,9 +119,9 @@ namespace ShotInk
 
         private void BeginAdjust(int handle, Point location)
         {
-            if (!ready || scrollSession != null || longViewport != null) return;
+            if (!ready || scrollSession != null || (longViewport != null && handle != -1)) return;
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
-            if (canvas != null) { canvas.CommitTextEdit(); canvas.Hide(); }
+            if (canvas != null) { canvas.CommitTextEdit(); if (longViewport == null) canvas.Hide(); }
             sizeHint.Hide(); foreach (var grip in grips) grip.Hide();
             if (toolbar != null) toolbar.Hide();
             Capture = true; Invalidate(true);
@@ -140,6 +140,7 @@ namespace ShotInk
                     var delta = new Point(e.X - anchor.X, e.Y - anchor.Y);
                     selection = dragMode == -1 ? SelectionGeometry.Move(dragOriginal, delta, ClientRectangle) : SelectionGeometry.Resize(dragOriginal, dragMode, delta, ClientRectangle);
                 }
+                if (longViewport != null) longViewport.Bounds = selection;
                 UpdateSelectionChrome();
             }
             Invalidate();
@@ -156,9 +157,14 @@ namespace ShotInk
             if (!ready) PrepareEditor();
             else if (canvas != null)
             {
-                if (selection != dragOriginal)
-                    canvas.Reframe(desktop.Clone(selection, desktop.PixelFormat), dragMode == -1 ? Point.Empty : new Point(dragOriginal.Left - selection.Left, dragOriginal.Top - selection.Top));
-                canvas.Location = selection.Location; canvas.Show();
+                if (longViewport != null) longViewport.Bounds = selection;
+                else
+                {
+                    if (selection != dragOriginal)
+                        canvas.Reframe(desktop.Clone(selection, desktop.PixelFormat), dragMode == -1 ? Point.Empty : new Point(dragOriginal.Left - selection.Left, dragOriginal.Top - selection.Top));
+                    canvas.Location = selection.Location;
+                }
+                canvas.Show();
             }
             UpdateSelectionChrome();
             toolbar.Show(); PositionToolbar(); Invalidate(true);
@@ -235,7 +241,8 @@ namespace ShotInk
                 dragging = false;
                 if (ready)
                 {
-                    selection = dragOriginal; if (canvas != null) canvas.Show();
+                    selection = dragOriginal; if (longViewport != null) longViewport.Bounds = selection;
+                    if (canvas != null) canvas.Show();
                     UpdateSelectionChrome(); if (toolbar != null) { toolbar.Show(); PositionToolbar(); }
                 }
                 else selection = Rectangle.Empty;

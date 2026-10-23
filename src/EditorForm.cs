@@ -126,36 +126,20 @@ namespace ShotInk
             Zoom = Math.Max(0.05F, Math.Min(3F, value));
             Size = documentFrame.IsEmpty ? new Size(Math.Max(1, (int)Math.Ceiling(Image.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(Image.Height * Zoom))) : documentFrame;
             if (documentScroll != null)
-            {
-                documentScroll.SetBounds(Width - SystemInformation.VerticalScrollBarWidth, 0, SystemInformation.VerticalScrollBarWidth, Height);
-                documentScroll.LargeChange = Math.Max(1, Height); documentScroll.SmallChange = 20;
-                documentScroll.Maximum = Math.Max(0, (int)Math.Ceiling(Image.Height * Zoom) - 1);
-                documentScroll.Visible = Image.Height * Zoom > Height;
-                documentScroll.Value = Math.Max(0, Math.Min(Math.Max(0, documentScroll.Maximum - documentScroll.LargeChange + 1), (int)(offset * Zoom)));
-                DocumentOffsetY = documentScroll.Value / Zoom;
-            }
+                UpdateDocumentViewport(DocumentOffsetX, offset);
             Invalidate();
-        }
-        internal void UseDocumentViewport(Size frame)
-        {
-            documentFrame = frame; documentScroll = new VScrollBar { Name = "long-image-scrollbar" };
-            documentScroll.ValueChanged += delegate { DocumentOffsetY = documentScroll.Value / Zoom; Invalidate(); };
-            Controls.Add(documentScroll);
-            SetZoom(Math.Min(1, Math.Max(1, frame.Width - SystemInformation.VerticalScrollBarWidth - 2F) / Image.Width));
-        }
-        internal void ScrollDocument(int pixels)
-        {
-            if (documentScroll == null) return;
-            CommitTextEdit();
-            documentScroll.Value = Math.Max(0, Math.Min(Math.Max(0, documentScroll.Maximum - documentScroll.LargeChange + 1), documentScroll.Value + pixels));
         }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             if (documentScroll != null)
-            { ScrollDocument(-e.Delta / 120 * 80); var handled = e as HandledMouseEventArgs; if (handled != null) handled.Handled = true; }
+            {
+                if ((ModifierKeys & Keys.Shift) != 0) ScrollDocumentHorizontal(-e.Delta / 120 * 80);
+                else ScrollDocument(-e.Delta / 120 * 80);
+                var handled = e as HandledMouseEventArgs; if (handled != null) handled.Handled = true;
+            }
             base.OnMouseWheel(e);
         }
-        private PointF ImagePoint(Point p) { return new PointF(Math.Max(0, Math.Min(Image.Width - 1, p.X / Zoom)), Math.Max(0, Math.Min(Image.Height - 1, p.Y / Zoom + DocumentOffsetY))); }
+        private PointF ImagePoint(Point p) { return new PointF(Math.Max(0, Math.Min(Image.Width - 1, p.X / Zoom + DocumentOffsetX)), Math.Max(0, Math.Min(Image.Height - 1, p.Y / Zoom + DocumentOffsetY))); }
 
         private bool BrushTool
         { get { return Tool == DrawTool.Mosaic && MosaicMode == ApplyMode.Brush || Tool == DrawTool.Eraser && EraserMode == ApplyMode.Brush; } }
@@ -271,9 +255,11 @@ namespace ShotInk
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            if (documentScroll != null) e.Graphics.SetClip(new Rectangle(Point.Empty, documentClient));
             e.Graphics.ScaleTransform(Zoom, Zoom);
-            e.Graphics.TranslateTransform(0, -DocumentOffsetY);
-            e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
+            e.Graphics.TranslateTransform(-DocumentOffsetX, -DocumentOffsetY);
+            if (Zoom == 1) e.Graphics.DrawImageUnscaled(Image, Point.Empty);
+            else e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             foreach (var mark in Marks) DrawMark(e.Graphics, textEditor != null && mark == selectedText ? EditingTextMark() : mark);
             DrawEditingText(e.Graphics);

@@ -24,6 +24,7 @@ namespace ShotInk
         private NotifyIcon tray;
         private Icon appIcon;
         private bool captureBusy;
+        private bool settingsOpen;
         private bool quitting;
         private HotkeyBindings hotkeys;
         private readonly AppSettings settings;
@@ -129,13 +130,32 @@ namespace ShotInk
             try { settings.Save(SettingsPath); settingsDirty = false; }
             catch (Exception ex) { if (notice != null) notice.Text = "设置保存失败：" + ex.Message; }
         }
-        private void OpenSettings() { using (var dialog = new SettingsForm(settings, ApplySettings)) dialog.ShowDialog(this); }
+        private void OpenSettings()
+        {
+            if (settingsOpen || captureBusy) return;
+            settingsOpen = true;
+            if (hotkeys != null) hotkeys.Clear();
+            try { using (var dialog = new SettingsForm(settings, ApplySettings)) dialog.ShowDialog(this); }
+            finally
+            {
+                if (!IsDisposed && hotkeys != null)
+                {
+                    string conflicts = hotkeys.RegisterInitial(settings.Shortcuts);
+                    if (conflicts.Length > 0) notice.Text = conflicts + " 已被占用，请在设置中修改快捷键。";
+                }
+                settingsOpen = false;
+            }
+        }
         internal string ApplySettings(AppSettings candidate)
         {
             try { candidate.Validate(); } catch (Exception ex) { return ex.Message; }
             string error;
-            if (hotkeys != null && !settings.Shortcuts.SequenceEqual(candidate.Shortcuts))
-            { if (!hotkeys.TryApply(candidate.Shortcuts, delegate { candidate.Save(SettingsPath); }, out error)) return error; }
+            if (hotkeys != null && (settingsOpen || !settings.Shortcuts.SequenceEqual(candidate.Shortcuts)))
+            {
+                bool applied = hotkeys.TryApply(candidate.Shortcuts, delegate { candidate.Save(SettingsPath); }, out error);
+                if (settingsOpen) hotkeys.Clear();
+                if (!applied) return error;
+            }
             else try { candidate.Save(SettingsPath); } catch (Exception ex) { return "设置未保存：" + ex.Message; }
             settings.CopyFrom(candidate); settingsDirty = false; settingsTimer.Stop();
             RefreshShortcutLabels(); if (notice != null) notice.Text = "设置已保存并立即生效。"; return null;
@@ -199,6 +219,7 @@ namespace ShotInk
         {
             if (m.Msg == Native.HotKeyMessage)
             {
+                if (settingsOpen) return;
                 int id = m.WParam.ToInt32();
                 if (id == 1) BeginCapture(false);
                 if (id == 2 && !captureBusy) PinClipboard();
@@ -209,7 +230,7 @@ namespace ShotInk
 
         private async void BeginCapture(bool scroll)
         {
-            if (captureBusy) return;
+            if (captureBusy || settingsOpen) return;
             captureBusy = true;
             var restore = new List<Form>();
             foreach (Form form in Application.OpenForms)
@@ -308,6 +329,7 @@ namespace ShotInk
         }
         private void PinClipboard()
         {
+            if (settingsOpen) return;
             try
             {
                 if (!Clipboard.ContainsImage()) { MessageBox.Show("剪贴板中没有图片。先截图或复制一张图片，再使用贴图快捷键。", "剪贴板贴图"); return; }

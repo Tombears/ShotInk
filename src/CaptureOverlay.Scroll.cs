@@ -100,7 +100,12 @@ namespace ShotInk
             next.Location = Point.Empty; canvas = next; longViewport.Controls.Add(next); Controls.Add(longViewport);
             next.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
             next.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
-            next.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Right) Close(); };
+            next.MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Right) Close();
+                else if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None && !canvas.HasTextRecognition)
+                    BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
+            };
             next.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
             Controls.Remove(previous); previous.Dispose(); ResetRecognitionSession();
             SyncSettings(); toolbar.SetLongPreview(true); toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo);

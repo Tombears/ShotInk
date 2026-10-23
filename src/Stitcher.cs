@@ -9,7 +9,7 @@ namespace ShotInk
     internal enum StitchStatus { Added, Unchanged, Unmatched, LimitReached }
 
     // Only stores the first frame and newly exposed rows. Full frames are not repeatedly concatenated.
-    internal sealed class VerticalStitcher : IDisposable
+    internal sealed partial class VerticalStitcher : IDisposable
     {
         private readonly List<Bitmap> strips = new List<Bitmap>();
         private byte[] previous;
@@ -41,7 +41,7 @@ namespace ShotInk
             var before = previous;
             var after = ReadPixels(frame);
             double unchanged = Error(before, after, Width, frame.Height, 0);
-            if (unchanged < 0.8) return StitchStatus.Unchanged;
+            if (unchanged < 0.15) return StitchStatus.Unchanged;
             int maximum = frame.Height - Math.Max(32, frame.Height / 10);
             if (maximum < 1) return StitchStatus.Unmatched;
             int best = 0;
@@ -52,11 +52,22 @@ namespace ShotInk
                 double error = Error(before, after, Width, frame.Height, offset, Math.Min(12, bestError));
                 if (error < bestError) { bestError = error; best = offset; }
             }
-            LastError = bestError;
-            // Animated content and unrelated windows must never be silently appended.
             if (best == 0 || bestError > 12 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
+            // Validate the alignment at full width; sparse sampling can miss a one-pixel text shift.
+            int coarse = best;
+            bestError = Error(before, after, Width, frame.Height, best, 3, 1);
+            foreach (int delta in new[] { -1, 1, -2, 2 })
+            {
+                int candidate = coarse + delta; if (candidate < 1 || candidate > maximum) continue;
+                double error = Error(before, after, Width, frame.Height, candidate, Math.Min(3, bestError), 1);
+                if (error < bestError) { bestError = error; best = candidate; }
+            }
+            LastError = bestError;
+            if (bestError > 3 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
             if (Height + best > heightLimit || (long)Width * (Height + best) > pixelLimit) return StitchStatus.LimitReached;
-            strips.Add(frame.Clone(new Rectangle(0, frame.Height - best, Width, best), PixelFormat.Format24bppRgb));
+            int seam = FindTextSeam(before, after, Width, frame.Height, best);
+            TrimTail(Height - (frame.Height - best - seam));
+            strips.Add(frame.Clone(new Rectangle(0, seam, Width, frame.Height - seam), PixelFormat.Format24bppRgb));
             Height += best;
             previous = after;
             Frames++;
@@ -85,20 +96,21 @@ namespace ShotInk
             finally { image.UnlockBits(data); }
         }
 
-        private static double Error(byte[] before, byte[] after, int width, int height, int offset, double cutoff = double.MaxValue)
+        private static double Error(byte[] before, byte[] after, int width, int height, int offset, double cutoff = double.MaxValue, int pixelStep = 0)
         {
             int marginY = Math.Min(24, Math.Max(1, (height - offset) / 12));
             int endY = height - offset - marginY;
             if (endY <= marginY) return double.MaxValue;
-            int stepX = Math.Max(1, width / 64);
-            int stepY = Math.Max(1, (endY - marginY) / 40);
-            int marginX = Math.Max(1, width / 20);
-            int samples = ((endY - marginY + stepY - 1) / stepY) * ((width - 2 * marginX + stepX - 1) / stepX) * 3;
+            int stepX = pixelStep > 0 ? pixelStep : Math.Max(1, width / 192);
+            int stepY = 1;
+            int marginX = Math.Max(1, Math.Min(8, width / 40));
+            int right = width - Math.Max(marginX, Math.Min(24, width / 20));
+            int samples = (endY - marginY) * ((right - marginX + stepX - 1) / stepX) * 3;
             long sum = 0;
             int count = 0;
             for (int y = marginY; y < endY; y += stepY)
             {
-                for (int x = marginX; x < width - marginX; x += stepX)
+                for (int x = marginX; x < right; x += stepX)
                 {
                     int a = ((y + offset) * width + x) * 3;
                     int b = (y * width + x) * 3;

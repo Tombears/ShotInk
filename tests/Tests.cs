@@ -21,6 +21,7 @@ namespace ShotInk
                 Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
                 Run("text pages with whitespace and small overlaps preserve every row", TestDocumentStitch);
+                Run("text seams retain whole glyphs and narrow left-hand content", TestTextSeams);
                 Run("unchanged frame does not duplicate content", TestUnchanged);
                 Run("unrelated frames are rejected", TestUnrelated);
                 Run("changed frame dimensions are rejected", TestDimensions);
@@ -40,6 +41,8 @@ namespace ShotInk
                 Run("slow stitching retains every queued overlap frame under pressure", TestScrollBackPressure);
                 Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
                 Run("integrated scroll capture restores tools and edits within a fixed viewport", TestIntegratedScroll);
+                Run("long preview preserves native pixels and moves its frame without altering content", TestLongPreviewMove);
+                Run("settings suspend global shortcuts and prevent capture until the dialog closes", TestSettingsCaptureGuard);
                 Run("an unrecoverable page jump stops with a visible partial-capture notice", TestScrollGap);
                 Run("shortcut changes restore existing bindings on a registration conflict", TestHotkeyRollback);
                 Run("configured save paths work without prompts in screenshots and the editor", TestSavePreferences);
@@ -329,6 +332,80 @@ namespace ShotInk
                 }
             }
         }
+        private static void TestLongPreviewMove()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                overlay.Show(); Select(overlay); overlay.ShowLongPreview(Pattern(700, 1200, 229));
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas"); var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                var viewport = Field<Panel>(overlay, "longViewport"); var original = Field<Rectangle>(overlay, "selection");
+                Assert(canvas.Zoom == 1, "Scrollbars shrank the long preview and blurred the text.");
+                canvas.ScrollDocument(91); canvas.ScrollDocumentHorizontal(11);
+                using (var visible = new Bitmap(canvas.Width, canvas.Height))
+                {
+                    canvas.DrawToBitmap(visible, canvas.ClientRectangle);
+                    for (int y = 0; y < 200; y++) for (int x = 0; x < 300; x++)
+                        Assert(visible.GetPixel(x, y).ToArgb() == canvas.Image.GetPixel(x + 11, y + 91).ToArgb(), "Preview resampled the original pixels.");
+                }
+                var image = canvas.Image; int revision = canvas.Revision;
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 40, 50);
+                Assert(Field<bool>(overlay, "dragging"), "Clicking the long image did not begin moving its frame.");
+                Mouse(overlay, "OnMouseMove", MouseButtons.Left, original.X + 95, original.Y + 95);
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, original.X + 95, original.Y + 95);
+                var moved = original; moved.Offset(55, 45);
+                Assert(Field<Rectangle>(overlay, "selection") == moved && viewport.Bounds == moved && canvas.Location == Point.Empty, "The long-image frame did not move with the pointer.");
+                Assert(canvas.Image == image && canvas.Revision == revision && canvas.DocumentOffsetY == 91 && canvas.DocumentOffsetX == 11, "Moving the frame recaptured the desktop or reset the document.");
+                toolbar.SelectTool(DrawTool.Rectangle); Gesture(canvas, new Point(20, 20), new Point(80, 80));
+                Assert(canvas.Marks[0].Points[0] == new PointF(31, 111), "Mark coordinates changed after moving the frame.");
+                toolbar.SelectTool(DrawTool.None);
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 40, 50);
+                Mouse(overlay, "OnMouseMove", MouseButtons.Left, moved.X + 20, moved.Y + 20);
+                overlay.Capture = false;
+                Assert(Field<Rectangle>(overlay, "selection") == moved && viewport.Bounds == moved, "Interrupted dragging left the frame at a different position.");
+                ToolPreview(overlay, "long-moved");
+                using (var exported = canvas.Render()) Assert(exported.Size == new Size(700, 1200), "Moving the frame cropped the exported long image.");
+                overlay.Close();
+            }
+        }
+        private static void TestSettingsCaptureGuard()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-settings-guard-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                using (var home = new MainForm(root, false))
+                {
+                    var live = new System.Collections.Generic.Dictionary<int, Keys>();
+                    var bindings = new HotkeyBindings(delegate(int id, Keys key) { live.Add(id, key); return true; }, delegate(int id) { live.Remove(id); });
+                    home.Show(); bindings.RegisterInitial(new AppSettings().Shortcuts);
+                    typeof(MainForm).GetField("hotkeys", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(home, bindings);
+                    for (int round = 0; round < 2; round++)
+                    {
+                        bool save = round == 1;
+                        home.BeginInvoke(new Action(delegate
+                        {
+                            SettingsForm dialog = null;
+                            foreach (Form form in Application.OpenForms) if (form is SettingsForm) dialog = (SettingsForm)form;
+                            Assert(dialog != null && Field<bool>(home, "settingsOpen") && live.Count == 0, "Settings did not release the global shortcut registrations.");
+                            try
+                            {
+                                Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.F1);
+                                Assert(Option<ShortcutBox>(dialog, "hotkey-0").ShortcutValue == Keys.F1, "The existing capture shortcut could not be recorded.");
+                                for (int id = 1; id <= 3; id++) SendMessage(home.Handle, Native.HotKeyMessage, new IntPtr(id), IntPtr.Zero);
+                                typeof(MainForm).GetMethod("BeginCapture", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, new object[] { false });
+                                Assert(!Field<bool>(home, "captureBusy") && dialog.Visible, "Entering a shortcut or using a capture entry started a screenshot inside settings.");
+                                Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.F6);
+                                if (save) Assert(home.ApplySettings(dialog.ReadSettings()) == null && live.Count == 0, "Saving settings resumed shortcuts before closing the dialog.");
+                            }
+                            finally { dialog.Close(); }
+                        }));
+                        typeof(MainForm).GetMethod("OpenSettings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, null);
+                        Assert(!Field<bool>(home, "settingsOpen") && live.Count == 3 && live[1] == (save ? Keys.F6 : Keys.F1), "Closing settings failed to restore the saved or cancelled shortcuts.");
+                    }
+                    home.Close();
+                }
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
         private static void TestScrollGap()
         {
             using (var before = Pattern(700, 370, 227))
@@ -503,6 +580,47 @@ namespace ShotInk
                     using (var frame = content.Clone(new Rectangle(0, offset, 180, 240), PixelFormat.Format24bppRgb))
                         Assert(stitcher.Add(frame) == StitchStatus.Added, "A valid narrow overlap was rejected.");
                 using (var result = stitcher.Build()) EqualPixels(content, result, content.Height);
+            }
+        }
+        private static void TestTextSeams()
+        {
+            using (var content = new Bitmap(480, 560, PixelFormat.Format24bppRgb))
+            using (var stitcher = new VerticalStitcher())
+            {
+                using (var g = Graphics.FromImage(content))
+                {
+                    g.Clear(Color.FromArgb(14, 18, 24));
+                    for (int row = 25; row < 210; row += 29) g.FillRectangle(Brushes.SlateBlue, 35 + row / 5, row, 120 + row / 3, 7);
+                    g.FillRectangle(Brushes.White, 220, 228, 3, 31); g.FillRectangle(Brushes.White, 238, 228, 3, 31);
+                    g.FillRectangle(Brushes.White, 220, 241, 21, 3);
+                }
+                using (var first = content.Clone(new Rectangle(0, 0, 480, 240), PixelFormat.Format24bppRgb))
+                {
+                    using (var g = Graphics.FromImage(first))
+                    using (var background = new SolidBrush(Color.FromArgb(14, 18, 24)))
+                    {
+                        g.FillRectangle(background, 215, 225, 35, 15);
+                        g.FillRectangle(Brushes.White, 219, 228, 3, 31); g.FillRectangle(Brushes.White, 237, 228, 3, 31);
+                    }
+                    stitcher.Add(first);
+                }
+                using (var next = content.Clone(new Rectangle(0, 61, 480, 240), PixelFormat.Format24bppRgb))
+                    Assert(stitcher.Add(next) == StitchStatus.Added, "A small rasterization difference prevented overlap alignment.");
+                using (var result = stitcher.Build()) EqualPixels(content, result, 301);
+            }
+            using (var content = new Bitmap(1024, 300, PixelFormat.Format24bppRgb))
+            using (var stitcher = new VerticalStitcher())
+            {
+                using (var g = Graphics.FromImage(content))
+                {
+                    g.Clear(Color.Black);
+                    var random = new Random(230);
+                    for (int y = 0; y < 300; y += 7) g.FillRectangle(Brushes.White, 20, y, 5, random.Next(1, 6));
+                }
+                foreach (int offset in new[] { 0, 37 })
+                    using (var frame = content.Clone(new Rectangle(0, offset, 1024, 200), PixelFormat.Format24bppRgb))
+                        Assert(stitcher.Add(frame) == StitchStatus.Added, "Sparse content near the left edge was mistaken for a stationary page.");
+                using (var result = stitcher.Build()) EqualPixels(content, result, 237);
             }
         }
         private static void TestStitch()

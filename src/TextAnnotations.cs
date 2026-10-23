@@ -234,7 +234,7 @@ namespace ShotInk
             var display = EditingTextMark(); selectedText.TextSize = TextGeometry.Measure(display); display.TextSize = selectedText.TextSize;
             int caret = textEditor.SelectionStart + textEditor.Composition.Length;
             var position = TextGeometry.World(display, TextGeometry.Caret(display, caret));
-            textEditor.Bounds = new Rectangle(Math.Max(0, Math.Min(Width - 1, (int)Math.Round(position.X * Zoom))),
+            textEditor.Bounds = new Rectangle(Math.Max(0, Math.Min(Width - 1, (int)Math.Round((position.X - DocumentOffsetX) * Zoom))),
                 Math.Max(0, Math.Min(Height - 1, (int)Math.Round((position.Y - DocumentOffsetY) * Zoom))), 1, Math.Max(1, (int)Math.Ceiling(TextGeometry.LineHeight(display) * Zoom)));
             textEditor.PositionIme();
         }
