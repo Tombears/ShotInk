@@ -467,6 +467,7 @@ namespace ShotInk
             toolOptions.SettingsChanged += delegate { toolOptions.ApplyTo(canvas); };
             toolOptions.ToolChanged += SelectTool;
             toolArea = new Panel { Dock = DockStyle.Top, BackColor = Color.White };
+            toolOptions.SizeChanged += delegate { if (toolOptions.Visible) toolArea.Height = 110 + toolOptions.Height; };
             textActions = new OcrSelectionActions { Location = new Point(9, 106), Visible = false };
             textActions.CopySelected += delegate { canvas.CopyRecognizedText(false); };
             textActions.CopyAll += delegate { canvas.CopyRecognizedText(true); };
@@ -504,7 +505,7 @@ namespace ShotInk
             for (int i = 0; i < toolButtons.Count; i++)
             {
                 bool chosen = i == (int)tool || (tool == DrawTool.Line || tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline) && i == (int)DrawTool.Arrow;
-                toolButtons[i].BackColor = chosen ? Theme.Accent : Color.White; toolButtons[i].ForeColor = chosen ? Color.White : Theme.Ink;
+                toolButtons[i].BackColor = chosen ? ToolAppearance.Accent((DrawTool)i) : Color.White; toolButtons[i].ForeColor = chosen ? Color.White : Theme.Ink;
             }
             canvas.Focus();
         }

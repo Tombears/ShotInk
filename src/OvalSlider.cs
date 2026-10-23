@@ -17,6 +17,7 @@ namespace ShotInk
         internal event EventHandler ValueChanged;
         internal int SmallChange = 1;
         internal int LargeChange = 4;
+        internal Color AccentColor = Color.FromArgb(91, 155, 235);
 
         internal int Minimum
         {
@@ -142,14 +143,14 @@ namespace ShotInk
                 track.StartCap = LineCap.Round; track.EndCap = LineCap.Round;
                 g.DrawLine(track, TrackLeft, y, TrackRight, y);
                 if (Enabled && value > minimum)
-                { track.Color = Color.FromArgb(91, 155, 235); g.DrawLine(track, TrackLeft, y, thumb.Left + thumb.Width / 2, y); }
+                { track.Color = AccentColor; g.DrawLine(track, TrackLeft, y, thumb.Left + thumb.Width / 2, y); }
             }
             var shadow = thumb; shadow.Offset(0, dragging ? 1 : 2);
             using (var shade = new SolidBrush(Color.FromArgb(Enabled ? 48 : 20, 38, 56, 77))) g.FillEllipse(shade, shadow);
             Color top = Enabled ? Color.White : Color.FromArgb(244, 245, 247);
-            Color bottom = !Enabled ? Color.FromArgb(212, 216, 221) : dragging ? Color.FromArgb(154, 188, 230) : Color.FromArgb(188, 200, 214);
+            Color bottom = !Enabled ? Color.FromArgb(212, 216, 221) : ToolAppearance.Tint(AccentColor, dragging ? 0.62F : 0.84F);
             using (var face = new LinearGradientBrush(thumb, top, bottom, LinearGradientMode.Vertical)) g.FillEllipse(face, thumb);
-            using (var rim = new Pen(Enabled && (hovering || dragging || Focused) ? Color.FromArgb(55, 125, 213) : Color.FromArgb(124, 141, 160))) g.DrawEllipse(rim, thumb);
+            using (var rim = new Pen(Enabled && (hovering || dragging || Focused) ? AccentColor : Color.FromArgb(145, 155, 169))) g.DrawEllipse(rim, thumb);
             var highlight = thumb; highlight.Inflate(-2, -2);
             using (var light = new Pen(Color.FromArgb(205, Color.White))) g.DrawArc(light, highlight, 190, 150);
             if (Focused && ShowFocusCues)

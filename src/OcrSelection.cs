@@ -140,18 +140,28 @@ namespace ShotInk
         internal event Action ExitSelection;
         internal OcrSelectionActions()
         {
-            Height = 30; Width = 440; WrapContents = false;
-            Controls.Add(new Label { Text = "拖选文字", AutoSize = true, Margin = new Padding(2, 7, 8, 0) });
-            copy = ActionButton("复制选中", delegate { if (CopySelected != null) CopySelected(); });
-            ActionButton("复制全部", delegate { if (CopyAll != null) CopyAll(); });
-            ActionButton("返回标注", delegate { if (ExitSelection != null) ExitSelection(); });
+            Height = 112; Width = 440; WrapContents = false; FlowDirection = FlowDirection.TopDown;
+            Padding = new Padding(12, 8, 12, 8); BackColor = Color.White; Font = ToolAppearance.Font;
+            var header = new FlowLayoutPanel { Width = 400, Height = 30, WrapContents = false, Margin = new Padding(0, 0, 0, 6) };
+            header.Controls.Add(new Label { Text = "文字识别", Width = 72, Height = 28, TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = ToolAppearance.Accent("ocr"), Font = ToolAppearance.HeadingFont, Margin = Padding.Empty });
+            header.Controls.Add(new Label { Text = "从图片中选择并复制文字", Width = 260, Height = 28, TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
+            Controls.Add(header);
+            var actions = new FlowLayoutPanel { Width = 400, Height = 36, WrapContents = false, Margin = Padding.Empty };
+            copy = ActionButton(actions, "复制选中", delegate { if (CopySelected != null) CopySelected(); });
+            ((ToolOptionButton)copy).Selected = true;
+            ActionButton(actions, "复制全部", delegate { if (CopyAll != null) CopyAll(); });
+            ActionButton(actions, "返回标注", delegate { if (ExitSelection != null) ExitSelection(); });
+            Controls.Add(actions);
+            Controls.Add(new Label { Text = "拖选文字 · Ctrl+A 全选 · Ctrl+C 复制", Width = 400, Height = 24,
+                TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
             SetSelection(false);
         }
-        private Button ActionButton(string text, Action action)
+        private Button ActionButton(FlowLayoutPanel row, string text, Action action)
         {
-            var button = new Button { Text = text, Width = 82, Height = 25, Margin = new Padding(2, 2, 3, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.White, Cursor = Cursors.Hand };
-            button.FlatAppearance.BorderColor = Color.LightGray;
-            button.Click += delegate { action(); }; Controls.Add(button); return button;
+            var button = new ToolOptionButton { Text = text, Width = 96, Height = 30, Margin = new Padding(0, 1, 8, 0), AccentColor = ToolAppearance.Accent("ocr") };
+            button.Click += delegate { action(); }; row.Controls.Add(button); return button;
         }
         internal void SetSelection(bool selected) { copy.Enabled = selected; }
     }
