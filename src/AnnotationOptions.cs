@@ -118,10 +118,7 @@ namespace ShotInk
                     Caption(modes, "线条");
                     Choice(modes, "箭头", "line-arrow", tool == DrawTool.Arrow, delegate { ChooseTool(DrawTool.Arrow); });
                     Choice(modes, "直线", "line-straight", tool == DrawTool.Line, delegate { ChooseTool(DrawTool.Line); });
-                    Choice(modes, "折线", "line-polyline", tool == DrawTool.Polyline, delegate { ChooseTool(DrawTool.Polyline); });
-                    Choice(modes, "折线箭头", "line-polyline-arrow", tool == DrawTool.ArrowPolyline, delegate { ChooseTool(DrawTool.ArrowPolyline); });
-                    if (tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline)
-                        Row().Controls.Add(new Label { AutoSize = true, Text = "单击加点 · 双击 / Enter 完成 · Backspace 退点 · Esc 取消", Margin = new Padding(3, 7, 0, 0) });
+                    Row().Controls.Add(new Label { AutoSize = true, Text = "单击起点 / 折点 · 右键 / 双击完成 · Backspace 退点 · Esc 取消", Margin = new Padding(3, 7, 0, 0) });
                 }
                 var colors = Row();
                 foreach (var color in new[] { Color.FromArgb(239, 64, 76), Color.FromArgb(255, 174, 38), Color.FromArgb(250, 216, 49), Color.FromArgb(37, 181, 114), Color.FromArgb(47, 135, 246), Color.FromArgb(150, 89, 224), Color.Black, Color.White })

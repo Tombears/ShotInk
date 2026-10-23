@@ -86,9 +86,11 @@ namespace ShotInk
                 for (int row = y; row < endY; row++) for (int column = x; column < endX; column++)
                 { int at = (row * width + column) * 3; blue += pixels[at]; green += pixels[at + 1]; red += pixels[at + 2]; }
                 long count = (endX - x) * (endY - y);
-                byte gray = (byte)((red * 299 + green * 587 + blue * 114 + count * 500) / (count * 1000));
+                byte averageRed = (byte)((red + count / 2) / count);
+                byte averageGreen = (byte)((green + count / 2) / count);
+                byte averageBlue = (byte)((blue + count / 2) / count);
                 for (int row = y; row < endY; row++) for (int column = x; column < endX; column++)
-                { int at = (row * width + column) * 3; pixels[at] = pixels[at + 1] = pixels[at + 2] = gray; }
+                { int at = (row * width + column) * 3; pixels[at] = averageBlue; pixels[at + 1] = averageGreen; pixels[at + 2] = averageRed; }
             }
             return Write(pixels, width, height);
         }

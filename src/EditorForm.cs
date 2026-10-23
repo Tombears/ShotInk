@@ -353,8 +353,6 @@ namespace ShotInk
         {
             if (mark.Points.Count == 0) return;
             if (mark.Tool == DrawTool.Mosaic || mark.Tool == DrawTool.Eraser) { DrawAppliedMark(g, mark); return; }
-            var first = mark.Points[0];
-            var last = mark.Points[mark.Points.Count - 1];
             var bounds = mark.Bounds;
             using (var pen = new Pen(mark.Color, mark.Width))
             {
@@ -367,15 +365,11 @@ namespace ShotInk
                     case DrawTool.Ellipse:
                         if (bounds.Width > 0 && bounds.Height > 0) g.DrawEllipse(pen, bounds);
                         break;
-                    case DrawTool.Arrow:
-                        using (var arrow = new AdjustableArrowCap(4, 5, true)) { pen.CustomEndCap = arrow; g.DrawLine(pen, first, last); }
-                        break;
                     case DrawTool.Line:
-                        g.DrawLine(pen, first, last);
-                        break;
                     case DrawTool.Polyline:
                         if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
                         break;
+                    case DrawTool.Arrow:
                     case DrawTool.ArrowPolyline:
                         if (mark.Points.Count > 1)
                             using (var arrow = new AdjustableArrowCap(4, 5, true))

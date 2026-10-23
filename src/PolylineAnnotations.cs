@@ -6,7 +6,8 @@ namespace ShotInk
 {
     internal sealed partial class AnnotationCanvas
     {
-        private static bool IsPolyline(DrawTool value) { return value == DrawTool.Polyline || value == DrawTool.ArrowPolyline; }
+        private static bool IsPolyline(DrawTool value)
+        { return value == DrawTool.Line || value == DrawTool.Arrow || value == DrawTool.Polyline || value == DrawTool.ArrowPolyline; }
         private bool HasPolyline { get { return active != null && IsPolyline(active.Tool); } }
         private bool PolylineMouseDown(MouseEventArgs e)
         {

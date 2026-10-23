@@ -20,7 +20,7 @@ try {
                 $color = $iconPixels.GetPixel($x, $y)
                 if ($color.R -gt 180 -and $color.G -gt 100 -and $color.B -lt 150) { $yellow++ }
             } }
-            if ($yellow -lt 20 -or $iconPixels.GetPixel(0, 0).A -ne 0) { throw 'Packaged executable lost its yellow shell icon or transparency.' }
+            if ($yellow -lt 20 -or $iconPixels.GetPixel(0, 0).A -ne 0) { throw 'Packaged executable lost its yellow pen icon or transparency.' }
         } finally { $iconPixels.Dispose() }
     } finally { $applicationIcon.Dispose() }
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'

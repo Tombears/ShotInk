@@ -36,7 +36,7 @@ namespace ShotInk
                 Run("Gaussian blur has a smooth impulse response and stays within the mask", TestGaussianBlur);
                 Run("mosaic rectangles remain editable with independent undo", TestEditableMosaic);
                 Run("point-click polylines complete, cancel and undo as one annotation", TestPolylines);
-                Run("application icon contains yellow shell branding and transparent multi-size images", TestApplicationIcon);
+                Run("application icon contains the supplied pen and colorful corners in transparent multi-size images", TestApplicationIcon);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
@@ -880,6 +880,21 @@ namespace ShotInk
         { return Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)); }
         private static void TestMosaicPixels()
         {
+            using (var source = new Bitmap(25, 16))
+            {
+                var dark = Color.FromArgb(13, 17, 23); var light = Color.FromArgb(242, 244, 248);
+                using (var g = Graphics.FromImage(source))
+                using (var brush = new SolidBrush(light))
+                { g.Clear(dark); g.FillRectangle(brush, 8, 0, 8, 16); g.FillRectangle(Brushes.Blue, 16, 0, 9, 16); }
+                source.SetPixel(16, 0, Color.Red);
+                using (var pixels = ImageFilters.Pixelate(source, 8))
+                {
+                    Assert(pixels.GetPixel(3, 3).ToArgb() == dark.ToArgb(), "Mosaic changed a uniform dark background.");
+                    Assert(pixels.GetPixel(11, 3).ToArgb() == light.ToArgb(), "Mosaic changed a uniform light background.");
+                    Assert(pixels.GetPixel(20, 3).ToArgb() == Color.FromArgb(4, 0, 251).ToArgb(), "Mosaic did not average each source color channel.");
+                    Assert(pixels.GetPixel(24, 3).ToArgb() == Color.Blue.ToArgb(), "Partial edge block lost the source color.");
+                }
+            }
             using (var source = new Bitmap(120, 100))
             {
                 using (var g = Graphics.FromImage(source)) g.Clear(Color.FromArgb(32, 32, 32));
@@ -963,18 +978,34 @@ namespace ShotInk
             using (var canvas = new AnnotationCanvas(new Bitmap(300, 220)))
             {
                 using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
-                canvas.Tool = DrawTool.Polyline; canvas.Ink = Color.Red; canvas.Stroke = 4;
+                canvas.Tool = DrawTool.Line; canvas.Ink = Color.Red; canvas.Stroke = 4;
                 ClickVertex(canvas, new Point(20, 30)); ClickVertex(canvas, new Point(120, 30)); ClickVertex(canvas, new Point(120, 140));
                 Assert(canvas.Marks.Count == 0, "Point clicks prematurely committed separate lines.");
-                Assert(canvas.HandleGestureKey(new KeyEventArgs(Keys.Enter)), "Enter did not finish the polyline.");
+                Mouse(canvas, "OnMouseMove", MouseButtons.None, 250, 200);
+                Mouse(canvas, "OnMouseDown", MouseButtons.Right, 250, 200);
+                Mouse(canvas, "OnMouseUp", MouseButtons.Right, 250, 200);
                 Assert(canvas.Marks.Count == 1 && canvas.Marks[0].Points.Count == 3, "Polyline did not store its clicked vertices as one annotation.");
                 using (var rendered = canvas.Render()) Assert(rendered.GetPixel(70, 30).R > 240 && rendered.GetPixel(70, 30).G < 20 && rendered.GetPixel(120, 90).G < 20 && rendered.GetPixel(70, 90).G > 240, "Polyline segments did not follow the clicked route.");
                 canvas.Undo(); Assert(canvas.Marks.Count == 0, "Polyline needed multiple undo operations."); canvas.Redo();
-                canvas.Tool = DrawTool.ArrowPolyline;
+                canvas.Tool = DrawTool.Arrow;
                 ClickVertex(canvas, new Point(30, 170)); ClickVertex(canvas, new Point(130, 170)); ClickVertex(canvas, new Point(180, 100));
-                canvas.HandleGestureKey(new KeyEventArgs(Keys.Back)); ClickVertex(canvas, new Point(230, 170));
+                canvas.HandleGestureKey(new KeyEventArgs(Keys.Back)); ClickVertex(canvas, new Point(230, 100));
                 canvas.HandleGestureKey(new KeyEventArgs(Keys.Enter));
-                Assert(canvas.Marks[1].Tool == DrawTool.ArrowPolyline && canvas.Marks[1].Points.Count == 3 && canvas.Marks[1].Points[2] == new PointF(230, 170), "Backspace did not remove one polyline vertex.");
+                Assert(canvas.Marks[1].Tool == DrawTool.Arrow && canvas.Marks[1].Points.Count == 3 && canvas.Marks[1].Points[2] == new PointF(230, 100), "Backspace did not remove one polyline vertex.");
+                using (var rendered = canvas.Render())
+                {
+                    Assert(rendered.GetPixel(80, 170).G < 20 && rendered.GetPixel(180, 135).G < 20, "Arrow did not follow every clicked segment.");
+                    Assert(rendered.GetPixel(130, 160).G > 240, "Arrow placed an extra arrowhead at a bend.");
+                    canvas.Marks[1].Tool = DrawTool.Line;
+                    using (var withoutHead = canvas.Render())
+                    {
+                        int headPixels = 0;
+                        for (int y = 80; y < 130; y++) for (int x = 200; x < 250; x++)
+                            if (rendered.GetPixel(x, y).G < 20 && withoutHead.GetPixel(x, y).G > 240) headPixels++;
+                        Assert(headPixels > 20, "Arrowhead was missing from the final segment.");
+                    }
+                    canvas.Marks[1].Tool = DrawTool.Arrow;
+                }
                 ClickVertex(canvas, new Point(10, 10)); ClickVertex(canvas, new Point(30, 50)); canvas.HandleGestureKey(new KeyEventArgs(Keys.Escape));
                 Assert(canvas.Marks.Count == 2, "Escape committed a cancelled polyline.");
                 ClickVertex(canvas, new Point(30, 40)); ClickVertex(canvas, new Point(90, 80));
@@ -985,12 +1016,16 @@ namespace ShotInk
             using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
             {
                 overlay.Show(); Select(overlay);
-                var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); toolbar.SelectTool(DrawTool.Polyline);
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); toolbar.SelectTool(DrawTool.Line);
                 var canvas = Field<AnnotationCanvas>(overlay, "canvas");
                 ClickVertex(canvas, new Point(30, 30)); ClickVertex(canvas, new Point(140, 100));
                 Key(overlay, Keys.Enter); Assert(!overlay.IsDisposed && canvas.Marks.Count == 1, "Enter exported the screenshot instead of finishing its polyline.");
                 ClickVertex(canvas, new Point(200, 100)); ClickVertex(canvas, new Point(300, 160)); Key(overlay, Keys.Escape);
                 Assert(!overlay.IsDisposed && canvas.Marks.Count == 1, "Escape closed the screenshot instead of cancelling the unfinished polyline.");
+                ClickVertex(canvas, new Point(40, 160)); ClickVertex(canvas, new Point(150, 200));
+                Mouse(canvas, "OnMouseDown", MouseButtons.Right, 250, 220);
+                Mouse(canvas, "OnMouseUp", MouseButtons.Right, 250, 220);
+                Assert(!overlay.IsDisposed && canvas.Marks.Count == 2 && canvas.Marks[1].Points[1] == new PointF(150, 200), "Right-click closed the screenshot or added a hover vertex.");
                 ToolPreview(overlay, "polyline"); overlay.Close();
             }
         }
@@ -1005,11 +1040,19 @@ namespace ShotInk
             using (var icon = MainForm.CreateIcon())
             using (var pixels = icon.ToBitmap())
             {
-                int yellow = 0;
+                int yellow = 0, blue = 0, green = 0, purple = 0, orange = 0;
                 for (int y = 0; y < pixels.Height; y++) for (int x = 0; x < pixels.Width; x++)
-                { var color = pixels.GetPixel(x, y); if (color.R > 180 && color.G > 100 && color.B < 150) yellow++; }
+                {
+                    var color = pixels.GetPixel(x, y); if (color.A < 128) continue;
+                    if (color.R > 180 && color.G > 150 && color.B < 100) yellow++;
+                    if (color.B > 180 && color.R < 100) blue++;
+                    if (color.G > 120 && color.R < 100 && color.B < 180) green++;
+                    if (color.B > 160 && color.R > 100 && color.R < 180 && color.G < 130) purple++;
+                    if (color.R > 200 && color.G > 70 && color.G < 180 && color.B < 100) orange++;
+                }
                 pixels.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-app-icon.png"));
-                Assert(yellow > 100 && pixels.GetPixel(0, 0).A == 0, "The shell icon lost its yellow color or transparency: " + pixels.Size + ", yellow=" + yellow + ", corner=" + pixels.GetPixel(0, 0));
+                Assert(yellow > 40 && blue > 10 && green > 10 && purple > 10 && orange > 10 && pixels.GetPixel(0, 0).A == 0,
+                    "The supplied icon lost its pen, colorful corners or transparency: " + pixels.Size + ", yellow=" + yellow + ", corner=" + pixels.GetPixel(0, 0));
             }
         }
         private static void TestLiveLongDrag()
@@ -1147,6 +1190,8 @@ namespace ShotInk
                 Assert(canvas.Tool == DrawTool.Rectangle && canvas.Cursor == Cursors.Cross, "Shape button did not immediately restore its default rectangle.");
                 tools[DrawTool.Arrow].PerformClick();
                 Assert(canvas.Tool == DrawTool.Arrow, "Arrow button did not select its default tool.");
+                Assert(options.Controls.Find("line-polyline", true).Length == 0 && options.Controls.Find("line-polyline-arrow", true).Length == 0,
+                    "Line options still expose separate polyline tools.");
                 Option<Button>(options, "line-straight").PerformClick();
                 Assert(canvas.Tool == DrawTool.Line, "Line options did not switch to straight line.");
                 tools[DrawTool.Arrow].PerformClick();

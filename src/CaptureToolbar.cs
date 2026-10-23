@@ -48,7 +48,7 @@ namespace ShotInk
             AddTool("move", "移动选区", DrawTool.None);
             var shape = Button("shape", "形状：单击使用矩形，下面可切换椭圆", delegate { ActivateTool(DrawTool.Rectangle); });
             tools.Add(DrawTool.Rectangle, shape); tools.Add(DrawTool.Ellipse, shape);
-            var arrow = Button("arrow", "线条：箭头 / 直线 / 点按折线 / 折线箭头", delegate { ActivateTool(DrawTool.Arrow); });
+            var arrow = Button("arrow", "线条：箭头 / 直线，单击加点，右键或双击完成", delegate { ActivateTool(DrawTool.Arrow); });
             tools.Add(DrawTool.Arrow, arrow); tools.Add(DrawTool.Line, arrow);
             tools.Add(DrawTool.Polyline, arrow); tools.Add(DrawTool.ArrowPolyline, arrow);
             AddTool("pen", "画笔", DrawTool.Pen);
