@@ -4,9 +4,7 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 下载 [ShotInk-Setup.exe 完整安装包](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-Setup.exe)，按提示安装后，从桌面或开始菜单启动 ShotInk。安装包内含主程序、OCR 组件、模型和所需运行环境，可离线安装。
-
-也可使用 [ShotInk-portable.zip 便携包](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip)：完整解压后运行 `ShotInk.exe`，保留同目录的 `ocr` 文件夹。请勿单独复制其中的 EXE。
+前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 下载 [ShotInk-portable.zip](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip)，完整解压到一个文件夹后运行其中的 `ShotInk.exe`，保留同目录的 `ocr` 文件夹。后续版本统一提供 ZIP 包。
 
 支持 Windows 10 / 11，需要 .NET Framework 4.8。
 
@@ -25,13 +23,11 @@
 - **本地历史**：默认保存最近 100 张截图，可关闭自动保存；普通截图完成时保存带标注的结果，长截图保存原始长图，双击历史图片继续编辑。
 - **托盘常驻**：关闭工作台后仍可使用全局快捷键，从托盘菜单退出。
 - **设置**：从工作台左侧或托盘菜单打开「设置」，可修改区域截图、剪贴板贴图、滚动长截图的全局快捷键，以及图片默认保存文件夹和「每次保存时询问保存位置」开关。关闭询问后，保存按钮和 `Ctrl+S` 直接保存到指定文件夹；快捷键冲突会提示并保留原绑定。历史记录仍单独保留最近 100 张，不会清理手动保存的图片。
-- **版本下载**：GitHub Releases 提供中文版本说明、可直接运行的 EXE 和便携 ZIP。
+- **版本下载**：GitHub Releases 提供中文版本说明和完整 ZIP 包。
 
 ## 运行
 
-完整安装包支持 Windows 10 / 11 x64，内含 .NET Framework 4.8 和 Visual C++ x64 离线安装程序，按需补齐环境；OCR 的 .NET 8 运行时和模型随程序一起安装。用户无需额外下载运行库、Python、.NET SDK 或模型。若安装提示需要重启，请重启后再运行。首次使用 OCR 会加载模型，之后复用同一进程；截图全程在本地处理。
-
-便携包需要系统已有 .NET Framework 4.8 和 Visual C++ x64 运行库；环境不全时请使用完整安装包。
+ZIP 包支持 Windows 10 / 11 x64，包含主程序、OCR 组件、模型和 OCR 自带的 .NET 8 运行时；无需安装 Python、.NET SDK 或额外下载模型。系统需要已有 .NET Framework 4.8 和 Visual C++ x64 运行库。首次使用 OCR 会加载模型，之后复用同一进程；截图全程在本地处理。
 
 双击 `dist\ShotInk.exe`。也可以在项目目录运行：
 
@@ -45,7 +41,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 ```
 
-产物为 `dist\ShotInk.exe`、`dist\ocr\` 和 `ShotInk-portable.zip`。加上 `-Installer` 可构建完整安装包 `ShotInk-Setup.exe`（构建机需要 Inno Setup 6.5 或更新版本）；构建时下载并验证微软签名的离线运行库。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。主程序保持 .NET Framework 4.8。
+构建目录包含 `dist\ShotInk.exe` 和 `dist\ocr\`，交付文件为 `ShotInk-portable.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。主程序保持 .NET Framework 4.8。
 
 OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](docs/ocr.md)。
 

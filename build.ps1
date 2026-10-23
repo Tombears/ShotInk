@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$Test, [switch]$Preview, [switch]$Installer)
+param([switch]$Test, [switch]$Preview)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 . (Join-Path $projectRoot 'scripts\build-inputs.ps1')
@@ -43,4 +43,3 @@ Compress-Archive -LiteralPath $appPath, (Join-Path $distRoot 'README.md'), (Join
 [IO.File]::WriteAllText((Join-Path $distRoot 'ShotInk.build.sha256'), $sourceSignature)
 Write-Host ('Built: ' + $appPath)
 Write-Host ('Portable: ' + $archive)
-if ($Installer) { & (Join-Path $projectRoot 'scripts\build-installer.ps1') }

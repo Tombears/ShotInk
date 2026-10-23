@@ -27,8 +27,14 @@ try {
     $tag = 'v' + $version
     [IO.File]::WriteAllText((Join-Path $fixture ('releases\' + $tag + '.md')), 'Release notes')
     Copy-Item -LiteralPath $BinaryPath -Destination (Join-Path $fixture 'assets\dist\ShotInk.exe')
-    [IO.File]::WriteAllText((Join-Path $fixture 'assets\ShotInk-portable.zip'), 'fixture')
-    [IO.File]::WriteAllText((Join-Path $fixture 'assets\ShotInk-Setup.exe'), 'fixture')
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipFixture = Join-Path $fixture 'assets\ShotInk-portable.zip'
+    $package = [IO.Compression.ZipFile]::Open($zipFixture, [IO.Compression.ZipArchiveMode]::Create)
+    try { [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($package, (Resolve-Path -LiteralPath $BinaryPath).Path, 'ShotInk.exe') | Out-Null }
+    finally { $package.Dispose() }
+    # Publication must work with the ZIP alone, without a loose EXE or installer.
+    Remove-Item -LiteralPath (Join-Path $fixture 'assets\dist\ShotInk.exe') -Force
     $script = Join-Path $fixture 'scripts\release-github.ps1'
     $assetRoot = Join-Path $fixture 'assets'
     $env:GITHUB_REF = 'refs/heads/main'
@@ -37,17 +43,18 @@ try {
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current
     Assert-Release ((Calls-For create).Count -eq 1 -and (Calls-For edit).Count -eq 1) 'A new version did not create and publish a draft.'
     Assert-Release ((Calls-For create)[0] -contains '--draft') 'New release was visible before its assets were ready.'
-    Assert-Release (((Calls-For create)[0] -join ' ') -like '*ShotInk-Setup.exe*') 'The complete installer was not published.'
+    Assert-Release (((Calls-For create)[0] -join ' ') -like '*ShotInk-portable.zip*' -and ((Calls-For create)[0] -join ' ') -notlike '*ShotInk-Setup.exe*') 'New releases must publish only the portable ZIP.'
     Assert-Release ($state.Notes.Trim() -eq 'Release notes') 'Internal publication details were appended to the user-facing release notes.'
 
     $state.Calls = @(); $state.Releases = @(
-        @{ tag_name = $tag; draft = $false; prerelease = $false; immutable = $false; assets = @(@{ name = 'ShotInk.exe' }) },
+        @{ tag_name = $tag; draft = $false; prerelease = $false; immutable = $false; assets = @(@{ name = 'ShotInk.exe' }, @{ name = 'ShotInk-Setup.exe' }) },
         @{ tag_name = 'v0.1.0'; draft = $false; prerelease = $false; immutable = $false }
     )
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current
     Assert-Release ((Calls-For create).Count -eq 0 -and (Calls-For upload).Count -eq 1 -and (Calls-For edit).Count -eq 1) 'A small update created another release or failed to replace existing assets.'
     Assert-Release ((Calls-For upload)[0] -contains '--clobber') 'Existing asset names were not replaced.'
-    Assert-Release ((Calls-For delete-asset).Count -eq 1) 'The incomplete standalone EXE remained in the release assets.'
+    Assert-Release ((Calls-For delete-asset).Count -eq 2) 'The current release retained a standalone EXE or installer.'
+    Assert-Release (((Calls-For upload)[0] -join ' ') -notlike '*ShotInk-Setup.exe*') 'The installer was uploaded during a ZIP-only update.'
 
     $state.Calls = @(); $state.Head = 'newer'
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current

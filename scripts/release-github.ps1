@@ -14,11 +14,20 @@ $tag = 'v' + $version
 if ($env:GITHUB_REF -like 'refs/tags/*' -and $env:GITHUB_REF_NAME -ne $tag) { throw 'Tag and application version do not match.' }
 $notes = Join-Path $projectRoot ('releases\' + $tag + '.md')
 if (-not (Test-Path -LiteralPath $notes)) { throw ('Missing release notes: ' + $notes) }
-$exe = Join-Path $AssetDirectory 'dist\ShotInk.exe'
 $zip = Join-Path $AssetDirectory 'ShotInk-portable.zip'
-$setup = Join-Path $AssetDirectory 'ShotInk-Setup.exe'
-foreach ($asset in @($exe, $zip, $setup)) { if (-not (Test-Path -LiteralPath $asset)) { throw ('Missing release asset: ' + $asset) } }
-if ([Reflection.AssemblyName]::GetAssemblyName((Resolve-Path -LiteralPath $exe).Path).Version.ToString(3) -ne $version) { throw 'Application binary and release version do not match.' }
+if (-not (Test-Path -LiteralPath $zip)) { throw ('Missing release asset: ' + $zip) }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$probe = Join-Path ([IO.Path]::GetTempPath()) ('ShotInk-package-version-' + [Guid]::NewGuid().ToString('N') + '.exe')
+$archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zip).Path)
+try {
+    $entry = $archive.GetEntry('ShotInk.exe')
+    if (-not $entry) { throw 'Portable ZIP is missing ShotInk.exe.' }
+    [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $probe)
+    if ([Reflection.AssemblyName]::GetAssemblyName($probe).Version.ToString(3) -ne $version) { throw 'Application binary and release version do not match.' }
+} finally {
+    $archive.Dispose()
+    if (Test-Path -LiteralPath $probe) { Remove-Item -LiteralPath $probe -Force }
+}
 
 # An older build may finish after a newer commit. It must not replace that build.
 if ($env:GITHUB_REF -eq 'refs/heads/main') {
@@ -46,18 +55,20 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Release notes update failed.' }
             throw 'Release notes updated. GitHub has made this release immutable; its existing assets cannot be replaced.'
         }
-        & gh release upload $tag $setup $zip --repo $Repository --clobber
+        & gh release upload $tag $zip --repo $Repository --clobber
         if ($LASTEXITCODE -ne 0) { throw 'Release asset replacement failed.' }
         & gh release edit $tag --repo $Repository --title $version --notes-file $body --draft=false --latest
         if ($LASTEXITCODE -ne 0) { throw 'Release notes update failed.' }
-        if ($existing.assets | Where-Object { $_.name -eq 'ShotInk.exe' }) {
-            & gh release delete-asset $tag 'ShotInk.exe' --repo $Repository --yes
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot remove the incomplete standalone application asset.' }
+        foreach ($legacyName in @('ShotInk.exe', 'ShotInk-Setup.exe')) {
+            if ($existing.assets | Where-Object { $_.name -eq $legacyName }) {
+                & gh release delete-asset $tag $legacyName --repo $Repository --yes
+                if ($LASTEXITCODE -ne 0) { throw ('Cannot remove the superseded release asset: ' + $legacyName) }
+            }
         }
         Write-Host ('Replaced assets for ' + $tag + '; existing tag preserved.')
     } else {
         # Keep incomplete uploads out of the public release list.
-        & gh release create $tag $setup $zip --repo $Repository --target $Commit --title $version --notes-file $body --draft
+        & gh release create $tag $zip --repo $Repository --target $Commit --title $version --notes-file $body --draft
         if ($LASTEXITCODE -ne 0) { throw 'New draft release creation failed.' }
         & gh release edit $tag --repo $Repository --draft=false --latest
         if ($LASTEXITCODE -ne 0) { throw 'New release publication failed.' }
