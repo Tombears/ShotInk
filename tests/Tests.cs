@@ -41,6 +41,8 @@ namespace ShotInk
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
+                Run("startup registration handles quoted paths, disabling and save rollback without touching real startup entries", TestStartupRegistration);
+                Run("startup mode stays hidden and can reopen the workbench", TestStartupTray);
                 Run("history defaults to ten and its on-screen limit persists and prunes only history", TestHistoryLimit);
                 Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
                 Run("slow stitching retains every queued overlap frame under pressure", TestScrollBackPressure);
@@ -146,23 +148,27 @@ namespace ShotInk
             {
                 string path = Path.Combine(root, "settings.ini"); File.WriteAllText(path, "save=0");
                 var settings = AppSettings.Load(path);
-                Assert(!settings.AutoHistory && settings.AskSaveLocation && settings.CaptureShortcut == Keys.F1, "Legacy settings were not migrated with defaults.");
+                Assert(!settings.AutoHistory && settings.AskSaveLocation && !settings.StartWithWindows && settings.CaptureShortcut == Keys.F1, "Legacy settings were not migrated with defaults.");
                 settings.SaveDirectory = Path.Combine(root, "图片=测试"); settings.AskSaveLocation = false;
                 settings.CaptureShortcut = Keys.Control | Keys.Shift | Keys.F8; settings.PinShortcut = Keys.None;
+                settings.StartWithWindows = true;
                 settings.Tool(DrawTool.Pen).Ink = Color.Blue; settings.Tool(DrawTool.Pen).Width = 7;
                 settings.Tool(DrawTool.Text).FontSize = 42; settings.Tool(DrawTool.Mosaic).BrushSize = 76;
                 settings.Tool(DrawTool.Mosaic).MosaicEffect = MosaicEffect.GaussianBlur; settings.Tool(DrawTool.Mosaic).BlurRadius = 12;
                 settings.Save(path); var restored = AppSettings.Load(path);
                 Assert(!restored.AutoHistory && !restored.AskSaveLocation && restored.SaveDirectory == settings.SaveDirectory, "Saving lost history or directory preferences.");
                 Assert(restored.CaptureShortcut == settings.CaptureShortcut && restored.PinShortcut == Keys.None, "Shortcut preferences were not persisted.");
+                Assert(restored.StartWithWindows && restored.Clone().StartWithWindows, "Startup preference was not persisted or cloned.");
                 Assert(restored.Tool(DrawTool.Pen).Ink.ToArgb() == Color.Blue.ToArgb() && restored.Tool(DrawTool.Pen).Width == 7 && restored.Tool(DrawTool.Text).FontSize == 42 && restored.Tool(DrawTool.Mosaic).BrushSize == 76, "Tool preferences were not restored independently.");
                 Assert(restored.Tool(DrawTool.Mosaic).MosaicEffect == MosaicEffect.GaussianBlur && restored.Tool(DrawTool.Mosaic).BlurRadius == 12, "Gaussian effect preferences were not restored.");
                 using (var dialog = new SettingsForm(restored, delegate { return null; }))
                 {
                     Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.Control | Keys.Alt | Keys.F9);
                     Option<CheckBox>(dialog, "ask-save-location").Checked = true;
+                    Option<CheckBox>(dialog, "start-with-windows").Checked = false;
                     var candidate = dialog.ReadSettings();
                     Assert(candidate.CaptureShortcut == (Keys.Control | Keys.Alt | Keys.F9) && candidate.AskSaveLocation && !restored.AskSaveLocation, "Editing the dialog mutated settings before save.");
+                    Assert(!candidate.StartWithWindows && restored.StartWithWindows, "Editing startup changed the saved setting before Save.");
                     Option<ShortcutBox>(dialog, "hotkey-1").ShortcutValue = candidate.CaptureShortcut;
                     bool rejected = false; try { dialog.ReadSettings(); } catch (ArgumentException) { rejected = true; }
                     Assert(rejected, "Duplicate global shortcuts were accepted.");
@@ -183,6 +189,71 @@ namespace ShotInk
                 }
             }
             finally { Directory.Delete(root, true); }
+        }
+        private static void TestStartupRegistration()
+        {
+            string registryPath = @"Software\ShotInk.Tests\Startup-" + Guid.NewGuid().ToString("N");
+            string directory = Path.Combine(Path.GetTempPath(), "ShotInk-startup-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var root = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(registryPath))
+                {
+                    var registration = new StartupRegistration(root, "Run", @"E:\截图工具 文件夹\ShotInk.exe");
+                    Assert(!registration.IsEnabled, "Startup was enabled by default.");
+                    using (var key = root.CreateSubKey("Run")) key.SetValue("OtherApp", "keep");
+                    registration.Apply(true, delegate { });
+                    using (var key = root.OpenSubKey("Run"))
+                        Assert((string)key.GetValue("ShotInk") == "\"E:\\截图工具 文件夹\\ShotInk.exe\" --startup", "Startup path was not quoted or did not request tray startup.");
+                    var moved = new StartupRegistration(root, "Run", @"E:\新位置\ShotInk.exe");
+                    bool failed = false;
+                    try { moved.Apply(true, delegate { throw new IOException("save failed"); }); } catch (IOException) { failed = true; }
+                    using (var key = root.OpenSubKey("Run"))
+                        Assert(failed && (string)key.GetValue("ShotInk") == "\"E:\\截图工具 文件夹\\ShotInk.exe\" --startup", "Failed save did not restore the previous startup path.");
+                    registration.Apply(false, delegate { });
+                    using (var key = root.OpenSubKey("Run")) Assert(key.GetValue("ShotInk") == null && (string)key.GetValue("OtherApp") == "keep", "Disabling startup changed another application.");
+                    using (var home = new MainForm(directory, false, false, registration))
+                    {
+                        var candidate = Field<AppSettings>(home, "settings").Clone(); candidate.StartWithWindows = true;
+                        Assert(home.ApplySettings(candidate) == null && registration.IsEnabled && AppSettings.Load(Path.Combine(directory, "settings.ini")).StartWithWindows,
+                            "Saving settings did not enable and persist startup.");
+                        string blocker = Path.Combine(directory, "settings.ini.new"); Directory.CreateDirectory(blocker);
+                        try
+                        {
+                            candidate.StartWithWindows = false;
+                            Assert(home.ApplySettings(candidate) != null && registration.IsEnabled && Field<AppSettings>(home, "settings").StartWithWindows,
+                                "A failed settings save left startup disabled or changed live settings.");
+                        }
+                        finally { Directory.Delete(blocker); }
+                        Assert(home.ApplySettings(candidate) == null && !registration.IsEnabled, "Saving settings did not disable startup.");
+                    }
+                    // The actual OS entry is authoritative if preferences and Windows diverge.
+                    var saved = AppSettings.Load(Path.Combine(directory, "settings.ini")); saved.StartWithWindows = true; saved.Save(Path.Combine(directory, "settings.ini"));
+                    using (var home = new MainForm(directory, false, false, registration))
+                        Assert(!Field<AppSettings>(home, "settings").StartWithWindows, "The UI ignored the missing Windows startup entry.");
+                }
+            }
+            finally
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(registryPath, false);
+                Directory.Delete(directory, true);
+            }
+        }
+        private static void TestStartupTray()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "ShotInk-tray-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                using (var home = new MainForm(directory, false, true))
+                {
+                    int shown = 0; home.VisibleChanged += delegate { if (home.Visible) shown++; };
+                    home.Show(); Application.DoEvents();
+                    Assert(!home.Visible && home.IsHandleCreated && shown == 0, "Startup briefly displayed the workbench or failed to create its message window.");
+                    home.Show(); Application.DoEvents(); Assert(home.Visible && shown == 1, "The workbench could not open after tray startup.");
+                    home.Close();
+                }
+            }
+            finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
         }
         private static void WaitUntil(Func<bool> condition)
         {

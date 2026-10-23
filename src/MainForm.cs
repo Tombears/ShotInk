@@ -16,6 +16,8 @@ namespace ShotInk
         private readonly string dataRoot;
         private readonly string historyRoot;
         private readonly bool desktopIntegration;
+        private readonly StartupRegistration startup;
+        private bool startInTray;
         private readonly ListView history;
         private readonly ImageList thumbnails;
         private readonly Label notice;
@@ -35,11 +37,14 @@ namespace ShotInk
         private string SettingsPath { get { return Path.Combine(dataRoot, "settings.ini"); } }
 
         internal MainForm() : this(null, true) { }
-        internal MainForm(string storageRoot, bool integrateDesktop)
+        internal MainForm(string storageRoot, bool integrateDesktop, bool startInTray = false, StartupRegistration startup = null)
         {
             desktopIntegration = integrateDesktop;
+            this.startInTray = startInTray;
+            this.startup = startup ?? (integrateDesktop ? new StartupRegistration(Application.ExecutablePath) : null);
             dataRoot = storageRoot ?? ResolveDataRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             settings = AppSettings.Load(SettingsPath);
+            if (this.startup != null) settings.StartWithWindows = this.startup.IsEnabled;
             settingsTimer = new Timer { Interval = 350 };
             settingsTimer.Tick += delegate { settingsTimer.Stop(); PersistSettings(); };
             settings.Changed += delegate { settingsDirty = true; settingsTimer.Stop(); settingsTimer.Start(); };
@@ -133,6 +138,7 @@ namespace ShotInk
         private void OpenSettings()
         {
             if (settingsOpen || captureBusy) return;
+            if (startup != null) settings.StartWithWindows = startup.IsEnabled;
             settingsOpen = true;
             if (hotkeys != null) hotkeys.Clear();
             try { using (var dialog = new SettingsForm(settings, ApplySettings)) dialog.ShowDialog(this); }
@@ -149,14 +155,19 @@ namespace ShotInk
         internal string ApplySettings(AppSettings candidate)
         {
             try { candidate.Validate(); } catch (Exception ex) { return ex.Message; }
+            Action persist = delegate
+            {
+                if (startup != null) startup.Apply(candidate.StartWithWindows, delegate { candidate.Save(SettingsPath); });
+                else candidate.Save(SettingsPath);
+            };
             string error;
             if (hotkeys != null && (settingsOpen || !settings.Shortcuts.SequenceEqual(candidate.Shortcuts)))
             {
-                bool applied = hotkeys.TryApply(candidate.Shortcuts, delegate { candidate.Save(SettingsPath); }, out error);
+                bool applied = hotkeys.TryApply(candidate.Shortcuts, persist, out error);
                 if (settingsOpen) hotkeys.Clear();
                 if (!applied) return error;
             }
-            else try { candidate.Save(SettingsPath); } catch (Exception ex) { return "设置未保存：" + ex.Message; }
+            else try { persist(); } catch (Exception ex) { return "设置未保存：" + ex.Message; }
             settings.CopyFrom(candidate); settingsDirty = false; settingsTimer.Stop();
             RefreshShortcutLabels(); if (notice != null) notice.Text = "设置已保存并立即生效。"; return null;
         }
@@ -338,6 +349,16 @@ namespace ShotInk
             catch (System.Runtime.InteropServices.ExternalException) { MessageBox.Show("剪贴板正在被其他程序使用，请稍后重试。", "无法读取剪贴板"); }
         }
         private void PinImage(Bitmap image) { new PinForm(image).Show(); }
+        protected override void SetVisibleCore(bool value)
+        {
+            if (value && startInTray)
+            {
+                startInTray = false;
+                if (!IsHandleCreated) CreateHandle();
+                base.SetVisibleCore(false); return;
+            }
+            base.SetVisibleCore(value);
+        }
         private void ShowHome() { Show(); WindowState = FormWindowState.Normal; Activate(); LoadHistory(); }
         private void Quit()
         {

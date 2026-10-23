@@ -26,6 +26,7 @@ namespace ShotInk
         internal bool AutoHistory = true;
         internal int HistoryLimit = 10;
         internal bool AskSaveLocation = true;
+        internal bool StartWithWindows;
         internal string SaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
         internal Keys CaptureShortcut = Keys.F1;
         internal Keys PinShortcut = Keys.F3;
@@ -44,6 +45,7 @@ namespace ShotInk
         internal void CopyFrom(AppSettings other)
         {
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
+            StartWithWindows = other.StartWithWindows;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
             tools.Clear(); foreach (var item in other.tools) tools.Add(item.Key, item.Value.Clone());
         }
@@ -60,6 +62,7 @@ namespace ShotInk
                 if (values.TryGetValue("save", out value)) settings.AutoHistory = value != "0";
                 settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
                 if (values.TryGetValue("ask-save-location", out value)) settings.AskSaveLocation = value != "0";
+                if (values.TryGetValue("start-with-windows", out value)) settings.StartWithWindows = value == "1";
                 if (values.TryGetValue("save-directory", out value) && AbsolutePath(value)) settings.SaveDirectory = value;
                 settings.CaptureShortcut = ReadShortcut(values, "hotkey-capture", settings.CaptureShortcut);
                 settings.PinShortcut = ReadShortcut(values, "hotkey-pin", settings.PinShortcut);
@@ -104,6 +107,7 @@ namespace ShotInk
         {
             Validate(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
+                "start-with-windows=" + (StartWithWindows ? "1" : "0"),
                 "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut };
             foreach (var item in tools.OrderBy(item => (int)item.Key))
             {

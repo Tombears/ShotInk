@@ -27,17 +27,18 @@ namespace ShotInk
         private readonly ShortcutBox scroll;
         private readonly TextBox folder;
         private readonly CheckBox ask;
+        private readonly CheckBox startup;
         private readonly Label error;
         internal SettingsForm(AppSettings current, Func<AppSettings, string> apply)
         {
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
-            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 430); MinimumSize = new Size(640, 460);
+            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 510); MinimumSize = new Size(640, 540);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 9 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 11 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88));
-            for (int i = 0; i < 9; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, new[] { 38, 38, 38, 35, 42, 34, 35, 42, 50 }[i]));
+            foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
@@ -52,7 +53,11 @@ namespace ShotInk
             layout.Controls.Add(ask, 0, 5); layout.SetColumnSpan(ask, 3);
             var description = new Label { Text = "取消勾选后，保存按钮和 Ctrl+S 直接保存到上方文件夹。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
             layout.Controls.Add(description, 0, 6); layout.SetColumnSpan(description, 3);
-            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick }; layout.Controls.Add(error, 0, 7); layout.SetColumnSpan(error, 3);
+            startup = new CheckBox { Name = "start-with-windows", Text = "开机启动", Checked = current.StartWithWindows, Dock = DockStyle.Fill };
+            layout.Controls.Add(startup, 0, 7); layout.SetColumnSpan(startup, 3);
+            var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
+            layout.Controls.Add(startupHint, 0, 8); layout.SetColumnSpan(startupHint, 3);
+            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick }; layout.Controls.Add(error, 0, 9); layout.SetColumnSpan(error, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             var save = new Button { Text = "保存", Width = 85, Height = 30 };
             save.Click += delegate
@@ -64,7 +69,7 @@ namespace ShotInk
             var reset = new Button { Text = "恢复默认快捷键", Width = 130, Height = 30 };
             reset.Click += delegate { var defaults = new AppSettings(); capture.ShortcutValue = defaults.CaptureShortcut; pin.ShortcutValue = defaults.PinShortcut; scroll.ShortcutValue = defaults.ScrollShortcut; };
             buttons.Controls.Add(save); buttons.Controls.Add(cancel); buttons.Controls.Add(reset);
-            layout.Controls.Add(buttons, 0, 8); layout.SetColumnSpan(buttons, 3);
+            layout.Controls.Add(buttons, 0, 10); layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout); AcceptButton = save; CancelButton = cancel;
         }
         private static ShortcutBox AddShortcut(TableLayoutPanel layout, string title, int row, Keys value)
@@ -76,7 +81,7 @@ namespace ShotInk
         internal AppSettings ReadSettings()
         {
             var candidate = original.Clone(); candidate.CaptureShortcut = capture.ShortcutValue; candidate.PinShortcut = pin.ShortcutValue; candidate.ScrollShortcut = scroll.ShortcutValue;
-            candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.Validate(); return candidate;
+            candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.Validate(); return candidate;
         }
     }
 }

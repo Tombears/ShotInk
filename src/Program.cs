@@ -7,8 +7,9 @@ namespace ShotInk
     internal static class Program
     {
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
+            bool startInTray = Array.Exists(args, delegate(string argument) { return string.Equals(argument, "--startup", StringComparison.OrdinalIgnoreCase); });
             Native.RefreshExecutableIcon(Application.ExecutablePath);
             bool first;
             // Share the legacy mutex so both names cannot register the same hotkeys.
@@ -16,6 +17,7 @@ namespace ShotInk
             {
                 if (!first)
                 {
+                    if (startInTray) return;
                     MessageBox.Show("ShotInk 已在运行。若要使用刚编译或下载的程序，请先从系统托盘退出正在运行的 ShotInk，再重新启动。\n\n本次启动：" + Application.ProductVersion + "\n" + Application.ExecutablePath, "ShotInk");
                     return;
                 }
@@ -27,7 +29,7 @@ namespace ShotInk
                     MessageBox.Show(e.Exception.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 };
                 Application.ApplicationExit += delegate { RapidTextRecognizer.Shared.Dispose(); };
-                Application.Run(new MainForm());
+                Application.Run(new MainForm(null, true, startInTray));
             }
         }
     }
