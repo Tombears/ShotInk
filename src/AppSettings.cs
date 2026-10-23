@@ -16,6 +16,8 @@ namespace ShotInk
         internal FontStyle FontStyle;
         internal int BrushSize = 24;
         internal int MosaicSize = 14;
+        internal MosaicEffect MosaicEffect;
+        internal int BlurRadius = 8;
         internal ToolPreferences Clone() { return (ToolPreferences)MemberwiseClone(); }
     }
 
@@ -74,6 +76,8 @@ namespace ShotInk
                     style.FontStyle = (FontStyle)(int)ReadNumber(values, prefix + "font-style", 0, 3, (int)style.FontStyle);
                     style.BrushSize = (int)ReadNumber(values, prefix + "brush-size", 4, 160, style.BrushSize);
                     style.MosaicSize = (int)ReadNumber(values, prefix + "mosaic-size", 4, 48, style.MosaicSize);
+                    style.MosaicEffect = (MosaicEffect)(int)ReadNumber(values, prefix + "mosaic-effect", 0, 1, 0);
+                    style.BlurRadius = (int)ReadNumber(values, prefix + "blur-radius", 1, 24, style.BlurRadius);
                 }
             }
             catch (IOException) { }
@@ -107,6 +111,7 @@ namespace ShotInk
                 lines.Add(prefix + "color=" + style.Ink.ToArgb()); lines.Add(prefix + "width=" + style.Width.ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "font-size=" + style.FontSize.ToString(CultureInfo.InvariantCulture)); lines.Add(prefix + "font-style=" + (int)style.FontStyle);
                 lines.Add(prefix + "brush-size=" + style.BrushSize); lines.Add(prefix + "mosaic-size=" + style.MosaicSize);
+                lines.Add(prefix + "mosaic-effect=" + (int)style.MosaicEffect); lines.Add(prefix + "blur-radius=" + style.BlurRadius);
             }
             string temporary = path + ".new";
             try

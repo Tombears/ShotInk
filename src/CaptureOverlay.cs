@@ -21,6 +21,7 @@ namespace ShotInk
         private bool dragging;
         private bool ready;
         private bool completed;
+        private Bitmap longDragPreview;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
         private TextRecognitionSession recognition;
@@ -68,6 +69,7 @@ namespace ShotInk
             if (selection.Width > 0 && selection.Height > 0)
             {
                 g.DrawImage(desktop, selection, selection, GraphicsUnit.Pixel);
+                if (dragging && longDragPreview != null) g.DrawImageUnscaled(longDragPreview, selection.Location);
                 if (dragging && ready && canvas != null && longViewport == null)
                 {
                     var state = g.Save(); g.SetClip(selection, CombineMode.Intersect);
@@ -83,7 +85,7 @@ namespace ShotInk
                     var hint = new Rectangle(Math.Max(0, Math.Min(selection.Left, Width - extent.Width - 8)), Math.Max(0, selection.Top - extent.Height - 7), extent.Width + 8, extent.Height + 4);
                     using (var brush = new SolidBrush(sizeHint.BackColor)) g.FillRectangle(brush, hint);
                     TextRenderer.DrawText(g, size, sizeHint.Font, hint, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                    if (ready) foreach (var point in SelectionGeometry.Handles(selection))
+                    if (ready && longViewport == null) foreach (var point in SelectionGeometry.Handles(selection))
                     { g.FillEllipse(Brushes.DodgerBlue, point.X - 4, point.Y - 4, 8, 8); g.DrawEllipse(Pens.White, point.X - 4, point.Y - 4, 8, 8); }
                 }
             }
@@ -121,6 +123,13 @@ namespace ShotInk
         {
             if (!ready || scrollSession != null || (longViewport != null && handle != -1)) return;
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
+            if (longViewport != null)
+            {
+                ClearLongDragPreview();
+                longDragPreview = new Bitmap(longViewport.Width, longViewport.Height);
+                longViewport.DrawToBitmap(longDragPreview, longViewport.ClientRectangle);
+                longViewport.Hide();
+            }
             if (canvas != null) { canvas.CommitTextEdit(); if (longViewport == null) canvas.Hide(); }
             sizeHint.Hide(); foreach (var grip in grips) grip.Hide();
             if (toolbar != null) toolbar.Hide();
@@ -140,7 +149,6 @@ namespace ShotInk
                     var delta = new Point(e.X - anchor.X, e.Y - anchor.Y);
                     selection = dragMode == -1 ? SelectionGeometry.Move(dragOriginal, delta, ClientRectangle) : SelectionGeometry.Resize(dragOriginal, dragMode, delta, ClientRectangle);
                 }
-                if (longViewport != null) longViewport.Bounds = selection;
                 UpdateSelectionChrome();
             }
             Invalidate();
@@ -157,7 +165,7 @@ namespace ShotInk
             if (!ready) PrepareEditor();
             else if (canvas != null)
             {
-                if (longViewport != null) longViewport.Bounds = selection;
+                if (longViewport != null) { longViewport.Bounds = selection; ClearLongDragPreview(); longViewport.Show(); }
                 else
                 {
                     if (selection != dragOriginal)
@@ -241,7 +249,8 @@ namespace ShotInk
                 dragging = false;
                 if (ready)
                 {
-                    selection = dragOriginal; if (longViewport != null) longViewport.Bounds = selection;
+                    selection = dragOriginal;
+                    if (longViewport != null) { longViewport.Bounds = selection; ClearLongDragPreview(); longViewport.Show(); }
                     if (canvas != null) canvas.Show();
                     UpdateSelectionChrome(); if (toolbar != null) { toolbar.Show(); PositionToolbar(); }
                 }
@@ -252,6 +261,7 @@ namespace ShotInk
 
         private void ClearSelection()
         {
+            ClearLongDragPreview();
             if (scrollSession != null) { scrollSession.Dispose(); scrollSession = null; ResetCaptureRegion(); }
             ready = false;
             if (recognition != null) { recognition.Dispose(); recognition = null; }
@@ -289,6 +299,7 @@ namespace ShotInk
                 else if (e.KeyCode == Keys.Escape) Close();
                 e.SuppressKeyPress = true; return;
             }
+            if (canvas != null && canvas.HandleGestureKey(e)) return;
             if (canvas != null && canvas.HandleTextKey(e)) return;
             base.OnKeyDown(e);
             if (canvas != null && canvas.HandleRecognitionKey(e)) return;
@@ -306,7 +317,8 @@ namespace ShotInk
             return index == 1 || index == 5 ? Cursors.SizeNS : Cursors.SizeWE;
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
-        protected override void Dispose(bool disposing) { if (disposing) { if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
+        private void ClearLongDragPreview() { if (longDragPreview != null) { longDragPreview.Dispose(); longDragPreview = null; } }
+        protected override void Dispose(bool disposing) { if (disposing) { ClearLongDragPreview(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

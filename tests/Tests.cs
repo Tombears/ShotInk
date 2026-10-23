@@ -32,6 +32,11 @@ namespace ShotInk
                 Run("typing stays transparent, compact and anchored to the image caret", TestTransparentTextInput);
                 Run("text moves, scales and rotates with independent undo at different zooms", TestTextTransform);
                 Run("mosaic covers partial edge blocks", TestMosaic);
+                Run("mosaic averaging and scaled previews contain no white grid seams", TestMosaicPixels);
+                Run("Gaussian blur has a smooth impulse response and stays within the mask", TestGaussianBlur);
+                Run("mosaic rectangles remain editable with independent undo", TestEditableMosaic);
+                Run("point-click polylines complete, cancel and undo as one annotation", TestPolylines);
+                Run("application icon contains yellow shell branding and transparent multi-size images", TestApplicationIcon);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
@@ -66,8 +71,16 @@ namespace ShotInk
                     Preview(args[1]);
                 }
                 if (args.Length == 1 && args[0] == "--drag-preview") Run("live selection dragging clears old borders on screen", TestLiveDrag);
+                if (args.Length == 1 && args[0] == "--drag-preview") Run("live long-image dragging erases its old viewport and scrollbars", TestLiveLongDrag);
                 if (args.Length == 1 && args[0] == "--scroll-preview")
                 { Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture); Run("live integrated scroll capture excludes its own chrome", TestLiveIntegratedScroll); }
+                if (args.Length == 1 && args[0] == "--interaction-preview")
+                {
+                    Run("live selection dragging clears old borders on screen", TestLiveDrag);
+                    Run("live long-image dragging erases its old viewport and scrollbars", TestLiveLongDrag);
+                    Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture);
+                    Run("live integrated scroll capture excludes its own chrome", TestLiveIntegratedScroll);
+                }
                 Console.WriteLine("PASS: " + passed + " checks");
                 return 0;
             }
@@ -136,10 +149,12 @@ namespace ShotInk
                 settings.CaptureShortcut = Keys.Control | Keys.Shift | Keys.F8; settings.PinShortcut = Keys.None;
                 settings.Tool(DrawTool.Pen).Ink = Color.Blue; settings.Tool(DrawTool.Pen).Width = 7;
                 settings.Tool(DrawTool.Text).FontSize = 42; settings.Tool(DrawTool.Mosaic).BrushSize = 76;
+                settings.Tool(DrawTool.Mosaic).MosaicEffect = MosaicEffect.GaussianBlur; settings.Tool(DrawTool.Mosaic).BlurRadius = 12;
                 settings.Save(path); var restored = AppSettings.Load(path);
                 Assert(!restored.AutoHistory && !restored.AskSaveLocation && restored.SaveDirectory == settings.SaveDirectory, "Saving lost history or directory preferences.");
                 Assert(restored.CaptureShortcut == settings.CaptureShortcut && restored.PinShortcut == Keys.None, "Shortcut preferences were not persisted.");
                 Assert(restored.Tool(DrawTool.Pen).Ink.ToArgb() == Color.Blue.ToArgb() && restored.Tool(DrawTool.Pen).Width == 7 && restored.Tool(DrawTool.Text).FontSize == 42 && restored.Tool(DrawTool.Mosaic).BrushSize == 76, "Tool preferences were not restored independently.");
+                Assert(restored.Tool(DrawTool.Mosaic).MosaicEffect == MosaicEffect.GaussianBlur && restored.Tool(DrawTool.Mosaic).BlurRadius == 12, "Gaussian effect preferences were not restored.");
                 using (var dialog = new SettingsForm(restored, delegate { return null; }))
                 {
                     Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.Control | Keys.Alt | Keys.F9);
@@ -350,6 +365,7 @@ namespace ShotInk
                 var image = canvas.Image; int revision = canvas.Revision;
                 Mouse(canvas, "OnMouseDown", MouseButtons.Left, 40, 50);
                 Assert(Field<bool>(overlay, "dragging"), "Clicking the long image did not begin moving its frame.");
+                Assert(!viewport.Visible && Field<Bitmap>(overlay, "longDragPreview") != null, "Dragging moved a visible child window instead of painting one surface.");
                 Mouse(overlay, "OnMouseMove", MouseButtons.Left, original.X + 95, original.Y + 95);
                 Mouse(overlay, "OnMouseUp", MouseButtons.Left, original.X + 95, original.Y + 95);
                 var moved = original; moved.Offset(55, 45);
@@ -862,16 +878,168 @@ namespace ShotInk
         }
         private static double DistanceForTest(PointF a, PointF b)
         { return Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)); }
+        private static void TestMosaicPixels()
+        {
+            using (var source = new Bitmap(120, 100))
+            {
+                using (var g = Graphics.FromImage(source)) g.Clear(Color.FromArgb(32, 32, 32));
+                for (int y = 0; y < 100; y++) for (int x = 0; x < 120; x++) if ((x + y) % 4 == 0) source.SetPixel(x, y, Color.White);
+                using (var canvas = new AnnotationCanvas(new Bitmap(source)))
+                {
+                    canvas.Tool = DrawTool.Mosaic; canvas.MosaicMode = ApplyMode.Rectangle; canvas.MosaicSize = 8;
+                    Gesture(canvas, new Point(8, 8), new Point(112, 88));
+                    using (var exported = canvas.Render())
+                    {
+                        for (int y = 9; y < 88; y++) for (int x = 9; x < 112; x++)
+                            Assert(exported.GetPixel(x, y).ToArgb() == Color.FromArgb(88, 88, 88).ToArgb(), "Block averaging left a white stripe or retained the center-pixel contrast.");
+                    }
+                    canvas.Tool = DrawTool.None;
+                    foreach (float zoom in new[] { 0.65F, 1F, 1.25F })
+                    {
+                        canvas.SetZoom(zoom);
+                        using (var visible = new Bitmap(canvas.Width, canvas.Height))
+                        {
+                            canvas.DrawToBitmap(visible, canvas.ClientRectangle);
+                            for (int y = (int)(20 * zoom); y < (int)(75 * zoom); y++) for (int x = (int)(20 * zoom); x < (int)(100 * zoom); x++)
+                                Assert(visible.GetPixel(x, y).R == 88, "Scaled preview introduced a gap between mosaic blocks.");
+                        }
+                    }
+                }
+            }
+        }
+        private static void TestGaussianBlur()
+        {
+            using (var impulse = new Bitmap(41, 41))
+            {
+                using (var g = Graphics.FromImage(impulse)) { g.Clear(Color.Black); g.FillRectangle(Brushes.White, 18, 18, 5, 5); }
+                using (var blurred = ImageFilters.Gaussian(impulse, 2))
+                {
+                    int center = blurred.GetPixel(20, 20).R;
+                    Assert(center > 30 && center < 255 && blurred.GetPixel(20, 16).R > 0 && blurred.GetPixel(20, 16).R < center, "Gaussian filtering did not spread an impulse smoothly.");
+                    Assert(Math.Abs(blurred.GetPixel(16, 20).R - blurred.GetPixel(24, 20).R) <= 1, "Gaussian kernel was not symmetric.");
+                }
+                using (var canvas = new AnnotationCanvas(new Bitmap(impulse)))
+                {
+                    canvas.Tool = DrawTool.Mosaic; canvas.MosaicMode = ApplyMode.Rectangle; canvas.MosaicEffect = MosaicEffect.GaussianBlur; canvas.BlurRadius = 3;
+                    Gesture(canvas, new Point(10, 10), new Point(31, 31));
+                    using (var exported = canvas.Render())
+                    {
+                        Assert(exported.GetPixel(20, 20).R < 255 && exported.GetPixel(16, 20).R > 0, "The Gaussian selection did not blur its source.");
+                        Assert(exported.GetPixel(9, 20).ToArgb() == impulse.GetPixel(9, 20).ToArgb(), "Blur escaped its selection mask.");
+                    }
+                    canvas.Undo(); using (var original = canvas.Render()) EqualPixels(impulse, original, impulse.Height);
+                    canvas.Redo(); Assert(canvas.Marks[0].MosaicEffect == MosaicEffect.GaussianBlur && canvas.Marks[0].BlurRadius == 3, "Undo lost the blur parameters.");
+                }
+            }
+            using (var flat = new Bitmap(80, 60))
+            {
+                using (var g = Graphics.FromImage(flat)) g.Clear(Color.FromArgb(47, 91, 137));
+                using (var blurred = ImageFilters.Gaussian(flat, 16)) EqualPixels(flat, blurred, flat.Height);
+            }
+        }
+        private static void TestEditableMosaic()
+        {
+            using (var canvas = new AnnotationCanvas(Pattern(240, 180, 233)))
+            {
+                canvas.Tool = DrawTool.Mosaic; canvas.MosaicMode = ApplyMode.Rectangle;
+                Gesture(canvas, new Point(20, 20), new Point(100, 90));
+                var original = canvas.Marks[0].Bounds;
+                Gesture(canvas, new Point(60, 55), new Point(90, 70));
+                Assert(canvas.Marks.Count == 1 && canvas.Marks[0].Bounds == new RectangleF(50, 35, 80, 70), "Moving the mosaic created a second annotation or changed its size.");
+                Gesture(canvas, new Point(130, 105), new Point(160, 125));
+                Assert(canvas.Marks[0].Bounds == new RectangleF(50, 35, 110, 90), "Mosaic resize handles did not update its area.");
+                canvas.ApplyMosaicSettings(MosaicEffect.GaussianBlur, 14, 5);
+                Assert(canvas.Marks[0].MosaicEffect == MosaicEffect.GaussianBlur, "Existing mosaic effect could not be changed.");
+                canvas.Undo(); Assert(canvas.Marks[0].MosaicEffect == MosaicEffect.Pixelate, "Effect change did not undo independently.");
+                canvas.Undo(); Assert(canvas.Marks[0].Bounds == new RectangleF(50, 35, 80, 70), "Resize did not undo independently.");
+                canvas.Undo(); Assert(canvas.Marks[0].Bounds == original, "Move did not undo independently.");
+                canvas.Redo(); Assert(canvas.Marks[0].Bounds == new RectangleF(50, 35, 80, 70), "Mosaic move did not redo.");
+            }
+        }
+        private static void ClickVertex(AnnotationCanvas canvas, Point point)
+        { Mouse(canvas, "OnMouseDown", MouseButtons.Left, point.X, point.Y); Mouse(canvas, "OnMouseUp", MouseButtons.Left, point.X, point.Y); }
+        private static void TestPolylines()
+        {
+            using (var canvas = new AnnotationCanvas(new Bitmap(300, 220)))
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                canvas.Tool = DrawTool.Polyline; canvas.Ink = Color.Red; canvas.Stroke = 4;
+                ClickVertex(canvas, new Point(20, 30)); ClickVertex(canvas, new Point(120, 30)); ClickVertex(canvas, new Point(120, 140));
+                Assert(canvas.Marks.Count == 0, "Point clicks prematurely committed separate lines.");
+                Assert(canvas.HandleGestureKey(new KeyEventArgs(Keys.Enter)), "Enter did not finish the polyline.");
+                Assert(canvas.Marks.Count == 1 && canvas.Marks[0].Points.Count == 3, "Polyline did not store its clicked vertices as one annotation.");
+                using (var rendered = canvas.Render()) Assert(rendered.GetPixel(70, 30).R > 240 && rendered.GetPixel(70, 30).G < 20 && rendered.GetPixel(120, 90).G < 20 && rendered.GetPixel(70, 90).G > 240, "Polyline segments did not follow the clicked route.");
+                canvas.Undo(); Assert(canvas.Marks.Count == 0, "Polyline needed multiple undo operations."); canvas.Redo();
+                canvas.Tool = DrawTool.ArrowPolyline;
+                ClickVertex(canvas, new Point(30, 170)); ClickVertex(canvas, new Point(130, 170)); ClickVertex(canvas, new Point(180, 100));
+                canvas.HandleGestureKey(new KeyEventArgs(Keys.Back)); ClickVertex(canvas, new Point(230, 170));
+                canvas.HandleGestureKey(new KeyEventArgs(Keys.Enter));
+                Assert(canvas.Marks[1].Tool == DrawTool.ArrowPolyline && canvas.Marks[1].Points.Count == 3 && canvas.Marks[1].Points[2] == new PointF(230, 170), "Backspace did not remove one polyline vertex.");
+                ClickVertex(canvas, new Point(10, 10)); ClickVertex(canvas, new Point(30, 50)); canvas.HandleGestureKey(new KeyEventArgs(Keys.Escape));
+                Assert(canvas.Marks.Count == 2, "Escape committed a cancelled polyline.");
+                ClickVertex(canvas, new Point(30, 40)); ClickVertex(canvas, new Point(90, 80));
+                canvas.GetType().GetMethod("OnMouseDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(canvas,
+                    new object[] { new MouseEventArgs(MouseButtons.Left, 2, 90, 80, 0) });
+                Assert(canvas.Marks.Count == 3 && canvas.Marks[2].Points.Count == 2, "Double-click appended a duplicate vertex or failed to finish.");
+            }
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                overlay.Show(); Select(overlay);
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); toolbar.SelectTool(DrawTool.Polyline);
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                ClickVertex(canvas, new Point(30, 30)); ClickVertex(canvas, new Point(140, 100));
+                Key(overlay, Keys.Enter); Assert(!overlay.IsDisposed && canvas.Marks.Count == 1, "Enter exported the screenshot instead of finishing its polyline.");
+                ClickVertex(canvas, new Point(200, 100)); ClickVertex(canvas, new Point(300, 160)); Key(overlay, Keys.Escape);
+                Assert(!overlay.IsDisposed && canvas.Marks.Count == 1, "Escape closed the screenshot instead of cancelling the unfinished polyline.");
+                ToolPreview(overlay, "polyline"); overlay.Close();
+            }
+        }
+        private static void TestApplicationIcon()
+        {
+            using (var stream = typeof(MainForm).Assembly.GetManifestResourceStream("ShotInk.ApplicationIcon"))
+            {
+                Assert(stream != null, "Application branding was not embedded.");
+                using (var reader = new BinaryReader(stream))
+                { Assert(reader.ReadUInt16() == 0 && reader.ReadUInt16() == 1 && reader.ReadUInt16() == 7, "The ICO did not contain all seven Windows icon sizes."); }
+            }
+            using (var icon = MainForm.CreateIcon())
+            using (var pixels = icon.ToBitmap())
+            {
+                int yellow = 0;
+                for (int y = 0; y < pixels.Height; y++) for (int x = 0; x < pixels.Width; x++)
+                { var color = pixels.GetPixel(x, y); if (color.R > 180 && color.G > 100 && color.B < 150) yellow++; }
+                pixels.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-app-icon.png"));
+                Assert(yellow > 100 && pixels.GetPixel(0, 0).A == 0, "The shell icon lost its yellow color or transparency: " + pixels.Size + ", yellow=" + yellow + ", corner=" + pixels.GetPixel(0, 0));
+            }
+        }
+        private static void TestLiveLongDrag()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                overlay.Show(); overlay.Activate(); Select(overlay);
+                var image = new Bitmap(700, 1200); using (var g = Graphics.FromImage(image)) g.Clear(Color.Magenta);
+                overlay.ShowLongPreview(image); var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                Mouse(canvas, "OnMouseDown", MouseButtons.Left, 40, 50);
+                Mouse(overlay, "OnMouseMove", MouseButtons.Left, 220, 180); overlay.Refresh(); Application.DoEvents(); Native.FlushDesktop();
+                using (var screen = Native.Capture(overlay.Bounds))
+                {
+                    Assert(screen.GetPixel(90, 80).ToArgb() != Color.Magenta.ToArgb(), "Old long-image pixels remained after dragging.");
+                    Assert(screen.GetPixel(240, 190).ToArgb() == Color.Magenta.ToArgb(), "The dragged long image was not painted on the parent surface.");
+                    screen.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-long-drag-options.png"));
+                }
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, 220, 180); overlay.Close();
+            }
+        }
         private static void TestMosaic()
         {
-            using (var canvas = new AnnotationCanvas(Pattern(90, 100, 32)))
+            using (var canvas = new AnnotationCanvas(new Bitmap(90, 100)))
             {
-                var mark = new Mark { Tool = DrawTool.Mosaic, Width = 3 };
+                for (int y = 0; y < 100; y++) for (int x = 0; x < 90; x++) canvas.Image.SetPixel(x, y, (x + y) % 2 == 0 ? Color.Black : Color.White);
+                var mark = new Mark { Tool = DrawTool.Mosaic, MosaicSize = 10, Width = 3 };
                 mark.Points.Add(new PointF(10, 10)); mark.Points.Add(new PointF(32, 33)); canvas.AddMark(mark);
                 using (var rendered = canvas.Render())
                 {
-                    var source = canvas.Image.GetPixel(32, 32); int gray = (source.R * 299 + source.G * 587 + source.B * 114 + 500) / 1000;
-                    Assert(rendered.GetPixel(31, 32).ToArgb() == Color.FromArgb(gray, gray, gray).ToArgb(), "Partial edge block did not use grayscale mosaic.");
+                    Assert(rendered.GetPixel(31, 32).ToArgb() == Color.FromArgb(128, 128, 128).ToArgb(), "Partial edge block did not use the averaged grayscale mosaic.");
                     Assert(rendered.GetPixel(9, 9).ToArgb() == canvas.Image.GetPixel(9, 9).ToArgb(), "Mosaic modified pixels outside region.");
                 }
             }
@@ -955,6 +1123,9 @@ namespace ShotInk
                 Option<OvalSlider>(options, "mosaic-size").Value = 22;
                 Option<OvalSlider>(options, "mosaic-brush-size").Value = 50;
                 Assert(canvas.MosaicSize == 22 && canvas.MosaicBrushSize == 50, "Mosaic sliders did not update separate settings.");
+                Option<Button>(options, "mosaic-gaussian").PerformClick(); Option<OvalSlider>(options, "blur-radius").Value = 12;
+                Assert(canvas.MosaicEffect == MosaicEffect.GaussianBlur && canvas.BlurRadius == 12 && canvas.MosaicSize == 22, "Gaussian options did not keep independent pixel-block settings.");
+                Option<Button>(options, "mosaic-pixelate").PerformClick();
                 Option<Button>(options, "mode-rectangle").PerformClick();
                 Assert(canvas.MosaicMode == ApplyMode.Rectangle && !Option<OvalSlider>(options, "mosaic-brush-size").Enabled, "Mosaic selection mode did not activate.");
                 tools[DrawTool.Mosaic].PerformClick();

@@ -18,6 +18,8 @@ namespace ShotInk
         internal int MosaicSize { get { return settings.Tool(DrawTool.Mosaic).MosaicSize; } set { settings.Tool(DrawTool.Mosaic).MosaicSize = value; } }
         internal int MosaicBrushSize { get { return settings.Tool(DrawTool.Mosaic).BrushSize; } set { settings.Tool(DrawTool.Mosaic).BrushSize = value; } }
         internal int EraserBrushSize { get { return settings.Tool(DrawTool.Eraser).BrushSize; } set { settings.Tool(DrawTool.Eraser).BrushSize = value; } }
+        internal MosaicEffect MosaicEffect { get { return settings.Tool(DrawTool.Mosaic).MosaicEffect; } set { settings.Tool(DrawTool.Mosaic).MosaicEffect = value; } }
+        internal int BlurRadius { get { return settings.Tool(DrawTool.Mosaic).BlurRadius; } set { settings.Tool(DrawTool.Mosaic).BlurRadius = value; } }
         internal event Action SettingsChanged;
         internal event Action<DrawTool> ToolChanged;
 
@@ -35,12 +37,15 @@ namespace ShotInk
             if (boundCanvas != canvas)
             {
                 if (boundCanvas != null) boundCanvas.TextAnnotationSelected -= ReadTextSettings;
+                if (boundCanvas != null) boundCanvas.MosaicAnnotationSelected -= ReadMosaicSettings;
                 boundCanvas = canvas; canvas.TextAnnotationSelected += ReadTextSettings;
+                canvas.MosaicAnnotationSelected += ReadMosaicSettings;
             }
             canvas.Ink = Ink; canvas.Stroke = Stroke;
             canvas.ApplyTextSettings(TextFontSize, TextFontStyle, Ink);
             canvas.MosaicMode = MosaicMode; canvas.EraserMode = EraserMode;
             canvas.MosaicSize = MosaicSize; canvas.MosaicBrushSize = MosaicBrushSize; canvas.EraserBrushSize = EraserBrushSize;
+            canvas.ApplyMosaicSettings(MosaicEffect, MosaicSize, BlurRadius);
             canvas.UpdateToolCursor();
         }
         private void ReadTextSettings(Mark mark)
@@ -50,6 +55,12 @@ namespace ShotInk
             boundCanvas.Ink = Ink; boundCanvas.TextFontSize = TextFontSize; boundCanvas.TextFontStyle = TextFontStyle;
             settings.NotifyChanged();
             ShowTool(DrawTool.Text);
+        }
+        private void ReadMosaicSettings(Mark mark)
+        {
+            currentTool = DrawTool.Mosaic; MosaicEffect = mark.MosaicEffect; MosaicSize = mark.MosaicSize; BlurRadius = mark.BlurRadius;
+            boundCanvas.MosaicEffect = MosaicEffect; boundCanvas.MosaicSize = MosaicSize; boundCanvas.BlurRadius = BlurRadius;
+            settings.NotifyChanged(); ShowTool(DrawTool.Mosaic);
         }
 
         internal void UseDefaultMode(DrawTool tool)
@@ -71,7 +82,14 @@ namespace ShotInk
                 Caption(modes, mosaic ? "马赛克" : "橡皮擦");
                 Choice(modes, "画笔", "mode-brush", mode == ApplyMode.Brush, delegate { SetMode(tool, ApplyMode.Brush); });
                 Choice(modes, "选框", "mode-rectangle", mode == ApplyMode.Rectangle, delegate { SetMode(tool, ApplyMode.Rectangle); });
-                if (mosaic) Slider("马赛克大小", "mosaic-size", 4, 48, MosaicSize, true, delegate(int value) { MosaicSize = value; NotifySettings(); });
+                if (mosaic)
+                {
+                    var effects = Row(); Caption(effects, "效果");
+                    Choice(effects, "像素块", "mosaic-pixelate", MosaicEffect == MosaicEffect.Pixelate, delegate { MosaicEffect = MosaicEffect.Pixelate; NotifySettings(); ShowTool(tool); });
+                    Choice(effects, "高斯模糊", "mosaic-gaussian", MosaicEffect == MosaicEffect.GaussianBlur, delegate { MosaicEffect = MosaicEffect.GaussianBlur; NotifySettings(); ShowTool(tool); });
+                    if (MosaicEffect == MosaicEffect.Pixelate) Slider("马赛克大小", "mosaic-size", 4, 48, MosaicSize, true, delegate(int value) { MosaicSize = value; NotifySettings(); });
+                    else Slider("模糊强度", "blur-radius", 1, 24, BlurRadius, true, delegate(int value) { BlurRadius = value; NotifySettings(); });
+                }
                 Slider("画笔大小", mosaic ? "mosaic-brush-size" : "eraser-brush-size", 4, 160, mosaic ? MosaicBrushSize : EraserBrushSize, mode == ApplyMode.Brush,
                     delegate(int value) { if (mosaic) MosaicBrushSize = value; else EraserBrushSize = value; NotifySettings(); });
             }
@@ -94,12 +112,16 @@ namespace ShotInk
                     Choice(modes, "矩形", "shape-rectangle", tool == DrawTool.Rectangle, delegate { ChooseTool(DrawTool.Rectangle); });
                     Choice(modes, "椭圆", "shape-ellipse", tool == DrawTool.Ellipse, delegate { ChooseTool(DrawTool.Ellipse); });
                 }
-                if (tool == DrawTool.Arrow || tool == DrawTool.Line)
+                if (tool == DrawTool.Arrow || tool == DrawTool.Line || tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline)
                 {
                     var modes = Row();
                     Caption(modes, "线条");
                     Choice(modes, "箭头", "line-arrow", tool == DrawTool.Arrow, delegate { ChooseTool(DrawTool.Arrow); });
                     Choice(modes, "直线", "line-straight", tool == DrawTool.Line, delegate { ChooseTool(DrawTool.Line); });
+                    Choice(modes, "折线", "line-polyline", tool == DrawTool.Polyline, delegate { ChooseTool(DrawTool.Polyline); });
+                    Choice(modes, "折线箭头", "line-polyline-arrow", tool == DrawTool.ArrowPolyline, delegate { ChooseTool(DrawTool.ArrowPolyline); });
+                    if (tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline)
+                        Row().Controls.Add(new Label { AutoSize = true, Text = "单击加点 · 双击 / Enter 完成 · Backspace 退点 · Esc 取消", Margin = new Padding(3, 7, 0, 0) });
                 }
                 var colors = Row();
                 foreach (var color in new[] { Color.FromArgb(239, 64, 76), Color.FromArgb(255, 174, 38), Color.FromArgb(250, 216, 49), Color.FromArgb(37, 181, 114), Color.FromArgb(47, 135, 246), Color.FromArgb(150, 89, 224), Color.Black, Color.White })

@@ -31,6 +31,7 @@ namespace ShotInk
         internal SettingsForm(AppSettings current, Func<AppSettings, string> apply)
         {
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
+            MainForm.UseAppIcon(this);
             Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 430); MinimumSize = new Size(640, 460);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;

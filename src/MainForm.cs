@@ -365,17 +365,14 @@ namespace ShotInk
         }
         internal static Icon CreateIcon()
         {
-            using (var bitmap = new Bitmap(32, 32))
-            using (var g = Graphics.FromImage(bitmap))
+            using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("ShotInk.ApplicationIcon"))
             {
-                g.Clear(Theme.Accent);
-                using (var p = new Pen(Color.White, 3)) { g.DrawRectangle(p, 7, 9, 18, 14); g.DrawLine(p, 12, 6, 20, 6); }
-                IntPtr handle = bitmap.GetHicon();
-                try { using (var icon = Icon.FromHandle(handle)) return (Icon)icon.Clone(); }
-                finally { DestroyIcon(handle); }
+                if (stream == null) return (Icon)SystemIcons.Application.Clone();
+                using (var icon = new Icon(stream, 32, 32)) return (Icon)icon.Clone();
             }
         }
-        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr handle);
+        internal static void UseAppIcon(Form form)
+        { var icon = CreateIcon(); form.Icon = icon; form.Disposed += delegate { icon.Dispose(); }; }
     }
 
     internal sealed class HeroPanel : Panel

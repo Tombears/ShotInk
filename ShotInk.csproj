@@ -8,6 +8,7 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <OutputPath>dist\</OutputPath>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets\shotink.ico</ApplicationIcon>
     <StartupObject>ShotInk.Program</StartupObject>
     <LangVersion>5</LangVersion>
     <Prefer32Bit>false</Prefer32Bit>
@@ -19,6 +20,7 @@
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="Accessibility" />
     <Compile Include="src\*.cs" />
+    <EmbeddedResource Include="assets\shotink.ico"><LogicalName>ShotInk.ApplicationIcon</LogicalName></EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

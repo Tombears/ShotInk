@@ -10,6 +10,19 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $fixture $file))) { throw ('ZIP omitted required file: ' + $file) }
     }
     if ((Get-FileHash -LiteralPath (Join-Path $fixture 'ShotInk.exe')).Hash -ne (Get-FileHash -LiteralPath (Join-Path $root 'dist\ShotInk.exe')).Hash) { throw 'Packaged application differs from the tested build.' }
+    Add-Type -AssemblyName System.Drawing
+    $applicationIcon = [Drawing.Icon]::ExtractAssociatedIcon((Join-Path $fixture 'ShotInk.exe'))
+    try {
+        $iconPixels = $applicationIcon.ToBitmap()
+        try {
+            $yellow = 0
+            for ($y = 0; $y -lt $iconPixels.Height; $y++) { for ($x = 0; $x -lt $iconPixels.Width; $x++) {
+                $color = $iconPixels.GetPixel($x, $y)
+                if ($color.R -gt 180 -and $color.G -gt 100 -and $color.B -lt 150) { $yellow++ }
+            } }
+            if ($yellow -lt 20 -or $iconPixels.GetPixel(0, 0).A -ne 0) { throw 'Packaged executable lost its yellow shell icon or transparency.' }
+        } finally { $iconPixels.Dispose() }
+    } finally { $applicationIcon.Dispose() }
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
     $probe = Join-Path $fixture 'ShotInk.PackageTests.exe'
@@ -24,7 +37,7 @@ try {
             if ($application.HasExited) { throw 'Packaged application exited on launch.' }
         } finally { if (-not $application.HasExited) { Stop-Process -Id $application.Id -Force } }
     } else { Write-Host 'Existing ShotInk instance preserved; separate application launch skipped.' }
-    Write-Host 'PASS: portable ZIP contents, application hash and bundled OCR inference'
+    Write-Host 'PASS: portable ZIP contents, application hash, executable icon and bundled OCR inference'
 } finally {
     if (Test-Path -LiteralPath $fixture) {
         $resolvedFixture = (Resolve-Path -LiteralPath $fixture).Path

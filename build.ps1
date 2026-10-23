@@ -16,7 +16,7 @@ $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '
 $references = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', '/r:Accessibility.dll')
 $common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references
 $appPath = Join-Path $distRoot 'ShotInk.exe'
-& $compiler @common '/target:winexe' ('/out:' + $appPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) @sources
+& $compiler @common '/target:winexe' ('/out:' + $appPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/win32icon:' + (Join-Path $projectRoot 'assets\shotink.ico')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources
 if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $distRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $distRoot -Force
@@ -27,7 +27,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\ocr.md') -Destination $docs
 if ($Test -or $Preview) {
     $testPath = Join-Path $buildRoot 'ShotInk.Tests.exe'
     $testSource = Join-Path $projectRoot 'tests\Tests.cs'
-    & $compiler @common '/target:exe' '/main:ShotInk.Tests' ('/out:' + $testPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) @sources $testSource
+    & $compiler @common '/target:exe' '/main:ShotInk.Tests' ('/out:' + $testPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources $testSource
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
     $testArgs = @()
     if ($Preview) { $testArgs += @('--preview', $buildRoot) }
