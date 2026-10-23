@@ -102,7 +102,7 @@ namespace ShotInk
             next.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
             next.MouseDown += delegate(object sender, MouseEventArgs e)
             {
-                if (e.Button == MouseButtons.Right) Close();
+                if (e.Button == MouseButtons.Right) BeginRightCancel();
                 else if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None && !canvas.HasTextRecognition)
                     BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
             };

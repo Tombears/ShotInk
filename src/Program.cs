@@ -9,6 +9,7 @@ namespace ShotInk
         [STAThread]
         private static void Main()
         {
+            Native.RefreshExecutableIcon(Application.ExecutablePath);
             bool first;
             // Share the legacy mutex so both names cannot register the same hotkeys.
             using (var instance = new Mutex(true, "Local\\SnipasteLite.Desktop", out first))

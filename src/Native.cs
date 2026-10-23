@@ -22,6 +22,29 @@ namespace ShotInk
         [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
         [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, int message, IntPtr word, IntPtr value);
         [DllImport("dwmapi.dll")] private static extern int DwmFlush();
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct ShellFileInfo
+        {
+            internal IntPtr Icon;
+            internal int IconIndex;
+            internal uint Attributes;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] internal string DisplayName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] internal string TypeName;
+        }
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SHGetFileInfo(string path, uint attributes, out ShellFileInfo info, uint size, uint flags);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern void SHUpdateImage(string path, int iconIndex, uint flags, int imageIndex);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern void SHChangeNotify(uint change, uint flags, string path, IntPtr other);
+        internal static void RefreshExecutableIcon(string path)
+        {
+            ShellFileInfo info;
+            if (SHGetFileInfo(path, 0, out info, (uint)Marshal.SizeOf(typeof(ShellFileInfo)), 0x4000) == IntPtr.Zero) return;
+            // Updating the same EXE path can leave Explorer's previous image cached.
+            SHUpdateImage(path, 0, 0, info.IconIndex);
+            SHChangeNotify(0x2000, 0x1005, path, IntPtr.Zero);
+        }
         internal static void FlushDesktop() { DwmFlush(); }
         internal static IntPtr WindowAt(Point point) { return WindowFromPoint(point); }
         internal static IntPtr RootWindow(IntPtr window) { return GetAncestor(window, 2); }

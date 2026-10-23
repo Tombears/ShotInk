@@ -21,6 +21,7 @@ namespace ShotInk
         private bool dragging;
         private bool ready;
         private bool completed;
+        private bool rightCancelPending;
         private Bitmap longDragPreview;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
@@ -55,6 +56,7 @@ namespace ShotInk
                 var grip = new ResizeGrip { Visible = false, Size = new Size(9, 9), Cursor = HandleCursor(i) };
                 grip.MouseDown += delegate(object sender, MouseEventArgs e)
                 {
+                    if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
                     if (e.Button == MouseButtons.Left) BeginAdjust(index, PointToClient(((Control)sender).PointToScreen(e.Location)));
                 };
                 grips[i] = grip; Controls.Add(grip);
@@ -112,11 +114,17 @@ namespace ShotInk
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Right) { Close(); return; }
+            if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
             if (e.Button != MouseButtons.Left) return;
             if (ready && selection.Contains(e.Location)) { BeginAdjust(-1, e.Location); return; }
             ClearSelection();
             anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; Capture = true;
+        }
+
+        private void BeginRightCancel()
+        {
+            // Keep the overlay alive and capture the matching release, even if the pointer moves.
+            rightCancelPending = true; Capture = true;
         }
 
         private void BeginAdjust(int handle, Point location)
@@ -157,6 +165,8 @@ namespace ShotInk
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (rightCancelPending && e.Button == MouseButtons.Right)
+            { rightCancelPending = false; Close(); return; }
             if (!dragging || e.Button != MouseButtons.Left) return;
             // Process the final pointer position even when Windows coalesces mouse-move events.
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
@@ -185,7 +195,7 @@ namespace ShotInk
             canvas = new AnnotationCanvas(desktop.Clone(selection, desktop.PixelFormat)) { Location = selection.Location, Tool = DrawTool.None, Cursor = Cursors.SizeAll };
             canvas.MouseDown += delegate(object sender, MouseEventArgs e)
             {
-                if (e.Button == MouseButtons.Right) { Close(); return; }
+                if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
                 if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None && !canvas.HasTextRecognition && longViewport == null) BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
             };
             canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };

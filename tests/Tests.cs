@@ -64,6 +64,7 @@ namespace ShotInk
                 Run("floating selection stays open and exports only edited pixels", TestFloatingSelection);
                 Run("selection resize and toolbar stay within display bounds", TestSelectionGeometry);
                 Run("cancelled selection does not export a screenshot", TestSelectionCancel);
+                Run("right-button cancellation waits for release across overlay, canvas and long preview", TestRightCancel);
                 if (args.Length == 2 && args[0] == "--preview")
                 {
                     Run("native screen capture reads a known test window", TestScreenCapture);
@@ -76,6 +77,7 @@ namespace ShotInk
                 { Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture); Run("live integrated scroll capture excludes its own chrome", TestLiveIntegratedScroll); }
                 if (args.Length == 1 && args[0] == "--interaction-preview")
                 {
+                    Run("real right-button cancellation does not reach the background window", TestLiveRightCancel);
                     Run("live selection dragging clears old borders on screen", TestLiveDrag);
                     Run("live long-image dragging erases its old viewport and scrollbars", TestLiveLongDrag);
                     Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture);
@@ -1527,6 +1529,66 @@ namespace ShotInk
                 overlay.GetType().GetMethod("OnKeyDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay, new object[] { new KeyEventArgs(Keys.Escape) });
                 Assert(!exported && overlay.IsDisposed, "Cancel exported or kept the overlay open.");
             }
+        }
+        private static void TestRightCancel()
+        {
+            for (int mode = 0; mode < 4; mode++)
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                int cancelled = 0; overlay.Cancelled += delegate { cancelled++; };
+                overlay.Show();
+                if (mode != 0) Select(overlay);
+                if (mode == 2) overlay.ShowLongPreview(new Bitmap(700, 1200));
+                Control target = mode == 0 ? (Control)overlay : mode == 3 ? (Control)Field<Array>(overlay, "grips").GetValue(0) : Field<AnnotationCanvas>(overlay, "canvas");
+                Mouse(target, "OnMouseDown", MouseButtons.Right, 30, 30);
+                Assert(!overlay.IsDisposed && cancelled == 0 && overlay.Capture, "Right-down closed the overlay before it could consume the matching release.");
+                Mouse(overlay, "OnMouseUp", MouseButtons.Right, 890, 590);
+                Assert(overlay.IsDisposed && cancelled == 1, "Right-up did not cancel the overlay exactly once.");
+            }
+        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extra);
+        private static void TestLiveRightCancel()
+        {
+            var previousCursor = Cursor.Position;
+            try
+            {
+                using (var background = new Form { StartPosition = FormStartPosition.Manual, Bounds = new Rectangle(20, 20, 900, 600) })
+                using (var menu = new ContextMenuStrip())
+                {
+                    int releases = 0, menus = 0; bool held = false;
+                    menu.Items.Add("background"); menu.Opening += delegate { menus++; };
+                    background.ContextMenuStrip = menu;
+                    background.MouseUp += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Right) releases++; };
+                    background.Show(); background.Activate(); Application.DoEvents();
+                    for (int mode = 0; mode < 3; mode++)
+                    using (var overlay = new CaptureOverlay(false, FlatDesktop(), background.Bounds))
+                    {
+                        overlay.Show(); overlay.Activate();
+                        if (mode != 0) Select(overlay);
+                        if (mode == 2) overlay.ShowLongPreview(new Bitmap(700, 1200));
+                        Cursor.Position = new Point(200, 200); Application.DoEvents();
+                        try
+                        {
+                            mouse_event(0x0008, 0, 0, 0, UIntPtr.Zero); held = true;
+                            Application.DoEvents();
+                            Assert(!overlay.IsDisposed, "Real right-down closed the overlay early.");
+                            Cursor.Position = new Point(250, 230);
+                            mouse_event(0x0010, 0, 0, 0, UIntPtr.Zero); held = false;
+                            WaitUntil(delegate { return overlay.IsDisposed; });
+                            for (int i = 0; i < 10; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                            Assert(releases == 0 && menus == 0, "Cancelling opened the background context menu or leaked the right release.");
+                        }
+                        finally { if (held) { mouse_event(0x0010, 0, 0, 0, UIntPtr.Zero); held = false; } }
+                    }
+                    // Check the background probe really detects a normal right click.
+                    background.Activate(); Cursor.Position = new Point(250, 230); Application.DoEvents();
+                    mouse_event(0x0008, 0, 0, 0, UIntPtr.Zero); mouse_event(0x0010, 0, 0, 0, UIntPtr.Zero);
+                    WaitUntil(delegate { return releases > 0 && menus > 0; }); menu.Close();
+                    background.Close();
+                }
+            }
+            finally { Cursor.Position = previousCursor; }
         }
         private static Bitmap Sample()
         {
