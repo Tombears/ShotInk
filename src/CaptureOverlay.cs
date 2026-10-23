@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace ShotInk
 {
-    internal sealed class CaptureOverlay : Form
+    internal sealed partial class CaptureOverlay : Form
     {
         private readonly Bitmap desktop;
         private readonly Rectangle screenBounds;
@@ -25,7 +25,6 @@ namespace ShotInk
         private CaptureToolbar toolbar;
         private TextRecognitionSession recognition;
         private readonly AppSettings settings;
-        internal event Action<Rectangle, Bitmap> Selected;
         internal event Action<Bitmap, CaptureAction> Completed;
         internal event Action Cancelled;
 
@@ -120,7 +119,7 @@ namespace ShotInk
 
         private void BeginAdjust(int handle, Point location)
         {
-            if (!ready) return;
+            if (!ready || scrollSession != null || longViewport != null) return;
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
             if (canvas != null) { canvas.CommitTextEdit(); canvas.Hide(); }
             sizeHint.Hide(); foreach (var grip in grips) grip.Hide();
@@ -154,13 +153,6 @@ namespace ShotInk
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
             dragging = false; Capture = false;
             if (selection.Width < 8 || selection.Height < 8) { ClearSelection(); Invalidate(); return; }
-            if (scrolling)
-            {
-                completed = true;
-                var region = new Rectangle(selection.X + screenBounds.X, selection.Y + screenBounds.Y, selection.Width, selection.Height);
-                Hide(); Close(); if (Selected != null) Selected(region, null);
-                return;
-            }
             if (!ready) PrepareEditor();
             else if (canvas != null)
             {
@@ -170,6 +162,7 @@ namespace ShotInk
             }
             UpdateSelectionChrome();
             toolbar.Show(); PositionToolbar(); Invalidate(true);
+            if (scrolling && longViewport == null) StartLongCapture();
         }
 
         private void PrepareEditor()
@@ -179,7 +172,7 @@ namespace ShotInk
             canvas.MouseDown += delegate(object sender, MouseEventArgs e)
             {
                 if (e.Button == MouseButtons.Right) { Close(); return; }
-                if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
+                if (e.Button == MouseButtons.Left && canvas.Tool == DrawTool.None && !canvas.HasTextRecognition && longViewport == null) BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
             };
             canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
             Controls.Add(canvas);
@@ -191,8 +184,9 @@ namespace ShotInk
             toolbar.CancelClicked += delegate { Close(); };
             toolbar.FinishClicked += Finish;
             toolbar.LayoutChanged += PositionToolbar;
-            recognition = new TextRecognitionSession(this, canvas.Render, delegate { return canvas.Revision; }, toolbar.SetRecognitionBusy,
-                delegate(OcrDocument document) { toolbar.SelectTool(DrawTool.None); canvas.SetTextRecognition(document); canvas.Focus(); });
+            ResetRecognitionSession();
+            toolbar.ScrollClicked += StartLongCapture;
+            toolbar.ScrollFinishClicked += FinishLongCapture;
             toolbar.RecognitionClicked += async delegate { await recognition.RecognizeAsync(); };
             toolbar.RecognitionHovered += delegate { RapidTextRecognizer.Shared.WarmUpAsync(); };
             toolbar.CopySelectedText += delegate { canvas.CopyRecognizedText(false); };
@@ -220,13 +214,14 @@ namespace ShotInk
         {
             if (dragging) return;
             sizeHint.Visible = selection.Width > 0 && selection.Height > 0;
-            sizeHint.Text = selection.Width + " × " + selection.Height + " px";
+            sizeHint.Text = (longViewport == null ? selection.Width : canvas.Image.Width) + " × " + (longViewport == null ? selection.Height : canvas.Image.Height) + " px";
+            if (longLimitReached) sizeHint.Text += " · 达到上限，已自动完成";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
             sizeHint.BringToFront();
             var points = SelectionGeometry.Handles(selection);
             for (int i = 0; i < grips.Length; i++)
             {
-                grips[i].Visible = ready;
+                grips[i].Visible = ready && longViewport == null && scrollSession == null;
                 grips[i].Location = new Point(points[i].X - 4, points[i].Y - 4);
                 grips[i].BringToFront();
             }
@@ -249,9 +244,12 @@ namespace ShotInk
 
         private void ClearSelection()
         {
+            if (scrollSession != null) { scrollSession.Dispose(); scrollSession = null; ResetCaptureRegion(); }
             ready = false;
             if (recognition != null) { recognition.Dispose(); recognition = null; }
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); canvas = null; }
+            if (longViewport != null) { Controls.Remove(longViewport); longViewport.Dispose(); longViewport = null; }
+            longLimitReached = false;
             if (toolbar != null) { Controls.Remove(toolbar); toolbar.Dispose(); toolbar = null; }
             selection = Rectangle.Empty; sizeHint.Hide();
             foreach (var grip in grips) grip.Hide();
@@ -259,7 +257,7 @@ namespace ShotInk
 
         private void Finish(CaptureAction action)
         {
-            if (!ready || completed) return;
+            if (!ready || completed || scrollSession != null) return;
             var image = canvas.Render();
             if (action == CaptureAction.Save)
             {
@@ -277,6 +275,12 @@ namespace ShotInk
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (scrollSession != null)
+            {
+                if (e.KeyCode == Keys.Enter) FinishLongCapture();
+                else if (e.KeyCode == Keys.Escape) Close();
+                e.SuppressKeyPress = true; return;
+            }
             if (canvas != null && canvas.HandleTextKey(e)) return;
             base.OnKeyDown(e);
             if (canvas != null && canvas.HandleRecognitionKey(e)) return;
@@ -294,7 +298,7 @@ namespace ShotInk
             return index == 1 || index == 5 ? Cursors.SizeNS : Cursors.SizeWE;
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
-        protected override void Dispose(bool disposing) { if (disposing) { if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

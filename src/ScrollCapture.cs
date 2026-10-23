@@ -1,153 +1,148 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 
 namespace ShotInk
 {
-    internal sealed class ScrollCapture : Form
+    internal sealed class ScrollCaptureResult : IDisposable
     {
-        private readonly Rectangle region;
-        private readonly Label status;
-        private readonly ComboBox mode;
-        private readonly NumericUpDown delay;
-        private readonly Button start;
-        private readonly Button next;
-        private readonly Button finish;
-        private readonly Button cancel;
-        private readonly VerticalStitcher stitcher = new VerticalStitcher();
-        private bool running;
-        private bool busy;
-        private bool cancelled;
-        private bool finished;
-        private bool pendingFinish;
-        internal event Action<Bitmap> Completed;
-        internal event Action Cancelled;
-        protected override bool ShowWithoutActivation { get { return true; } }
-        protected override CreateParams CreateParams
-        {
-            get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000; return cp; }
-        }
+        internal Bitmap Image;
+        internal bool LimitReached;
+        internal int Frames;
+        internal Bitmap TakeImage() { var image = Image; Image = null; return image; }
+        public void Dispose() { if (Image != null) Image.Dispose(); }
+    }
 
-        internal ScrollCapture(Rectangle region)
+    // Sampling and stitching run independently; at most two frames are pending.
+    internal sealed class ScrollCaptureSession : IDisposable
+    {
+        internal const int PollInterval = 10;
+        private readonly Func<Bitmap> capture;
+        private readonly int heightLimit;
+        private readonly long pixelLimit;
+        private readonly object gate = new object();
+        private readonly Queue<Bitmap> pending = new Queue<Bitmap>();
+        private readonly SemaphoreSlim changed = new SemaphoreSlim(0);
+        private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
+        private bool producerDone;
+        private volatile bool finishRequested;
+        private int started;
+        private int disposed;
+        private int stitchedHeight;
+        private int stitchedFrames;
+        internal int Height { get { return Volatile.Read(ref stitchedHeight); } }
+        internal int Frames { get { return Volatile.Read(ref stitchedFrames); } }
+        internal int PeakPendingFrames { get; private set; }
+        internal ScrollCaptureSession(Func<Bitmap> capture, int heightLimit = VerticalStitcher.MaxHeight, long pixelLimit = VerticalStitcher.MaxPixels)
+        { this.capture = capture; this.heightLimit = heightLimit; this.pixelLimit = pixelLimit; }
+        internal void Finish() { finishRequested = true; }
+        internal Task<ScrollCaptureResult> RunAsync()
         {
-            this.region = region;
-            Text = "长截图";
-            FormBorderStyle = FormBorderStyle.FixedToolWindow;
-            ShowInTaskbar = false;
-            TopMost = true;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(660, 122);
-            BackColor = Theme.Background;
-            status = Theme.Label("将鼠标移到目标窗口；准备好后开始。", 9, Theme.Ink);
-            status.SetBounds(14, 12, 620, 24);
-            Controls.Add(status);
-            var bar = new FlowLayoutPanel { Location = new Point(8, 42), Size = new Size(650, 52), WrapContents = false };
-            mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, Margin = new Padding(5, 12, 3, 0) };
-            mode.Items.AddRange(new object[] { "自动滚动", "手动滚动" });
-            mode.SelectedIndex = 0;
-            delay = new NumericUpDown { Minimum = 500, Maximum = 5000, Increment = 250, Value = 1000, Width = 65, Margin = new Padding(3, 12, 1, 0) };
-            var unit = Theme.Label("ms", 9, Theme.Muted); unit.Margin = new Padding(0, 13, 3, 0);
-            start = Theme.Button("开始", true, 66);
-            next = Theme.Button("采集一屏", false, 88); next.Enabled = false;
-            finish = Theme.Button("完成", false, 66); finish.Enabled = false;
-            cancel = Theme.Button("取消", false, 66);
-            bar.Controls.AddRange(new Control[] { mode, delay, unit, start, next, finish, cancel });
-            Controls.Add(bar);
-            var note = Theme.Label("手动模式：在原窗口向下滚动一小段，再点「采集一屏」。", 8, Theme.Muted);
-            note.Location = new Point(14, 99); Controls.Add(note);
-            StartPosition = FormStartPosition.Manual;
-            var work = Screen.FromRectangle(region).WorkingArea;
-            int y = region.Top - Height - 8 >= work.Top ? region.Top - Height - 8 : region.Bottom + 8;
-            Location = new Point(Math.Max(work.Left, Math.Min(region.Left, work.Right - Width)), Math.Max(work.Top, Math.Min(y, work.Bottom - Height)));
-            start.Click += async delegate { await StartCapture(); };
-            next.Click += async delegate { await CaptureFrame(false); };
-            finish.Click += delegate { Finish(); };
-            cancel.Click += delegate { cancelled = true; running = false; Close(); };
-            FormClosing += delegate { running = false; cancelled = !finished; };
-        }
-
-        private async Task StartCapture()
-        {
-            if (running || busy) return;
-            running = true;
-            start.Enabled = false; mode.Enabled = false; delay.Enabled = false;
-            status.Text = "准备中… 请保持目标窗口可见。";
-            var target = new Point(region.Left + region.Width / 2, region.Top + region.Height / 2);
-            Native.FocusAt(target);
-            await Task.Delay(500);
-            if (cancelled || IsDisposed) return;
-            await CaptureFrame(false);
-            if (mode.SelectedIndex == 1) { next.Enabled = true; return; }
-            int unchanged = 0;
-            while (running && !cancelled && !IsDisposed)
+            if (disposed != 0) throw new ObjectDisposedException("ScrollCaptureSession");
+            if (Interlocked.Exchange(ref started, 1) != 0) throw new InvalidOperationException("长截图已启动。");
+            return Task.Run(async delegate
             {
-                Native.ScrollDown(target);
-                await Task.Delay((int)delay.Value);
-                if (!running || cancelled || IsDisposed) break;
-                var result = await CaptureFrame(true);
-                if (cancelled || finished || IsDisposed) break;
-                if (result == StitchStatus.Unchanged) unchanged++; else unchanged = 0;
-                if (result == StitchStatus.Unmatched || result == StitchStatus.LimitReached)
+                var token = cancellation.Token;
+                var producer = Task.Run(async delegate
                 {
-                    running = false;
-                    status.Text = result == StitchStatus.LimitReached ? "已到安全尺寸上限，请点「完成」保存已采集内容。" : "内容未能可靠对齐，已暂停。请点「完成」保存已采集内容。";
+                    ulong previous = 0; bool first = true;
+                    var clock = System.Diagnostics.Stopwatch.StartNew();
+                    try
+                    {
+                        while (true)
+                        {
+                            long sampleStarted = clock.ElapsedMilliseconds;
+                            token.ThrowIfCancellationRequested();
+                            var frame = capture();
+                            try
+                            {
+                                ulong signature = Signature(frame);
+                                if (first || signature != previous)
+                                {
+                                    first = false; previous = signature;
+                                    lock (gate)
+                                    {
+                                        if (pending.Count == 2)
+                                        {
+                                            var oldest = pending.Dequeue(); pending.Dequeue().Dispose();
+                                            pending.Enqueue(oldest); pending.Enqueue(frame);
+                                        }
+                                        else { pending.Enqueue(frame); changed.Release(); }
+                                        frame = null; PeakPendingFrames = Math.Max(PeakPendingFrames, pending.Count);
+                                    }
+                                }
+                            }
+                            finally { if (frame != null) frame.Dispose(); }
+                            if (finishRequested) break;
+                            await Task.Delay((int)Math.Max(1, PollInterval - (clock.ElapsedMilliseconds - sampleStarted)), token).ConfigureAwait(false);
+                        }
+                    }
+                    finally { lock (gate) { producerDone = true; changed.Release(); } }
+                });
+                ScrollCaptureResult output = null; Exception failure = null;
+                try
+                {
+                    using (var stitcher = new VerticalStitcher(heightLimit, pixelLimit))
+                    {
+                        bool limit = false;
+                        while (true)
+                        {
+                            await changed.WaitAsync(token).ConfigureAwait(false);
+                            Bitmap frame = null;
+                            lock (gate)
+                            {
+                                if (pending.Count > 0) frame = pending.Dequeue();
+                                else if (producerDone) break;
+                            }
+                            if (frame == null) continue;
+                            StitchStatus status;
+                            using (frame) status = stitcher.Add(frame);
+                            Volatile.Write(ref stitchedHeight, stitcher.Height); Volatile.Write(ref stitchedFrames, stitcher.Frames);
+                            if (status == StitchStatus.LimitReached || stitcher.Height >= heightLimit || (long)stitcher.Width * stitcher.Height >= pixelLimit)
+                            { limit = true; Finish(); break; }
+                        }
+                        await producer.ConfigureAwait(false); token.ThrowIfCancellationRequested();
+                        if (stitcher.Frames == 0) throw new InvalidOperationException("选区超过长截图尺寸上限。");
+                        output = new ScrollCaptureResult { Image = stitcher.Build(), Frames = stitcher.Frames, LimitReached = limit };
+                    }
                 }
-                if (unchanged >= 3) { Finish(); break; }
-            }
+                catch (Exception error) { failure = error; }
+                cancellation.Cancel();
+                try { await producer.ConfigureAwait(false); } catch (Exception error) { if (failure == null) failure = error; }
+                lock (gate) { while (pending.Count > 0) pending.Dequeue().Dispose(); }
+                changed.Dispose(); cancellation.Dispose();
+                if (failure != null) { if (output != null) output.Dispose(); System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw(); }
+                return output;
+            });
         }
-
-        private async Task<StitchStatus> CaptureFrame(bool automatic)
+        private static ulong Signature(Bitmap image)
         {
-            if (busy || cancelled || IsDisposed) return StitchStatus.Unchanged;
-            busy = true;
-            next.Enabled = false;
+            int bytes = System.Drawing.Image.GetPixelFormatSize(image.PixelFormat) / 8;
+            if (bytes < 3) throw new InvalidOperationException("不支持的截图像素格式。");
+            var data = image.LockBits(new Rectangle(Point.Empty, image.Size), ImageLockMode.ReadOnly, image.PixelFormat);
             try
             {
-                Hide();
-                await Task.Delay(140);
-                if (cancelled || IsDisposed) return StitchStatus.Unchanged;
-                StitchStatus result;
-                using (var frame = Native.Capture(region)) result = stitcher.Add(frame);
-                Show();
-                finish.Enabled = stitcher.Frames > 0;
-                status.Text = "已采集 " + stitcher.Frames + " 屏 · " + stitcher.Width + " × " + stitcher.Height + " px";
-                if (result == StitchStatus.Unchanged) status.Text += " · 画面未变化";
-                if (result == StitchStatus.Unmatched) status.Text += " · 对齐失败，请减少滚动距离后重试";
-                if (result == StitchStatus.LimitReached) status.Text += " · 已到尺寸上限";
-                return result;
+                ulong hash = 1469598103934665603UL;
+                for (int y = 0; y < image.Height; y += Math.Max(1, image.Height / 48))
+                    for (int x = 0; x < image.Width; x += Math.Max(1, image.Width / 64))
+                    {
+                        int at = y * data.Stride + x * bytes;
+                        for (int channel = 0; channel < 3; channel++)
+                            hash = unchecked((hash ^ Marshal.ReadByte(data.Scan0, at + channel)) * 1099511628211UL);
+                    }
+                return hash;
             }
-            catch (Exception ex)
-            {
-                running = false;
-                if (!IsDisposed) { Show(); status.Text = "采集失败：" + ex.Message; }
-                return StitchStatus.Unmatched;
-            }
-            finally
-            {
-                busy = false;
-                if (cancelled || IsDisposed) stitcher.Dispose();
-                else if (pendingFinish) Finish();
-                else next.Enabled = mode.SelectedIndex == 1 && running;
-            }
+            finally { image.UnlockBits(data); }
         }
-
-        private void Finish()
+        public void Dispose()
         {
-            running = false;
-            if (busy) { pendingFinish = true; return; }
-            if (finished || stitcher.Frames == 0) return;
-            var result = stitcher.Build();
-            finished = true;
-            Close();
-            if (Completed != null) Completed(result); else result.Dispose();
-        }
-
-        protected override void OnFormClosed(FormClosedEventArgs e)
-        {
-            if (!busy) stitcher.Dispose();
-            if (!finished && Cancelled != null) Cancelled();
-            base.OnFormClosed(e);
+            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            try { cancellation.Cancel(); } catch (ObjectDisposedException) { }
+            if (started == 0) { cancellation.Dispose(); changed.Dispose(); }
         }
     }
 }

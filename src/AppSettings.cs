@@ -22,6 +22,7 @@ namespace ShotInk
     internal sealed class AppSettings
     {
         internal bool AutoHistory = true;
+        internal int HistoryLimit = 10;
         internal bool AskSaveLocation = true;
         internal string SaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
         internal Keys CaptureShortcut = Keys.F1;
@@ -40,7 +41,7 @@ namespace ShotInk
         internal AppSettings Clone() { var copy = new AppSettings(); copy.CopyFrom(this); return copy; }
         internal void CopyFrom(AppSettings other)
         {
-            AutoHistory = other.AutoHistory; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
+            AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
             tools.Clear(); foreach (var item in other.tools) tools.Add(item.Key, item.Value.Clone());
         }
@@ -55,6 +56,7 @@ namespace ShotInk
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
                 string value;
                 if (values.TryGetValue("save", out value)) settings.AutoHistory = value != "0";
+                settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
                 if (values.TryGetValue("ask-save-location", out value)) settings.AskSaveLocation = value != "0";
                 if (values.TryGetValue("save-directory", out value) && AbsolutePath(value)) settings.SaveDirectory = value;
                 settings.CaptureShortcut = ReadShortcut(values, "hotkey-capture", settings.CaptureShortcut);
@@ -88,6 +90,7 @@ namespace ShotInk
             if (!AbsolutePath(SaveDirectory) || SaveDirectory.IndexOfAny(new[] { '\r', '\n' }) >= 0)
                 throw new ArgumentException("请选择有效的绝对保存路径。");
             Path.GetFullPath(SaveDirectory);
+            if (HistoryLimit < 1 || HistoryLimit > 10000) throw new ArgumentException("历史保留张数应为 1～10000。");
             if (Shortcuts.Any(key => !Shortcut.Valid(key))) throw new ArgumentException("快捷键无效：字母、数字和 Esc 需搭配 Ctrl 或 Alt，不能只使用修饰键。");
             if (Shortcuts.Where(key => key != Keys.None).Distinct().Count() != Shortcuts.Count(key => key != Keys.None)) throw new ArgumentException("不同功能不能使用相同的快捷键。");
         }
@@ -96,7 +99,7 @@ namespace ShotInk
         internal void Save(string path)
         {
             Validate(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
-            var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
+            var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
                 "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut };
             foreach (var item in tools.OrderBy(item => (int)item.Key))
             {

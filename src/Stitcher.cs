@@ -15,6 +15,10 @@ namespace ShotInk
         private Bitmap previous;
         internal const int MaxHeight = 30000;
         internal const long MaxPixels = 80000000;
+        private readonly int heightLimit;
+        private readonly long pixelLimit;
+        internal VerticalStitcher(int heightLimit = MaxHeight, long pixelLimit = MaxPixels)
+        { this.heightLimit = heightLimit; this.pixelLimit = pixelLimit; }
         internal int Height { get; private set; }
         internal int Width { get; private set; }
         internal int Frames { get; private set; }
@@ -24,7 +28,7 @@ namespace ShotInk
         {
             if (previous == null)
             {
-                if (frame.Height > MaxHeight || (long)frame.Width * frame.Height > MaxPixels) return StitchStatus.LimitReached;
+                if (frame.Height > heightLimit || (long)frame.Width * frame.Height > pixelLimit) return StitchStatus.LimitReached;
                 Width = frame.Width;
                 Height = frame.Height;
                 strips.Add(new Bitmap(frame));
@@ -50,7 +54,7 @@ namespace ShotInk
             LastError = bestError;
             // Animated content and unrelated windows must never be silently appended.
             if (best == 0 || bestError > 12 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
-            if (Height + best > MaxHeight || (long)Width * (Height + best) > MaxPixels) return StitchStatus.LimitReached;
+            if (Height + best > heightLimit || (long)Width * (Height + best) > pixelLimit) return StitchStatus.LimitReached;
             strips.Add(frame.Clone(new Rectangle(0, frame.Height - best, Width, best), PixelFormat.Format24bppRgb));
             Height += best;
             previous.Dispose();

@@ -29,6 +29,13 @@ try {
     if (Test-Path -LiteralPath $fixture) {
         $resolvedFixture = (Resolve-Path -LiteralPath $fixture).Path
         if (-not $resolvedFixture.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing to clean a path outside the test temporary directory.' }
-        Remove-Item -LiteralPath $resolvedFixture -Recurse -Force
+        # Process.Kill returns before Windows has released every OCR DLL handle.
+        for ($attempt = 0; $attempt -lt 40; $attempt++) {
+            try { Remove-Item -LiteralPath $resolvedFixture -Recurse -Force -ErrorAction Stop; break }
+            catch {
+                if ($attempt -eq 39 -or ($_.Exception -isnot [IO.IOException] -and $_.Exception -isnot [UnauthorizedAccessException])) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
     }
 }

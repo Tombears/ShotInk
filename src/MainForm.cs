@@ -20,6 +20,7 @@ namespace ShotInk
         private readonly ImageList thumbnails;
         private readonly Label notice;
         private readonly CheckBox autoSave;
+        private readonly NumericUpDown historyLimit;
         private NotifyIcon tray;
         private Icon appIcon;
         private bool captureBusy;
@@ -85,20 +86,22 @@ namespace ShotInk
             var heroText = Theme.Label("从一小块屏幕，到一整页内容。", 10, Color.FromArgb(219, 224, 255)); heroText.Location = new Point(28, 76); hero.Controls.Add(heroText);
             content.Controls.Add(hero, 0, 1);
 
-            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0, 0, 0, 8) };
-            for (int i = 0; i < 3; i++) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333F));
-            actions.Controls.Add(ActionCard("区域截图", "F1 · 自由选择截图范围", false, delegate { BeginCapture(false); }), 0, 0);
-            actions.Controls.Add(ActionCard("滚动长截图", "Ctrl + Alt + L · 自动拼接", true, delegate { BeginCapture(true); }), 1, 0);
-            actions.Controls.Add(ActionCard("剪贴板贴图", "F3 · 让图片悬浮在桌面", false, delegate { PinClipboard(); }), 2, 0);
+            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 8) };
+            for (int i = 0; i < 2; i++) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            actions.Controls.Add(ActionCard("截图", "F1 · 选区标注 / 滚动长截图", true, delegate { BeginCapture(false); }), 0, 0);
+            actions.Controls.Add(ActionCard("剪贴板贴图", "F3 · 让图片悬浮在桌面", false, delegate { PinClipboard(); }), 1, 0);
             content.Controls.Add(actions, 0, 2);
 
             var historyBar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 7, 0, 0) };
             var recent = Theme.Label("最近截图", 12, Theme.Ink); recent.Margin = new Padding(0, 10, 12, 0); historyBar.Controls.Add(recent);
             var folder = Theme.Button("打开文件夹", false, 108); folder.Click += delegate { Process.Start("explorer.exe", historyRoot); }; historyBar.Controls.Add(folder);
             var refresh = Theme.Button("刷新", false, 62); refresh.Click += delegate { LoadHistory(); }; historyBar.Controls.Add(refresh);
-            autoSave = new CheckBox { Text = "保存历史（保留 100 张）", AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(12, 15, 0, 0), Checked = settings.AutoHistory };
-            autoSave.CheckedChanged += delegate { settings.AutoHistory = autoSave.Checked; settings.NotifyChanged(); };
-            historyBar.Controls.Add(autoSave); content.Controls.Add(historyBar, 0, 3);
+            autoSave = new CheckBox { Text = "保留历史", AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(12, 15, 0, 0), Checked = settings.AutoHistory };
+            historyLimit = new NumericUpDown { Name = "history-limit", Minimum = 1, Maximum = 10000, Value = settings.HistoryLimit, Width = 65, Margin = new Padding(3, 12, 2, 0), Enabled = autoSave.Checked };
+            autoSave.CheckedChanged += delegate { settings.AutoHistory = autoSave.Checked; historyLimit.Enabled = autoSave.Checked; settings.NotifyChanged(); };
+            historyLimit.ValueChanged += delegate { settings.HistoryLimit = (int)historyLimit.Value; settings.NotifyChanged(); PruneHistory(); LoadHistory(); };
+            historyBar.Controls.Add(autoSave); historyBar.Controls.Add(historyLimit);
+            historyBar.Controls.Add(new Label { Text = "张", AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(0, 16, 0, 0) }); content.Controls.Add(historyBar, 0, 3);
 
             thumbnails = new ImageList { ImageSize = new Size(150, 94), ColorDepth = ColorDepth.Depth32Bit };
             history = new ListView { Dock = DockStyle.Fill, View = View.LargeIcon, LargeImageList = thumbnails, MultiSelect = false, BorderStyle = BorderStyle.None, BackColor = Color.White, ForeColor = Theme.Ink, HideSelection = false, Margin = new Padding(0, 3, 0, 0) };
@@ -140,11 +143,10 @@ namespace ShotInk
         private void RefreshShortcutLabels()
         {
             shortcuts.Text = "全局快捷键\n\n" + Shortcut.Display(settings.CaptureShortcut) + "  区域截图\n" + Shortcut.Display(settings.PinShortcut) + "  剪贴板贴图\n" + Shortcut.Display(settings.ScrollShortcut) + "  长截图";
-            if (actionCards.Count == 3)
+            if (actionCards.Count == 2)
             {
-                actionCards[0].Text = "区域截图\n" + Shortcut.Display(settings.CaptureShortcut) + " · 自由选择截图范围";
-                actionCards[1].Text = "滚动长截图\n" + Shortcut.Display(settings.ScrollShortcut) + " · 自动拼接";
-                actionCards[2].Text = "剪贴板贴图\n" + Shortcut.Display(settings.PinShortcut) + " · 让图片悬浮在桌面";
+                actionCards[0].Text = "截图\n" + Shortcut.Display(settings.CaptureShortcut) + " · 标注 / 滚动长截图";
+                actionCards[1].Text = "剪贴板贴图\n" + Shortcut.Display(settings.PinShortcut) + " · 让图片悬浮在桌面";
             }
             if (tray != null)
             {
@@ -225,18 +227,6 @@ namespace ShotInk
                     captureBusy = false; restoreWindows();
                     AcceptCapture(image, false, action == CaptureAction.Pin, action == CaptureAction.Copy);
                 };
-                overlay.Selected += delegate(Rectangle region, Bitmap snapshot)
-                {
-                    if (region.Height < 120 || region.Width < 80)
-                    {
-                        captureBusy = false; restoreWindows();
-                        MessageBox.Show("长截图区域至少需要 80 × 120 像素，请重新选择。", "区域过小"); return;
-                    }
-                    var session = new ScrollCapture(region);
-                    session.Completed += delegate(Bitmap result) { captureBusy = false; restoreWindows(); AcceptCapture(result); };
-                    session.Cancelled += delegate { captureBusy = false; restoreWindows(); };
-                    session.Show();
-                };
                 overlay.Show(); overlay.Activate();
             }
             catch (Exception ex) { captureBusy = false; restoreWindows(); MessageBox.Show(ex.Message, "无法截图"); }
@@ -257,8 +247,7 @@ namespace ShotInk
                     {
                         string file = Path.Combine(historyRoot, "截图_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".png");
                         image.Save(file, ImageFormat.Png);
-                        foreach (var stale in new DirectoryInfo(historyRoot).GetFiles("*.png").OrderByDescending(f => f.LastWriteTimeUtc).Skip(100))
-                            try { stale.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                        PruneHistory();
                         LoadHistory();
                     }
                     catch (Exception ex) { notice.Text = "自动保存失败：" + ex.Message + "；仍可手动保存。"; }
@@ -270,6 +259,12 @@ namespace ShotInk
             catch { image.Dispose(); throw; }
         }
 
+        private void PruneHistory()
+        {
+            if (!settings.AutoHistory) return;
+            foreach (var stale in new DirectoryInfo(historyRoot).GetFiles("*.png").OrderByDescending(file => file.LastWriteTimeUtc).Skip(settings.HistoryLimit))
+                try { stale.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
         private void LoadHistory()
         {
             history.BeginUpdate(); history.Items.Clear(); thumbnails.Images.Clear();
@@ -277,7 +272,7 @@ namespace ShotInk
             IntPtr imageListHandle = thumbnails.Handle;
             try
             {
-                foreach (var file in new DirectoryInfo(historyRoot).GetFiles("*.png").OrderByDescending(f => f.LastWriteTimeUtc).Take(100))
+                foreach (var file in new DirectoryInfo(historyRoot).GetFiles("*.png").OrderByDescending(f => f.LastWriteTimeUtc).Take(settings.HistoryLimit))
                 {
                     try
                     {

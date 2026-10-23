@@ -65,6 +65,9 @@ namespace ShotInk
         internal Color Ink = Color.FromArgb(244, 75, 95);
         internal float Stroke = 3;
         internal float Zoom = 1;
+        private Size documentFrame;
+        private VScrollBar documentScroll;
+        internal float DocumentOffsetY { get; private set; }
         private Mark active;
         private OcrSelectionModel recognition;
         private bool selectingText;
@@ -119,12 +122,40 @@ namespace ShotInk
         internal void SetZoom(float value)
         {
             CommitTextEdit();
+            float offset = DocumentOffsetY;
             Zoom = Math.Max(0.05F, Math.Min(3F, value));
-            Size = new Size(Math.Max(1, (int)Math.Ceiling(Image.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(Image.Height * Zoom)));
+            Size = documentFrame.IsEmpty ? new Size(Math.Max(1, (int)Math.Ceiling(Image.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(Image.Height * Zoom))) : documentFrame;
+            if (documentScroll != null)
+            {
+                documentScroll.SetBounds(Width - SystemInformation.VerticalScrollBarWidth, 0, SystemInformation.VerticalScrollBarWidth, Height);
+                documentScroll.LargeChange = Math.Max(1, Height); documentScroll.SmallChange = 20;
+                documentScroll.Maximum = Math.Max(0, (int)Math.Ceiling(Image.Height * Zoom) - 1);
+                documentScroll.Visible = Image.Height * Zoom > Height;
+                documentScroll.Value = Math.Max(0, Math.Min(Math.Max(0, documentScroll.Maximum - documentScroll.LargeChange + 1), (int)(offset * Zoom)));
+                DocumentOffsetY = documentScroll.Value / Zoom;
+            }
             Invalidate();
         }
-
-        private PointF ImagePoint(Point p) { return new PointF(Math.Max(0, Math.Min(Image.Width - 1, p.X / Zoom)), Math.Max(0, Math.Min(Image.Height - 1, p.Y / Zoom))); }
+        internal void UseDocumentViewport(Size frame)
+        {
+            documentFrame = frame; documentScroll = new VScrollBar { Name = "long-image-scrollbar" };
+            documentScroll.ValueChanged += delegate { DocumentOffsetY = documentScroll.Value / Zoom; Invalidate(); };
+            Controls.Add(documentScroll);
+            SetZoom(Math.Min(1, Math.Max(1, frame.Width - SystemInformation.VerticalScrollBarWidth - 2F) / Image.Width));
+        }
+        internal void ScrollDocument(int pixels)
+        {
+            if (documentScroll == null) return;
+            CommitTextEdit();
+            documentScroll.Value = Math.Max(0, Math.Min(Math.Max(0, documentScroll.Maximum - documentScroll.LargeChange + 1), documentScroll.Value + pixels));
+        }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            if (documentScroll != null)
+            { ScrollDocument(-e.Delta / 120 * 80); var handled = e as HandledMouseEventArgs; if (handled != null) handled.Handled = true; }
+            base.OnMouseWheel(e);
+        }
+        private PointF ImagePoint(Point p) { return new PointF(Math.Max(0, Math.Min(Image.Width - 1, p.X / Zoom)), Math.Max(0, Math.Min(Image.Height - 1, p.Y / Zoom + DocumentOffsetY))); }
 
         private bool BrushTool
         { get { return Tool == DrawTool.Mosaic && MosaicMode == ApplyMode.Brush || Tool == DrawTool.Eraser && EraserMode == ApplyMode.Brush; } }
@@ -241,6 +272,7 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.ScaleTransform(Zoom, Zoom);
+            e.Graphics.TranslateTransform(0, -DocumentOffsetY);
             e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             foreach (var mark in Marks) DrawMark(e.Graphics, textEditor != null && mark == selectedText ? EditingTextMark() : mark);
@@ -318,6 +350,8 @@ namespace ShotInk
                             var cell = new Rectangle(x, y, Math.Min(block, clipped.Right - x), Math.Min(block, clipped.Bottom - y));
                             if (!region.IsVisible(cell)) continue;
                             var color = Image.GetPixel(Math.Min(Image.Width - 1, x + block / 2), Math.Min(Image.Height - 1, y + block / 2));
+                            int gray = (color.R * 299 + color.G * 587 + color.B * 114 + 500) / 1000;
+                            color = Color.FromArgb(gray, gray, gray);
                             using (var brush = new SolidBrush(color)) g.FillRectangle(brush, cell);
                         }
                 }

@@ -15,6 +15,8 @@ namespace ShotInk
         private readonly ToolStripButton undo;
         private readonly ToolStripButton redo;
         private readonly ToolStripButton recognize;
+        private readonly ToolStripButton scroll;
+        private readonly Button finishScroll;
         private readonly OcrSelectionActions textActions;
         private DrawTool currentTool = DrawTool.None;
         private bool textSelection;
@@ -32,6 +34,8 @@ namespace ShotInk
         internal event Action RecognitionHovered;
         internal event Action CopySelectedText;
         internal event Action CopyAllText;
+        internal event Action ScrollClicked;
+        internal event Action ScrollFinishClicked;
 
         internal CaptureToolbar(AppSettings settings = null)
         {
@@ -54,6 +58,8 @@ namespace ShotInk
             recognize = Button("ocr", "文字识别：在图片上选择并复制文字", delegate { if (RecognitionClicked != null) RecognitionClicked(); });
             recognize.Name = "recognize-text";
             recognize.MouseEnter += delegate { if (RecognitionHovered != null) RecognitionHovered(); };
+            scroll = Button("scroll", "滚动长截图：使用当前选框，手动滚动后点击完成", delegate { if (ScrollClicked != null) ScrollClicked(); });
+            scroll.Name = "scroll-capture";
             strip.Items.Add(new ToolStripSeparator());
             undo = Button("undo", "撤销 (Ctrl+Z)", delegate { if (UndoClicked != null) UndoClicked(); });
             redo = Button("redo", "重做 (Ctrl+Y)", delegate { if (RedoClicked != null) RedoClicked(); });
@@ -76,8 +82,22 @@ namespace ShotInk
             textActions.CopyAll += delegate { if (CopyAllText != null) CopyAllText(); };
             textActions.ExitSelection += delegate { SelectTool(DrawTool.None); };
             Controls.Add(textActions);
+            finishScroll = new Button { Name = "finish-scroll-capture", Text = "完成", Size = new Size(100, 30), Visible = false,
+                BackColor = Color.White, FlatStyle = FlatStyle.Flat };
+            finishScroll.Click += delegate { if (ScrollFinishClicked != null) ScrollFinishClicked(); }; Controls.Add(finishScroll);
             Size = new Size(width + 2, 35);
         }
+        internal void SetScrollCapture(bool capturing)
+        {
+            finishScroll.Visible = capturing; finishScroll.Enabled = true; finishScroll.Text = "完成";
+            Width = capturing ? 108 : strip.Width + 2;
+            strip.Visible = !capturing; options.Hide(); textActions.Hide();
+            if (capturing) { Height = 38; finishScroll.Location = new Point((Width - finishScroll.Width) / 2, 4); finishScroll.BringToFront(); }
+            else SelectTool(DrawTool.None);
+            if (LayoutChanged != null) LayoutChanged();
+        }
+        internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
+        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; }
 
         private ToolStripButton Button(string icon, string hint, Action clicked)
         {
@@ -163,6 +183,10 @@ namespace ShotInk
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
                 switch (name)
                 {
+                    case "scroll":
+                        g.DrawRectangle(pen, 5, 3, 10, 14); g.DrawLine(pen, 8, 7, 12, 7); g.DrawLine(pen, 8, 10, 12, 10);
+                        g.DrawLines(pen, new[] { new Point(2, 6), new Point(2, 14), new Point(0, 12) });
+                        g.DrawLines(pen, new[] { new Point(17, 6), new Point(17, 14), new Point(19, 12) }); break;
                     case "move":
                         g.DrawLine(pen, 10, 2, 10, 18); g.DrawLine(pen, 2, 10, 18, 10);
                         g.DrawLines(pen, new[] { new Point(7, 5), new Point(10, 2), new Point(13, 5) });

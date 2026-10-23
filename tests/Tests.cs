@@ -34,6 +34,10 @@ namespace ShotInk
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
+                Run("history defaults to ten and its on-screen limit persists and prunes only history", TestHistoryLimit);
+                Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
+                Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
+                Run("integrated scroll capture restores tools and edits within a fixed viewport", TestIntegratedScroll);
                 Run("shortcut changes restore existing bindings on a registration conflict", TestHotkeyRollback);
                 Run("configured save paths work without prompts in screenshots and the editor", TestSavePreferences);
                 Run("OCR highlights form continuous bands without gaps or darker seams", TestOcrHighlight);
@@ -52,10 +56,12 @@ namespace ShotInk
                 if (args.Length == 2 && args[0] == "--preview")
                 {
                     Run("native screen capture reads a known test window", TestScreenCapture);
-                    Run("automatic wheel capture reconstructs a real scrolling window", TestAutomaticCapture);
+                    Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture);
                     Preview(args[1]);
                 }
                 if (args.Length == 1 && args[0] == "--drag-preview") Run("live selection dragging clears old borders on screen", TestLiveDrag);
+                if (args.Length == 1 && args[0] == "--scroll-preview")
+                { Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture); Run("live integrated scroll capture excludes its own chrome", TestLiveIntegratedScroll); }
                 Console.WriteLine("PASS: " + passed + " checks");
                 return 0;
             }
@@ -154,6 +160,147 @@ namespace ShotInk
                 }
             }
             finally { Directory.Delete(root, true); }
+        }
+        private static void WaitUntil(Func<bool> condition)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(8);
+            while (!condition() && DateTime.UtcNow < deadline) { Application.DoEvents(); System.Threading.Thread.Sleep(2); }
+            Assert(condition(), "Asynchronous operation timed out.");
+        }
+        private static void TestHistoryLimit()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-history-" + Guid.NewGuid().ToString("N"));
+            string captures = Path.Combine(root, "captures"); Directory.CreateDirectory(captures);
+            try
+            {
+                using (var image = new Bitmap(2, 2))
+                {
+                    for (int i = 0; i < 15; i++)
+                    {
+                        string path = Path.Combine(captures, "capture-" + i + ".png"); image.Save(path, ImageFormat.Png);
+                        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-i));
+                    }
+                    image.Save(Path.Combine(root, "manual.png"), ImageFormat.Png);
+                }
+                using (var home = new MainForm(root, false))
+                {
+                    var number = Field<NumericUpDown>(home, "historyLimit");
+                    Assert(number.Value == 10 && Field<ListView>(home, "history").Items.Count == 10, "History did not default to ten.");
+                    number.Value = 3;
+                    Assert(Directory.GetFiles(captures, "*.png").Length == 3 && Field<ListView>(home, "history").Items.Count == 3, "Changing the count did not apply immediately.");
+                    Assert(File.Exists(Path.Combine(root, "manual.png")) && File.Exists(Path.Combine(captures, "capture-0.png")), "History pruning removed manual or newest images.");
+                    home.Show(); Application.DoEvents();
+                    using (var preview = new Bitmap(home.Width, home.Height)) { home.DrawToBitmap(preview, home.ClientRectangle); preview.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-history-options.png")); }
+                    home.Close();
+                }
+                Assert(AppSettings.Load(Path.Combine(root, "settings.ini")).HistoryLimit == 3, "History count was not persisted.");
+            }
+            finally { Directory.Delete(root, true); }
+        }
+        private static void TestScrollPipeline()
+        {
+            using (var content = Pattern(100, 760, 221))
+            {
+                int offset = 0, calls = 0, thread = 0, ui = System.Threading.Thread.CurrentThread.ManagedThreadId;
+                using (var session = new ScrollCaptureSession(delegate
+                {
+                    System.Threading.Interlocked.CompareExchange(ref thread, System.Threading.Thread.CurrentThread.ManagedThreadId, 0);
+                    System.Threading.Interlocked.Increment(ref calls);
+                    return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 100, 200), PixelFormat.Format24bppRgb);
+                }))
+                {
+                    var task = session.RunAsync(); WaitUntil(delegate { return session.Height == 200 && calls >= 5; });
+                    Assert(!task.IsCompleted && session.Frames == 1 && thread != ui, "Manual capture stopped early, duplicated static frames or ran capture on the UI thread.");
+                    foreach (int position in new[] { 35, 80, 120, 180, 220, 300, 360 })
+                    { System.Threading.Volatile.Write(ref offset, position); WaitUntil(delegate { return session.Height == 200 + position; }); }
+                    session.Finish(); Pump(task);
+                    using (var result = task.Result)
+                    { Assert(!result.LimitReached && result.Frames == 8, "Scroll frames were duplicated or lost."); EqualPixels(content, result.Image, 560); }
+                    Assert(session.PeakPendingFrames <= 2 && ScrollCaptureSession.PollInterval == 10, "Capture cadence or queue bound is incorrect.");
+                }
+            }
+        }
+        private static void TestScrollLimitAndCancel()
+        {
+            using (var content = Pattern(100, 640, 222))
+            {
+                foreach (bool pixels in new[] { false, true })
+                {
+                    int offset = 0;
+                    using (var session = new ScrollCaptureSession(delegate { return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 100, 240), PixelFormat.Format24bppRgb); },
+                        pixels ? VerticalStitcher.MaxHeight : 400, pixels ? 40000 : VerticalStitcher.MaxPixels))
+                    {
+                        var task = session.RunAsync(); WaitUntil(delegate { return session.Height == 240; });
+                        System.Threading.Volatile.Write(ref offset, 100); WaitUntil(delegate { return session.Height == 340; });
+                        System.Threading.Volatile.Write(ref offset, 160); Pump(task);
+                        using (var result = task.Result) { Assert(result.LimitReached && result.Image.Height == 400, "Length/pixel limit did not auto-complete."); EqualPixels(content, result.Image, 400); }
+                    }
+                }
+                using (var session = new ScrollCaptureSession(delegate { return content.Clone(new Rectangle(0, 0, 100, 240), PixelFormat.Format24bppRgb); }))
+                {
+                    var task = session.RunAsync(); WaitUntil(delegate { return session.Frames == 1; }); session.Dispose();
+                    WaitUntil(delegate { return task.IsCompleted; }); Assert(task.IsCanceled, "Cancellation left background capture running.");
+                }
+                using (var session = new ScrollCaptureSession(delegate { throw new InvalidOperationException("capture failed"); }))
+                {
+                    var task = session.RunAsync(); WaitUntil(delegate { return task.IsCompleted; });
+                    Assert(task.IsFaulted && task.Exception.InnerException.Message == "capture failed", "A failed frame source hung or hid its error.");
+                }
+            }
+        }
+        private static void TestIntegratedScroll()
+        {
+            using (var content = Pattern(700, 900, 223))
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                int offset = 0; Rectangle sampled = Rectangle.Empty;
+                overlay.CaptureScrollFrame = delegate(Rectangle region) { sampled = region; return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 700, 370), PixelFormat.Format24bppRgb); };
+                overlay.Show(); Select(overlay);
+                var selection = Field<Rectangle>(overlay, "selection"); var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                var strip = Field<ToolStrip>(toolbar, "strip"); var recognize = Field<ToolStripButton>(toolbar, "recognize"); var scroll = Field<ToolStripButton>(toolbar, "scroll");
+                Assert(strip.Items.IndexOf(scroll) == strip.Items.IndexOf(recognize) + 1, "Long capture is not beside OCR.");
+                var task = overlay.CaptureLongAsync();
+                WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 370; });
+                Assert(!strip.Visible && Option<Button>(toolbar, "finish-scroll-capture").Visible && !Field<AnnotationCanvas>(overlay, "canvas").Visible, "Capture mode exposed editing tools or the frozen canvas.");
+                Assert(!overlay.Region.IsVisible(selection.Left + 50, selection.Top + 50), "The selected area did not pass mouse input through to the original window.");
+                System.Threading.Volatile.Write(ref offset, 150);
+                WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 520; });
+                Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas"); var viewport = Field<Panel>(overlay, "longViewport");
+                Assert(sampled == new Rectangle(100, 90, 700, 370) && viewport.Bounds == selection && canvas.Size == selection.Size, "Long capture changed the selected scope or expanded its visible frame.");
+                Assert(strip.Visible && Field<ScrollCaptureSession>(overlay, "scrollSession") == null && canvas.Image.Height == 520, "Completion did not restore all tools and the stitched image.");
+                Assert(!Field<bool>(overlay, "scrollEscapeRegistered"), "Completion left the temporary Escape shortcut registered.");
+                MouseWheel(canvas, -120); Assert(canvas.DocumentOffsetY > 0, "Mouse wheel did not pan the long screenshot.");
+                float position = canvas.DocumentOffsetY;
+                toolbar.SelectTool(DrawTool.Rectangle); Gesture(canvas, new Point(20, 20), new Point(80, 80));
+                Assert(Math.Abs(canvas.Marks[0].Points[0].Y - position - 20 / canvas.Zoom) < 1, "Scrolled annotation used viewport rather than image coordinates.");
+                toolbar.SelectTool(DrawTool.Text); Mouse(canvas, "OnMouseDown", MouseButtons.Left, 220, 100);
+                Field<InlineTextInput>(canvas, "textEditor").Text = "滚动后的文字"; canvas.CommitTextEdit();
+                Assert(Math.Abs(canvas.Marks[1].Points[0].Y - position - 100 / canvas.Zoom) < 1, "Text input ignored the long-image offset.");
+                ToolPreview(overlay, "long-preview");
+                using (var image = canvas.Render()) Assert(image.Size == new Size(700, 520), "Export returned only the visible part of the long screenshot.");
+                overlay.Close();
+            }
+            using (var content = Pattern(700, 370, 224))
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                int exports = 0, cancellations = 0;
+                overlay.Completed += delegate(Bitmap image, CaptureAction action) { exports++; image.Dispose(); };
+                overlay.Cancelled += delegate { cancellations++; };
+                overlay.CaptureScrollFrame = delegate { return new Bitmap(content); };
+                overlay.Show(); Select(overlay);
+                var task = overlay.CaptureLongAsync();
+                WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Frames == 1; });
+                Assert(Field<bool>(overlay, "scrollEscapeRegistered"), "Capture did not register Escape while the underlying window had focus.");
+                SendMessage(overlay.Handle, Native.HotKeyMessage, new IntPtr(1001), IntPtr.Zero); Pump(task);
+                Assert(overlay.IsDisposed && cancellations == 1 && exports == 0, "Escape failed to cancel background capture without exporting.");
+                using (var probe = new Form())
+                {
+                    bool available = Native.RegisterHotKey(probe.Handle, 1001, 0x4000, (uint)Keys.Escape);
+                    if (available) Native.UnregisterHotKey(probe.Handle, 1001);
+                    Assert(available, "Cancellation left the temporary Escape shortcut registered.");
+                }
+            }
         }
         private static void TestHotkeyRollback()
         {
@@ -276,7 +423,7 @@ namespace ShotInk
         }
         private static void EqualPixels(Bitmap expected, Bitmap actual, int height)
         {
-            Assert(actual.Width == expected.Width && actual.Height == height, "Incorrect output dimensions.");
+            Assert(actual.Width == expected.Width && actual.Height == height, "Incorrect output dimensions: expected " + expected.Width + " x " + height + ", got " + actual.Width + " x " + actual.Height + ".");
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < actual.Width; x++)
                     Assert(expected.GetPixel(x, y).ToArgb() == actual.GetPixel(x, y).ToArgb(), "Pixel mismatch at " + x + ", " + y);
@@ -528,7 +675,8 @@ namespace ShotInk
                 mark.Points.Add(new PointF(10, 10)); mark.Points.Add(new PointF(32, 33)); canvas.AddMark(mark);
                 using (var rendered = canvas.Render())
                 {
-                    Assert(rendered.GetPixel(31, 32).ToArgb() == canvas.Image.GetPixel(32, 32).ToArgb(), "Partial edge block was left exposed.");
+                    var source = canvas.Image.GetPixel(32, 32); int gray = (source.R * 299 + source.G * 587 + source.B * 114 + 500) / 1000;
+                    Assert(rendered.GetPixel(31, 32).ToArgb() == Color.FromArgb(gray, gray, gray).ToArgb(), "Partial edge block did not use grayscale mosaic.");
                     Assert(rendered.GetPixel(9, 9).ToArgb() == canvas.Image.GetPixel(9, 9).ToArgb(), "Mosaic modified pixels outside region.");
                 }
             }
@@ -582,7 +730,7 @@ namespace ShotInk
             var last = points[points.Length - 1]; Mouse(canvas, "OnMouseUp", MouseButtons.Left, last.X, last.Y);
         }
         private static T Option<T>(Control parent, string name) where T : Control
-        { return (T)parent.Controls.Find(name, true)[0]; }
+        { var found = parent.Controls.Find(name, true); if (found.Length == 0) throw new Exception("Missing option: " + name); return (T)found[0]; }
         private static void TestToolOptions()
         {
             using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600)))
@@ -893,6 +1041,8 @@ namespace ShotInk
         {
             control.GetType().GetMethod(method, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(control, new object[] { new MouseEventArgs(button, 1, x, y, 0) });
         }
+        private static void MouseWheel(Control control, int delta)
+        { control.GetType().GetMethod("OnMouseWheel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(control, new object[] { new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, delta) }); }
         private static T Field<T>(object target, string name)
         { return (T)target.GetType().GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(target); }
         private static void Select(CaptureOverlay overlay)
@@ -990,24 +1140,75 @@ namespace ShotInk
             var oldCursor = Cursor.Position;
             using (var scene = new ScrollTestWindow())
             {
-                scene.Show(); scene.Activate(); Application.DoEvents();
-                using (var session = new ScrollCapture(scene.RectangleToScreen(scene.ClientRectangle)))
+                scene.Show(); scene.Activate(); scene.Refresh(); Application.DoEvents();
+                WaitUntil(delegate
                 {
-                    Bitmap result = null;
-                    session.Completed += delegate(Bitmap image) { result = image; };
-                    session.Show();
-                    var startMethod = typeof(ScrollCapture).GetMethod("StartCapture", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    var task = (System.Threading.Tasks.Task)startMethod.Invoke(session, null);
+                    using (var displayed = Native.Capture(scene.RectangleToScreen(scene.ClientRectangle)))
+                        return displayed.GetPixel(15, 15).ToArgb() == scene.Content.GetPixel(15, 15).ToArgb()
+                            && displayed.GetPixel(100, 200).ToArgb() == scene.Content.GetPixel(100, 200).ToArgb();
+                });
+                using (var session = new ScrollCaptureSession(delegate { return Native.Capture(scene.RectangleToScreen(scene.ClientRectangle)); }))
+                {
+                    var task = session.RunAsync(); int wheels = 0; var next = DateTime.UtcNow.AddMilliseconds(250);
                     var deadline = DateTime.UtcNow.AddSeconds(22);
-                    while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); System.Threading.Thread.Sleep(15); }
-                    Assert(task.IsCompleted, "Automatic capture timed out.");
+                    while (!task.IsCompleted && DateTime.UtcNow < deadline)
+                    {
+                        Application.DoEvents(); System.Threading.Thread.Sleep(10);
+                        if (DateTime.UtcNow < next) continue;
+                        if (wheels < 4) { MouseWheel(scene, -120); wheels++; next = DateTime.UtcNow.AddMilliseconds(250); }
+                        else session.Finish();
+                    }
+                    Assert(task.IsCompleted, "Manual capture timed out.");
                     if (task.IsFaulted) throw task.Exception;
-                    Assert(result != null, "Automatic capture did not finish.");
-                    using (result) EqualPixels(scene.Content, result, scene.Content.Height);
+                    using (var result = task.Result) EqualPixels(scene.Content, result.Image, scene.Content.Height);
                 }
                 scene.Close();
             }
             Cursor.Position = oldCursor;
+        }
+        private static void TestLiveIntegratedScroll()
+        {
+            using (var scene = new ScrollTestWindow())
+            {
+                scene.Show(); scene.Activate(); scene.Refresh(); Application.DoEvents();
+                var bounds = new Rectangle(20, 20, 900, 600);
+                using (var overlay = new CaptureOverlay(false, Native.Capture(bounds), bounds))
+                {
+                    overlay.Show();
+                    Mouse(overlay, "OnMouseDown", MouseButtons.Left, 80, 70); Mouse(overlay, "OnMouseUp", MouseButtons.Left, 360, 310);
+                    var task = overlay.CaptureLongAsync();
+                    WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 240; });
+                    for (int i = 1; i <= 4; i++)
+                    {
+                        MouseWheel(scene, -120); scene.Refresh(); int expected = 240 + i * 105;
+                        WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == expected; });
+                    }
+                    Option<Button>(Field<CaptureToolbar>(overlay, "toolbar"), "finish-scroll-capture").PerformClick(); Pump(task);
+                    var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                    using (var image = canvas.Render()) EqualPixels(scene.Content, image, 660);
+                    MouseWheel(canvas, -120); Assert(canvas.DocumentOffsetY > 0 && canvas.Height == 240, "Live preview did not stay inside its frame.");
+                    ToolPreview(overlay, "integrated-long"); overlay.Close();
+                }
+                scene.Close();
+            }
+            var color = Color.FromArgb(37, 91, 163);
+            using (var scene = new Form { Bounds = new Rectangle(20, 20, 900, 600), StartPosition = FormStartPosition.Manual, FormBorderStyle = FormBorderStyle.None,
+                BackColor = color, TopMost = true, ShowInTaskbar = false })
+            {
+                scene.Show(); scene.Refresh(); Application.DoEvents();
+                using (var overlay = new CaptureOverlay(false, Native.Capture(scene.Bounds), scene.Bounds))
+                {
+                    overlay.Show(); Mouse(overlay, "OnMouseDown", MouseButtons.Left, 0, 0); Mouse(overlay, "OnMouseUp", MouseButtons.Left, 900, 600);
+                    var task = overlay.CaptureLongAsync();
+                    WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 600; });
+                    var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); var at = toolbar.Bounds;
+                    Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
+                    using (var image = Field<AnnotationCanvas>(overlay, "canvas").Render())
+                        Assert(image.GetPixel(at.Left + 20, at.Top + 20).ToArgb() == color.ToArgb(), "The finish button contaminated a full-frame capture.");
+                    overlay.Close();
+                }
+                scene.Close();
+            }
         }
         private sealed class ScrollTestWindow : Form
         {
