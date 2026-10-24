@@ -45,11 +45,13 @@ namespace ShotInk
             TopMost = true;
             ShowInTaskbar = false;
             DoubleBuffered = true;
+            SetStyle(ControlStyles.Opaque, true);
             KeyPreview = true;
             Cursor = Cursors.Cross;
             sizeHint = new Label { AutoSize = true, ForeColor = Color.White, BackColor = Color.FromArgb(25, 28, 33),
                 Font = new Font("Consolas", 10), Padding = new Padding(4, 2, 4, 2), Visible = false };
             Controls.Add(sizeHint);
+            pointer = new Point(Cursor.Position.X - bounds.X, Cursor.Position.Y - bounds.Y);
             for (int i = 0; i < grips.Length; i++)
             {
                 int index = i;
@@ -66,8 +68,8 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            g.DrawImageUnscaled(desktop, Point.Empty);
-            using (var shade = new SolidBrush(Color.FromArgb(112, 10, 17, 33))) g.FillRectangle(shade, ClientRectangle);
+            EnsurePaintCache();
+            g.DrawImage(shadedDesktop, e.ClipRectangle, e.ClipRectangle, GraphicsUnit.Pixel);
             if (selection.Width > 0 && selection.Height > 0)
             {
                 g.DrawImage(desktop, selection, selection, GraphicsUnit.Pixel);
@@ -82,11 +84,10 @@ namespace ShotInk
                     g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
                 if (dragging)
                 {
-                    string size = selection.Width + " × " + selection.Height + " px";
-                    var extent = TextRenderer.MeasureText(size, sizeHint.Font);
-                    var hint = new Rectangle(Math.Max(0, Math.Min(selection.Left, Width - extent.Width - 8)), Math.Max(0, selection.Top - extent.Height - 7), extent.Width + 8, extent.Height + 4);
+                    string size = SelectionSizeText(selection);
+                    var hint = DragHintBounds(selection);
                     using (var brush = new SolidBrush(sizeHint.BackColor)) g.FillRectangle(brush, hint);
-                    TextRenderer.DrawText(g, size, sizeHint.Font, hint, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    TextRenderer.DrawText(g, size, sizeHint.Font, hint, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.PreserveGraphicsClipping);
                     if (ready && longViewport == null) foreach (var point in SelectionGeometry.Handles(selection))
                     { g.FillEllipse(Brushes.DodgerBlue, point.X - 4, point.Y - 4, 8, 8); g.DrawEllipse(Pens.White, point.X - 4, point.Y - 4, 8, 8); }
                 }
@@ -101,14 +102,9 @@ namespace ShotInk
 
         private void DrawHint(Graphics g, string text, Point at)
         {
-            using (var font = new Font("Microsoft YaHei UI", 10))
-            {
-                var size = g.MeasureString(text, font);
-                int x = Math.Max(0, Math.Min(at.X, ClientSize.Width - (int)size.Width - 24));
-                int y = Math.Max(0, Math.Min(at.Y, ClientSize.Height - (int)size.Height - 18));
-                using (var brush = new SolidBrush(Color.FromArgb(235, 26, 34, 51))) g.FillRectangle(brush, x, y, size.Width + 20, size.Height + 12);
-                g.DrawString(text, font, Brushes.White, x + 10, y + 6);
-            }
+            var hint = PointerHintBounds(at);
+            using (var brush = new SolidBrush(Color.FromArgb(235, 26, 34, 51))) g.FillRectangle(brush, hint);
+            g.DrawString(text, pointerHintFont, Brushes.White, hint.X + 10, hint.Y + 6);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -119,6 +115,8 @@ namespace ShotInk
             if (ready && selection.Contains(e.Location)) { BeginAdjust(-1, e.Location); return; }
             ClearSelection();
             anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; Capture = true;
+            // Remove the hover crosshair and hint before drawing the first selection frame.
+            Invalidate(); Update();
         }
 
         private void BeginRightCancel()
@@ -147,6 +145,8 @@ namespace ShotInk
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            var previousPointer = pointer;
+            var previousSelection = selection;
             pointer = e.Location;
             if (dragging)
             {
@@ -157,9 +157,9 @@ namespace ShotInk
                     var delta = new Point(e.X - anchor.X, e.Y - anchor.Y);
                     selection = dragMode == -1 ? SelectionGeometry.Move(dragOriginal, delta, ClientRectangle) : SelectionGeometry.Resize(dragOriginal, dragMode, delta, ClientRectangle);
                 }
-                UpdateSelectionChrome();
+                if (selection != previousSelection) InvalidateDrag(previousSelection);
             }
-            Invalidate();
+            else if (!ready && previousPointer != pointer) InvalidatePointer(previousPointer);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -328,7 +328,7 @@ namespace ShotInk
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
         private void ClearLongDragPreview() { if (longDragPreview != null) { longDragPreview.Dispose(); longDragPreview = null; } }
-        protected override void Dispose(bool disposing) { if (disposing) { ClearLongDragPreview(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

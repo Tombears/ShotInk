@@ -18,6 +18,12 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--initial-preview")
+                {
+                    Run("initial selection rendering preserves frozen pixels and reuses its dimmed background", TestInitialSelectionPaint);
+                    Run("hover and initial box drawing repaint without old crosshairs, hints or borders", TestLiveInitialSelection);
+                    return 0;
+                }
                 Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
                 Run("text pages with whitespace and small overlaps preserve every row", TestDocumentStitch);
@@ -55,6 +61,7 @@ namespace ShotInk
                 Run("configured save paths work without prompts in screenshots and the editor", TestSavePreferences);
                 Run("OCR highlights form continuous bands without gaps or darker seams", TestOcrHighlight);
                 Run("selection dragging repaints one surface and reframes once on release", TestSelectionDrag);
+                Run("initial selection rendering preserves frozen pixels and reuses its dimmed background", TestInitialSelectionPaint);
                 Run("oval sliders support bounded dragging and keyboard adjustments", TestOvalSlider);
                 Run("OCR selection preserves columns, punctuation and screenshot pixels", TestOcrSelection);
                 Run("OCR requests suppress reentry and ignore stale or cancelled results", TestOcrSession);
@@ -79,6 +86,7 @@ namespace ShotInk
                 { Run("manual scrolling reconstructs a real scrolling window", TestAutomaticCapture); Run("live integrated scroll capture excludes its own chrome", TestLiveIntegratedScroll); }
                 if (args.Length == 1 && args[0] == "--interaction-preview")
                 {
+                    Run("hover and initial box drawing repaint without old crosshairs, hints or borders", TestLiveInitialSelection);
                     Run("real right-button cancellation does not reach the background window", TestLiveRightCancel);
                     Run("live selection dragging clears old borders on screen", TestLiveDrag);
                     Run("live long-image dragging erases its old viewport and scrollbars", TestLiveLongDrag);
@@ -616,6 +624,97 @@ namespace ShotInk
                     screenshot.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-drag-options.png"));
                 }
                 Mouse(overlay, "OnMouseUp", MouseButtons.Left, 230, 200); overlay.Close();
+            }
+        }
+        private static void PaintSelectionPreview(CaptureOverlay overlay, Bitmap target, Rectangle clip)
+        {
+            using (var graphics = Graphics.FromImage(target))
+            {
+                graphics.SetClip(clip);
+                overlay.GetType().GetMethod("OnPaint", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay,
+                    new object[] { new PaintEventArgs(graphics, clip) });
+            }
+        }
+        private static void TestInitialSelectionPaint()
+        {
+            using (var overlay = new CaptureOverlay(false, Pattern(900, 600, 71), new Rectangle(20, 20, 900, 600)))
+            using (var preview = new Bitmap(900, 600))
+            {
+                PaintSelectionPreview(overlay, preview, overlay.ClientRectangle);
+                var cache = Field<Bitmap>(overlay, "shadedDesktop");
+                Mouse(overlay, "OnMouseMove", MouseButtons.None, 420, 250);
+                Mouse(overlay, "OnMouseDown", MouseButtons.Left, 450, 300);
+                foreach (var point in new[] { new Point(780, 500), new Point(300, 140), new Point(460, 310), new Point(200, 100) })
+                {
+                    Mouse(overlay, "OnMouseMove", MouseButtons.Left, point.X, point.Y);
+                    PaintSelectionPreview(overlay, preview, overlay.ClientRectangle);
+                    var selection = Field<Rectangle>(overlay, "selection");
+                    var sample = new Point(selection.Left + selection.Width / 2, selection.Top + selection.Height / 2);
+                    Assert(preview.GetPixel(sample.X, sample.Y).ToArgb() == Field<Bitmap>(overlay, "desktop").GetPixel(sample.X, sample.Y).ToArgb(), "Selection preview altered the frozen image.");
+                    Assert(object.ReferenceEquals(cache, Field<Bitmap>(overlay, "shadedDesktop")), "Pointer movement rebuilt the full-screen shade cache.");
+                }
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, 200, 100);
+                Assert(Field<Rectangle>(overlay, "selection") == new Rectangle(200, 100, 250, 200), "Reverse-direction selection lost its final coordinates.");
+            }
+        }
+        private static void TestLiveInitialSelection()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            using (var expected = new Bitmap(900, 600))
+            {
+                overlay.Show(); overlay.Activate(); Application.DoEvents();
+                Native.RaiseWithoutActivation(overlay.Handle);
+                try { WaitUntil(delegate { using (var initial = Native.Capture(overlay.Bounds)) return initial.GetPixel(10, 590).R > 130 && initial.GetPixel(10, 590).R < 170 && initial.GetPixel(20, 590).ToArgb() == initial.GetPixel(10, 590).ToArgb(); }); }
+                catch
+                {
+                    using (var initial = Native.Capture(overlay.Bounds)) initial.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-initial-unmapped.png"));
+                    Console.WriteLine("Preview handle=" + overlay.Handle + ", window at center=" + Native.RootWindow(Native.WindowAt(overlay.PointToScreen(new Point(400, 300)))) + ", bounds=" + overlay.Bounds + ", visible=" + overlay.Visible);
+                    throw;
+                }
+                foreach (var point in new[] { new Point(80, 100), new Point(650, 450), new Point(880, 580), new Point(420, 240) })
+                {
+                    Mouse(overlay, "OnMouseMove", MouseButtons.None, point.X, point.Y);
+                    CheckLivePreview(overlay, expected);
+                }
+                Mouse(overlay, "OnMouseDown", MouseButtons.Left, 450, 300);
+                foreach (var point in new[] { new Point(850, 550), new Point(700, 480), new Point(300, 140), new Point(200, 100), new Point(460, 310) })
+                {
+                    Mouse(overlay, "OnMouseMove", MouseButtons.Left, point.X, point.Y);
+                    CheckLivePreview(overlay, expected);
+                }
+                using (var screenshot = Native.Capture(overlay.Bounds)) screenshot.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-initial-selection-options.png"));
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, 750, 500);
+                overlay.Close();
+            }
+        }
+        private static void CheckLivePreview(CaptureOverlay overlay, Bitmap expected)
+        {
+            // Do not force a full refresh: compare the real incremental frame against a fresh full render.
+            Application.DoEvents(); Native.FlushDesktop();
+            using (var actual = Native.Capture(overlay.Bounds))
+            {
+                PaintSelectionPreview(overlay, expected, overlay.ClientRectangle);
+                try
+                {
+                    var hint = Field<bool>(overlay, "dragging") ? (Rectangle)overlay.GetType().GetMethod("DragHintBounds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay,
+                        new object[] { Field<Rectangle>(overlay, "selection") }) : Rectangle.Empty;
+                    for (int y = 0; y < expected.Height; y++) for (int x = 0; x < expected.Width; x++)
+                    {
+                        var a = actual.GetPixel(x, y); var b = expected.GetPixel(x, y);
+                        // GDI ClearType weights differ slightly between a screen DC and a bitmap DC.
+                        // Only the current size label permits this small color difference; old labels and all borders must match exactly.
+                        int tolerance = hint.Contains(x, y) ? 24 : 0;
+                        Assert(Math.Abs(a.R - b.R) <= tolerance && Math.Abs(a.G - b.G) <= tolerance && Math.Abs(a.B - b.B) <= tolerance,
+                            "Incremental selection left stale pixels at " + x + ", " + y);
+                    }
+                }
+                catch
+                {
+                    Console.WriteLine("Initial preview pointer=" + Field<Point>(overlay, "pointer") + ", selection=" + Field<Rectangle>(overlay, "selection"));
+                    expected.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-initial-expected.png"));
+                    actual.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-initial-actual.png"));
+                    throw;
+                }
             }
         }
         private static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
