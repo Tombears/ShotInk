@@ -6,7 +6,7 @@ using System.Windows.Forms;
 namespace ShotInk
 {
     // Route real wheel input to the page, including when the pointer stays over the toolbar.
-    // Wait for sampled frames to settle before forwarding another notch.
+    // Advance as soon as the preceding viewport is safely captured and processed.
     internal sealed class ScrollWheelRouter : IDisposable
     {
         private delegate IntPtr MouseCallback(int code, IntPtr message, IntPtr data);
@@ -55,19 +55,26 @@ namespace ShotInk
             }
             return CallNextHookEx(hook, code, message, data);
         }
-        internal void QueueWheel(int delta) { if (!disposed && !session.IsFinishing) pending = Math.Max(-6000, Math.Min(6000, pending + delta)); }
+        internal void QueueWheel(int delta)
+        {
+            if (disposed || session.IsFinishing || delta == 0) return;
+            // A reversal replaces queued movement instead of continuing in the old direction.
+            if (pending != 0 && Math.Sign(pending) != Math.Sign(delta)) pending = 0;
+            pending = Math.Max(-6000, Math.Min(6000, pending + delta));
+        }
         private void ForwardPending(object sender, EventArgs args)
         {
             if (disposed || session.IsFinishing) return;
             int elapsed = unchecked(Environment.TickCount - sentAt);
             if (session.AlignmentLost && elapsed >= 300 && ((session.IsCaughtUp && session.StableMilliseconds >= 160) || elapsed >= 1000))
             { pending = 0; session.Finish(); return; }
-            bool sampled = session.ProcessedVersion > sentVersion && session.IsCaughtUp && session.StableMilliseconds >= 32;
+            bool sampled = session.ProcessedVersion > sentVersion && session.IsCaughtUp;
             // A video or blinking caret must not prevent the page from receiving wheel input forever.
-            if (!sampled) sampled = elapsed >= 350 && session.Frames > 0 && session.PendingFrames <= 1;
-            if (pending == 0 || elapsed < 70 || !sampled || session.AlignmentLost) return;
+            if (!sampled) sampled = elapsed >= 200 && session.Frames > 0 && session.PendingFrames <= 1;
+            if (pending == 0 || elapsed < 16 || !sampled || session.AlignmentLost) return;
             int delta = Math.Sign(pending) * Math.Min(120, Math.Abs(pending));
             sentVersion = session.ProcessedVersion;
+            session.NotifyWheel(delta);
             if (!Native.PostWheel(target, Center, delta)) { pending = 0; session.Finish(); return; }
             pending -= delta; sentAt = Environment.TickCount;
         }

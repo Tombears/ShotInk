@@ -13,6 +13,8 @@ namespace ShotInk
     {
         private readonly List<Bitmap> strips = new List<Bitmap>();
         private byte[] previous;
+        private byte[] frontier;
+        private int framePosition;
         private int frameHeight;
         internal const int MaxHeight = 30000;
         internal const long MaxPixels = 80000000;
@@ -25,7 +27,7 @@ namespace ShotInk
         internal int Frames { get; private set; }
         internal double LastError { get; private set; }
 
-        internal StitchStatus Add(Bitmap frame)
+        internal StitchStatus Add(Bitmap frame, int direction = 0)
         {
             if (previous == null)
             {
@@ -34,23 +36,29 @@ namespace ShotInk
                 Height = frame.Height;
                 strips.Add(new Bitmap(frame));
                 previous = ReadPixels(frame); frameHeight = frame.Height;
+                frontier = previous; framePosition = 0;
                 Frames = 1;
                 return StitchStatus.Added;
             }
             if (frame.Width != Width || frame.Height != frameHeight) throw new ArgumentException("截图区域尺寸发生变化。");
             var before = previous;
             var after = ReadPixels(frame);
-            double unchanged = Error(before, after, Width, frame.Height, 0);
+            double unchanged = Error(before, after, Width, frame.Height, 0, double.MaxValue, 1);
             if (unchanged < 0.15) return StitchStatus.Unchanged;
             int maximum = frame.Height - Math.Max(32, frame.Height / 10);
             if (maximum < 1) return StitchStatus.Unmatched;
             int best = 0;
             double bestError = double.MaxValue;
             // Search every pixel: jumping offsets can miss the only valid match on sharp text.
-            for (int offset = 1; offset <= maximum; offset++)
+            int preferred = direction < 0 ? -1 : 1;
+            for (int distance = 1; distance <= maximum; distance++)
             {
-                double error = Error(before, after, Width, frame.Height, offset, Math.Min(12, bestError));
-                if (error < bestError) { bestError = error; best = offset; }
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    int offset = distance * preferred * (pass == 0 ? 1 : -1);
+                    double error = Error(before, after, Width, frame.Height, offset, Math.Min(12, bestError));
+                    if (error < bestError) { bestError = error; best = offset; }
+                }
             }
             if (best == 0 || bestError > 12 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
             // Validate the alignment at full width; sparse sampling can miss a one-pixel text shift.
@@ -58,18 +66,28 @@ namespace ShotInk
             bestError = Error(before, after, Width, frame.Height, best, 3, 1);
             foreach (int delta in new[] { -1, 1, -2, 2 })
             {
-                int candidate = coarse + delta; if (candidate < 1 || candidate > maximum) continue;
+                int candidate = coarse + delta; if (candidate == 0 || Math.Abs(candidate) > maximum) continue;
                 double error = Error(before, after, Width, frame.Height, candidate, Math.Min(3, bestError), 1);
                 if (error < bestError) { bestError = error; best = candidate; }
             }
             LastError = bestError;
             if (bestError > 3 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
-            if (Height + best > heightLimit || (long)Width * (Height + best) > pixelLimit) return StitchStatus.LimitReached;
-            int seam = FindTextSeam(before, after, Width, frame.Height, best);
-            TrimTail(Height - (frame.Height - best - seam));
+            int position = framePosition + best;
+            int added = position + frameHeight - Height;
+            if (added <= 0)
+            {
+                previous = after; framePosition = position;
+                return StitchStatus.Unchanged;
+            }
+            // Returning through previously captured content must not append it again.
+            // Validate any new tail against the furthest captured viewport, not the last revisited frame.
+            if (added > maximum || Error(frontier, after, Width, frameHeight, added, 3, 1) > 3) return StitchStatus.Unmatched;
+            if (Height + added > heightLimit || (long)Width * (Height + added) > pixelLimit) return StitchStatus.LimitReached;
+            int seam = FindTextSeam(frontier, after, Width, frame.Height, added);
+            TrimTail(Height - (frame.Height - added - seam));
             strips.Add(frame.Clone(new Rectangle(0, seam, Width, frame.Height - seam), PixelFormat.Format24bppRgb));
-            Height += best;
-            previous = after;
+            Height += added;
+            previous = after; frontier = after; framePosition = position;
             Frames++;
             return StitchStatus.Added;
         }
@@ -98,22 +116,24 @@ namespace ShotInk
 
         private static double Error(byte[] before, byte[] after, int width, int height, int offset, double cutoff = double.MaxValue, int pixelStep = 0)
         {
-            int marginY = Math.Min(24, Math.Max(1, (height - offset) / 12));
-            int endY = height - offset - marginY;
+            int displacement = Math.Abs(offset);
+            int beforeY = Math.Max(0, offset), afterY = Math.Max(0, -offset);
+            int marginY = Math.Min(24, Math.Max(1, (height - displacement) / 12));
+            int endY = height - displacement - marginY;
             if (endY <= marginY) return double.MaxValue;
             int stepX = pixelStep > 0 ? pixelStep : Math.Max(1, width / 192);
-            int stepY = 1;
+            int stepY = pixelStep > 0 ? 1 : Math.Max(1, height / 160);
             int marginX = Math.Max(1, Math.Min(8, width / 40));
             int right = width - Math.Max(marginX, Math.Min(24, width / 20));
-            int samples = (endY - marginY) * ((right - marginX + stepX - 1) / stepX) * 3;
+            int samples = ((endY - marginY + stepY - 1) / stepY) * ((right - marginX + stepX - 1) / stepX) * 3;
             long sum = 0;
             int count = 0;
             for (int y = marginY; y < endY; y += stepY)
             {
                 for (int x = marginX; x < right; x += stepX)
                 {
-                    int a = ((y + offset) * width + x) * 3;
-                    int b = (y * width + x) * 3;
+                    int a = ((y + beforeY) * width + x) * 3;
+                    int b = ((y + afterY) * width + x) * 3;
                     sum += Math.Abs(before[a] - after[b]) + Math.Abs(before[a + 1] - after[b + 1]) + Math.Abs(before[a + 2] - after[b + 2]);
                     count += 3;
                 }
@@ -138,6 +158,7 @@ namespace ShotInk
         public void Dispose()
         {
             previous = null;
+            frontier = null;
             foreach (var strip in strips) strip.Dispose();
             strips.Clear();
         }

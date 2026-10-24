@@ -27,7 +27,8 @@ namespace ShotInk
         private readonly int heightLimit;
         private readonly long pixelLimit;
         private readonly object gate = new object();
-        private readonly Queue<Bitmap> pending = new Queue<Bitmap>();
+        private sealed class CapturedFrame { internal Bitmap Image; internal int Direction; }
+        private readonly Queue<CapturedFrame> pending = new Queue<CapturedFrame>();
         private readonly SemaphoreSlim changed = new SemaphoreSlim(0);
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
         private bool producerDone;
@@ -37,6 +38,7 @@ namespace ShotInk
         private int stitchedHeight;
         private int stitchedFrames;
         private int capturedVersion, processedVersion, lastChangedAt = Environment.TickCount, alignmentLost;
+        private int scrollDirection;
         internal Action BeforeStitch;
         internal bool IsFinishing { get { return finishRequested; } }
         internal bool IsCaughtUp { get { return Volatile.Read(ref processedVersion) > 0 && Volatile.Read(ref processedVersion) == Volatile.Read(ref capturedVersion); } }
@@ -50,6 +52,7 @@ namespace ShotInk
         internal ScrollCaptureSession(Func<Bitmap> capture, int heightLimit = VerticalStitcher.MaxHeight, long pixelLimit = VerticalStitcher.MaxPixels)
         { this.capture = capture; this.heightLimit = heightLimit; this.pixelLimit = pixelLimit; }
         internal void Finish() { finishRequested = true; }
+        internal void NotifyWheel(int delta) { if (delta != 0) Volatile.Write(ref scrollDirection, delta < 0 ? 1 : -1); }
         internal Task<ScrollCaptureResult> RunAsync()
         {
             if (disposed != 0) throw new ObjectDisposedException("ScrollCaptureSession");
@@ -73,6 +76,7 @@ namespace ShotInk
                                 if (finishRequested) return;
                                 await Task.Delay(1, token).ConfigureAwait(false);
                             }
+                            int direction = Volatile.Read(ref scrollDirection);
                             var frame = capture();
                             try
                             {
@@ -82,7 +86,7 @@ namespace ShotInk
                                     first = false; previous = signature;
                                     lock (gate)
                                     {
-                                        pending.Enqueue(frame);
+                                        pending.Enqueue(new CapturedFrame { Image = frame, Direction = direction });
                                         Interlocked.Increment(ref capturedVersion); Volatile.Write(ref lastChangedAt, Environment.TickCount);
                                         changed.Release();
                                         frame = null; PeakPendingFrames = Math.Max(PeakPendingFrames, pending.Count);
@@ -105,7 +109,7 @@ namespace ShotInk
                         while (true)
                         {
                             await changed.WaitAsync(token).ConfigureAwait(false);
-                            Bitmap frame = null;
+                            CapturedFrame frame = null;
                             lock (gate)
                             {
                                 if (pending.Count > 0) frame = pending.Dequeue();
@@ -113,7 +117,7 @@ namespace ShotInk
                             }
                             if (frame == null) continue;
                             StitchStatus status;
-                            using (frame) { if (BeforeStitch != null) BeforeStitch(); status = stitcher.Add(frame); }
+                            using (frame.Image) { if (BeforeStitch != null) BeforeStitch(); status = stitcher.Add(frame.Image, frame.Direction); }
                             Volatile.Write(ref alignmentLost, status == StitchStatus.Unmatched ? 1 : 0);
                             Volatile.Write(ref stitchedHeight, stitcher.Height); Volatile.Write(ref stitchedFrames, stitcher.Frames);
                             Interlocked.Increment(ref processedVersion);
@@ -128,7 +132,7 @@ namespace ShotInk
                 catch (Exception error) { failure = error; }
                 cancellation.Cancel();
                 try { await producer.ConfigureAwait(false); } catch (Exception error) { if (failure == null) failure = error; }
-                lock (gate) { while (pending.Count > 0) pending.Dequeue().Dispose(); }
+                lock (gate) { while (pending.Count > 0) pending.Dequeue().Image.Dispose(); }
                 changed.Dispose(); cancellation.Dispose();
                 if (failure != null) { if (output != null) output.Dispose(); System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw(); }
                 return output;

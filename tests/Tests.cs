@@ -26,6 +26,7 @@ namespace ShotInk
                 }
                 Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
+                Run("scroll reversals revisit existing rows without duplicating or losing new tail pixels", TestScrollReversals);
                 Run("text pages with whitespace and small overlaps preserve every row", TestDocumentStitch);
                 Run("text seams retain whole glyphs and narrow left-hand content", TestTextSeams);
                 Run("unchanged frame does not duplicate content", TestUnchanged);
@@ -319,6 +320,46 @@ namespace ShotInk
                     using (var result = task.Result)
                     { Assert(!result.LimitReached && result.Frames == 8, "Scroll frames were duplicated or lost."); EqualPixels(content, result.Image, 560); }
                     Assert(session.PeakPendingFrames <= ScrollCaptureSession.QueueCapacity && ScrollCaptureSession.PollInterval == 10, "Capture cadence or queue bound is incorrect.");
+                }
+            }
+        }
+        private static void TestScrollReversals()
+        {
+            using (var content = Pattern(320, 1800, 519))
+            using (var stitcher = new VerticalStitcher())
+            {
+                int origin = 200, previous = origin, furthest = origin;
+                foreach (int top in new[] { 200, 280, 390, 310, 230, 150, 90, 170, 250, 350, 420, 510, 400, 300, 400, 500, 590, 680 })
+                using (var frame = content.Clone(new Rectangle(0, top, 320, 300), PixelFormat.Format24bppRgb))
+                {
+                    var status = stitcher.Add(frame, Math.Sign(top - previous));
+                    Assert(status != StitchStatus.Unmatched, "A valid reverse scroll lost alignment at " + top);
+                    furthest = Math.Max(furthest, top);
+                    Assert(stitcher.Height == 300 + furthest - origin, "Revisited rows were appended again at " + top);
+                    previous = top;
+                }
+                using (var expected = content.Clone(new Rectangle(0, origin, 320, furthest - origin + 300), PixelFormat.Format24bppRgb))
+                using (var actual = stitcher.Build()) EqualPixels(expected, actual, expected.Height);
+            }
+            using (var content = Pattern(100, 1100, 526))
+            {
+                int top = 0;
+                using (var session = new ScrollCaptureSession(delegate { return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref top), 100, 240), PixelFormat.Format24bppRgb); }))
+                {
+                    var task = session.RunAsync(); WaitUntil(delegate { return session.Height == 240; });
+                    int previous = 0, furthest = 0;
+                    foreach (int next in new[] { 80, 160, 240, 160, 80, 160, 240, 320, 400 })
+                    {
+                        int version = session.ProcessedVersion;
+                        session.NotifyWheel(next > previous ? -120 : 120);
+                        System.Threading.Volatile.Write(ref top, next);
+                        WaitUntil(delegate { return session.ProcessedVersion > version && session.IsCaughtUp; });
+                        furthest = Math.Max(furthest, next);
+                        Assert(!session.AlignmentLost && session.Height == 240 + furthest, "Asynchronous reversal duplicated content or lost alignment.");
+                        previous = next;
+                    }
+                    session.Finish(); Pump(task);
+                    using (var result = task.Result) EqualPixels(content, result.Image, 640);
                 }
             }
         }
@@ -760,6 +801,18 @@ namespace ShotInk
                         Assert(stitcher.Add(frame) == StitchStatus.Added, "A text page failed to match at offset " + offset + ".");
                 Console.WriteLine("Text-page matching: " + clock.ElapsedMilliseconds + " ms for 11 frames at 1280 x 720.");
                 using (var result = stitcher.Build()) EqualPixels(content, result, content.Height);
+                using (var revisit = new VerticalStitcher())
+                {
+                    int furthest = 0;
+                    foreach (int offset in new[] { 0, 120, 240, 120, 0, 120, 240, 360 })
+                    using (var frame = content.Clone(new Rectangle(0, offset, 1280, 720), PixelFormat.Format24bppRgb))
+                    {
+                        Assert(revisit.Add(frame) != StitchStatus.Unmatched, "A text-page reversal lost alignment.");
+                        furthest = Math.Max(furthest, offset);
+                        Assert(revisit.Height == 720 + furthest, "A text-page reversal appended repeated lines.");
+                    }
+                    using (var result = revisit.Build()) EqualPixels(content, result, 1080);
+                }
             }
             using (var content = Pattern(180, 420, 226))
             using (var stitcher = new VerticalStitcher())
@@ -1812,9 +1865,10 @@ namespace ShotInk
         }
         private static void TestLiveIntegratedScroll()
         {
+            foreach (int renderDelay in new[] { 0, 120 })
             using (var scene = new ScrollTestWindow())
             {
-                scene.WheelRenderDelay = 120;
+                scene.WheelRenderDelay = renderDelay;
                 scene.Show(); scene.Activate(); scene.Refresh(); Application.DoEvents();
                 var bounds = new Rectangle(20, 20, 900, 600);
                 using (var overlay = new CaptureOverlay(false, Native.Capture(bounds), bounds))
@@ -1824,6 +1878,7 @@ namespace ShotInk
                     Mouse(overlay, "OnMouseDown", MouseButtons.Left, 80, 70); Mouse(overlay, "OnMouseUp", MouseButtons.Left, 360, 310);
                     var task = overlay.CaptureLongAsync();
                     WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 240; });
+                    var wheelClock = System.Diagnostics.Stopwatch.StartNew();
                     // Deliver native wheel messages without relying on the shared desktop's mouse position.
                     SendMessage(overlay.Handle, 0x020A, new IntPtr(-120 << 16), IntPtr.Zero);
                     WaitUntil(delegate { return task.IsCompleted || Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 345; });
@@ -1832,6 +1887,22 @@ namespace ShotInk
                     WaitUntil(delegate { return task.IsCompleted || Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 660; });
                     Assert(!task.IsCompleted, "Delayed wheel burst ended capture: " + Field<Label>(overlay, "sizeHint").Text);
                     Assert(Field<ScrollCaptureSession>(overlay, "scrollSession").Frames == 5, "Rapid native wheel input skipped a viewport before sampling it.");
+                    Console.WriteLine("Four wheel steps including capture and stitching: " + wheelClock.ElapsedMilliseconds + " ms, page render delay=" + renderDelay + " ms.");
+                    var captureSession = Field<ScrollCaptureSession>(overlay, "scrollSession");
+                    foreach (int destination in new[] { 315, 210, 315, 420 })
+                    {
+                        int version = captureSession.ProcessedVersion;
+                        int delta = destination > scene.Offset ? -120 : 120;
+                        SendMessage(overlay.Handle, 0x020A, new IntPtr(delta << 16), IntPtr.Zero);
+                        WaitUntil(delegate { return task.IsCompleted || scene.Offset == destination && captureSession.ProcessedVersion > version && captureSession.IsCaughtUp; });
+                        Assert(!task.IsCompleted && captureSession.Height == 660 && captureSession.Frames == 5, "Revisiting old content appended duplicate rows or stopped live capture.");
+                    }
+                    // Reverse before queued wheel input is forwarded: upward input must win immediately.
+                    SendMessage(overlay.Handle, 0x020A, new IntPtr(-360 << 16), IntPtr.Zero);
+                    SendMessage(overlay.Handle, 0x020A, new IntPtr(120 << 16), IntPtr.Zero);
+                    WaitUntil(delegate { return task.IsCompleted || scene.Offset == 315 && captureSession.IsCaughtUp; });
+                    Assert(!task.IsCompleted && captureSession.Height == 660 && Field<int>(Field<ScrollWheelRouter>(overlay, "scrollWheel"), "pending") == 0,
+                        "Reversal retained the old queued downward movement.");
                     Option<Button>(Field<CaptureToolbar>(overlay, "toolbar"), "finish-scroll-capture").PerformClick(); Pump(task);
                     var canvas = Field<AnnotationCanvas>(overlay, "canvas");
                     using (var image = canvas.Render()) EqualPixels(scene.Content, image, 660);
@@ -1866,6 +1937,7 @@ namespace ShotInk
             internal readonly Bitmap Content = Pattern(280, 660, 41);
             internal int WheelRenderDelay;
             private int offset;
+            internal int Offset { get { return offset; } }
             private int pendingOffset;
             private readonly Timer delayedWheel = new Timer();
             internal ScrollTestWindow()
@@ -1878,13 +1950,14 @@ namespace ShotInk
                 DoubleBuffered = true;
                 TopMost = true;
                 ShowInTaskbar = false;
-                delayedWheel.Tick += delegate { delayedWheel.Stop(); offset = Math.Min(Content.Height - ClientSize.Height, offset + pendingOffset); pendingOffset = 0; Invalidate(); };
+                delayedWheel.Tick += delegate { delayedWheel.Stop(); offset = Math.Max(0, Math.Min(Content.Height - ClientSize.Height, offset + pendingOffset)); pendingOffset = 0; Invalidate(); };
             }
             protected override void OnPaint(PaintEventArgs e) { e.Graphics.DrawImageUnscaled(Content, 0, -offset); }
             protected override void OnMouseWheel(MouseEventArgs e)
             {
-                if (WheelRenderDelay == 0) { offset = Math.Min(Content.Height - ClientSize.Height, offset + 105); Invalidate(); }
-                else { pendingOffset += 105; if (!delayedWheel.Enabled) { delayedWheel.Interval = WheelRenderDelay; delayedWheel.Start(); } }
+                int movement = e.Delta < 0 ? 105 : -105;
+                if (WheelRenderDelay == 0) { offset = Math.Max(0, Math.Min(Content.Height - ClientSize.Height, offset + movement)); Invalidate(); }
+                else { pendingOffset += movement; if (!delayedWheel.Enabled) { delayedWheel.Interval = WheelRenderDelay; delayedWheel.Start(); } }
                 base.OnMouseWheel(e);
             }
             protected override void Dispose(bool disposing) { if (disposing) { delayedWheel.Dispose(); Content.Dispose(); } base.Dispose(disposing); }
