@@ -14,6 +14,7 @@ namespace ShotInk
         private readonly List<Bitmap> strips = new List<Bitmap>();
         private byte[] previous;
         private byte[] frontier;
+        private byte[] head;
         private int framePosition;
         private int frameHeight;
         internal const int MaxHeight = 30000;
@@ -36,7 +37,7 @@ namespace ShotInk
                 Height = frame.Height;
                 strips.Add(new Bitmap(frame));
                 previous = ReadPixels(frame); frameHeight = frame.Height;
-                frontier = previous; framePosition = 0;
+                frontier = previous; head = previous; framePosition = 0;
                 Frames = 1;
                 return StitchStatus.Added;
             }
@@ -73,6 +74,21 @@ namespace ShotInk
             LastError = bestError;
             if (bestError > 3 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
             int position = framePosition + best;
+            if (position < 0)
+            {
+                int prepend = -position;
+                if (prepend > maximum || Error(head, after, Width, frameHeight, -prepend, 3, 1) > 3) return StitchStatus.Unmatched;
+                if (Height + prepend > heightLimit || (long)Width * (Height + prepend) > pixelLimit) return StitchStatus.LimitReached;
+                // The new viewport precedes the old head. Replace its overlapping
+                // prefix at a quiet row, just as appending replaces the old tail.
+                int headSeam = FindTextSeam(after, head, Width, frameHeight, prepend);
+                TrimHead(headSeam);
+                strips.Insert(0, frame.Clone(new Rectangle(0, 0, Width, prepend + headSeam), PixelFormat.Format24bppRgb));
+                Height += prepend;
+                previous = after; head = after; framePosition = 0;
+                Frames++;
+                return StitchStatus.Added;
+            }
             int added = position + frameHeight - Height;
             if (added <= 0)
             {
@@ -159,6 +175,7 @@ namespace ShotInk
         {
             previous = null;
             frontier = null;
+            head = null;
             foreach (var strip in strips) strip.Dispose();
             strips.Clear();
         }

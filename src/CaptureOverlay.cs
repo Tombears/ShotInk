@@ -25,6 +25,7 @@ namespace ShotInk
         private Bitmap longDragPreview;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
+        private OcrSearchPanel textSearch;
         private TextRecognitionSession recognition;
         private readonly AppSettings settings;
         internal event Action<Bitmap, CaptureAction> Completed;
@@ -200,6 +201,9 @@ namespace ShotInk
             };
             canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
             Controls.Add(canvas);
+            textSearch = new OcrSearchPanel(); textSearch.Bind(canvas);
+            textSearch.VisibleChanged += delegate { PositionToolbar(); };
+            Controls.Add(textSearch);
             toolbar = new CaptureToolbar(settings);
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
             toolbar.SettingsChanged += delegate { SyncSettings(); };
@@ -232,6 +236,12 @@ namespace ShotInk
             work = Rectangle.Intersect(work, ClientRectangle);
             toolbar.Location = CaptureToolbar.Place(selection, work, toolbar.Size);
             toolbar.BringToFront();
+            if (textSearch != null && textSearch.Visible)
+            {
+                textSearch.Location = new Point(Math.Max(work.Left + 4, Math.Min(selection.Right - textSearch.Width - 8, work.Right - textSearch.Width - 4)),
+                    Math.Max(work.Top + 4, Math.Min(selection.Top + 8, work.Bottom - textSearch.Height - 4)));
+                textSearch.BringToFront();
+            }
         }
 
         private void UpdateSelectionChrome()
@@ -303,6 +313,7 @@ namespace ShotInk
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (textSearch != null && textSearch.HandleKey(e)) return;
             if (scrollSession != null)
             {
                 if (e.KeyCode == Keys.Enter) FinishLongCapture();

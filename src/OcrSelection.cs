@@ -21,6 +21,10 @@ namespace ShotInk
         }
         private readonly List<Glyph> glyphs = new List<Glyph>();
         private readonly HashSet<Glyph> selected = new HashSet<Glyph>();
+        private readonly List<RectangleF> matches = new List<RectangleF>();
+        internal int MatchCount { get { return matches.Count; } }
+        internal int MatchIndex { get; private set; }
+        internal RectangleF CurrentMatch { get { return matches.Count == 0 ? RectangleF.Empty : matches[MatchIndex]; } }
         internal bool HasSelection { get { return selected.Count > 0; } }
         internal string SelectedText { get { return GetText(false); } }
         internal string AllText { get { return GetText(true); } }
@@ -99,6 +103,26 @@ namespace ShotInk
         }
         private static bool AsciiWord(char value) { return value >= '!' && value <= '~'; }
         internal void SelectAll() { selected.Clear(); foreach (var glyph in glyphs) selected.Add(glyph); }
+        internal void Search(string query)
+        {
+            matches.Clear(); MatchIndex = 0;
+            if (string.IsNullOrWhiteSpace(query)) return;
+            foreach (var group in glyphs.GroupBy(glyph => glyph.Line))
+            {
+                string text = group.Key.Source.Text;
+                int offset = 0, start;
+                while (offset <= text.Length - query.Length && (start = text.IndexOf(query, offset, StringComparison.OrdinalIgnoreCase)) >= 0)
+                {
+                    var characters = group.Where(glyph => glyph.Character.Start < start + query.Length && glyph.Character.Start + glyph.Character.Length > start).ToArray();
+                    if (characters.Length > 0)
+                        matches.Add(RectangleF.FromLTRB(characters.Min(glyph => glyph.Character.Bounds.Left), characters.Min(glyph => glyph.Character.Bounds.Top),
+                            characters.Max(glyph => glyph.Character.Bounds.Right), characters.Max(glyph => glyph.Character.Bounds.Bottom)));
+                    offset = start + query.Length;
+                }
+            }
+        }
+        internal void MoveMatch(int direction)
+        { if (matches.Count > 0) MatchIndex = (MatchIndex + direction % matches.Count + matches.Count) % matches.Count; }
         private string GetText(bool all)
         {
             var output = new System.Text.StringBuilder(); int previousRow = -1;
@@ -129,6 +153,12 @@ namespace ShotInk
                     }
                     if (!band.IsEmpty) { band.Inflate(0.5F, 0.5F); graphics.FillRectangle(blue, band); }
                 }
+            for (int index = 0; index < matches.Count; index++)
+            {
+                var bounds = matches[index]; bounds.Inflate(1, 1);
+                using (var fill = new SolidBrush(Color.FromArgb(index == MatchIndex ? 155 : 80, 255, 185, 45))) graphics.FillRectangle(fill, bounds);
+                if (index == MatchIndex) using (var border = new Pen(Color.FromArgb(218, 119, 12), 1.5F)) graphics.DrawRectangle(border, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            }
         }
     }
 

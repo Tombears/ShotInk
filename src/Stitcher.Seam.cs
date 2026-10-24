@@ -45,5 +45,18 @@ namespace ShotInk
                 }
             }
         }
+        private void TrimHead(int remove)
+        {
+            while (remove > 0)
+            {
+                var first = strips[0];
+                if (first.Height <= remove) { remove -= first.Height; strips.RemoveAt(0); first.Dispose(); }
+                else
+                {
+                    strips[0] = first.Clone(new Rectangle(0, remove, first.Width, first.Height - remove), PixelFormat.Format24bppRgb);
+                    first.Dispose(); remove = 0;
+                }
+            }
+        }
     }
 }

@@ -101,7 +101,9 @@ namespace ShotInk
         internal bool HandleRecognitionKey(KeyEventArgs e)
         {
             if (recognition == null) return false;
-            if (e.Control && e.KeyCode == Keys.C) CopyRecognizedText(false);
+            if (e.Control && e.KeyCode == Keys.F) { if (SearchRequested != null) SearchRequested(); }
+            else if (e.KeyCode == Keys.F3) MoveSearchMatch(e.Shift ? -1 : 1);
+            else if (e.Control && e.KeyCode == Keys.C) CopyRecognizedText(false);
             else if (e.Control && e.KeyCode == Keys.A) { recognition.SelectAll(); NotifyTextSelection(); }
             else if (e.KeyCode == Keys.Escape) Tool = DrawTool.None;
             else return false;
@@ -419,6 +421,7 @@ namespace ShotInk
         private readonly Panel toolArea;
         private readonly OcrSelectionActions textActions;
         private readonly TextRecognitionSession recognition;
+        private readonly OcrSearchPanel textSearch;
         private readonly Action<Bitmap> pin;
         private readonly AppSettings settings;
         private bool dirty;
@@ -462,6 +465,10 @@ namespace ShotInk
             canvas = new AnnotationCanvas(image) { Location = new Point(20, 20) };
             canvas.Changed += delegate { dirty = true; UpdateStatus("已编辑"); };
             viewport.Controls.Add(canvas);
+            textSearch = new OcrSearchPanel(); textSearch.Bind(canvas); Controls.Add(textSearch);
+            viewport.Resize += delegate { PositionSearch(); };
+            viewport.LocationChanged += delegate { PositionSearch(); };
+            textSearch.VisibleChanged += delegate { PositionSearch(); };
             status = Theme.Label("", 9, Theme.Muted); status.Dock = DockStyle.Bottom; status.Height = 34; status.Padding = new Padding(12, 8, 0, 0);
             toolOptions = new AnnotationOptions(this.settings) { Location = new Point(9, 106), Width = 440 };
             toolOptions.SettingsChanged += delegate { toolOptions.ApplyTo(canvas); };
@@ -497,6 +504,8 @@ namespace ShotInk
 
         private void AddButton(FlowLayoutPanel panel, string text, bool primary, int width, Action action)
         { var b = Theme.Button(text, primary, width); b.Click += delegate { action(); }; panel.Controls.Add(b); }
+        private void PositionSearch()
+        { textSearch.Location = new Point(viewport.Left + Math.Max(8, viewport.ClientSize.Width - textSearch.Width - 8), viewport.Top + 8); textSearch.BringToFront(); }
         private void SelectTool(DrawTool tool)
         {
             canvas.Tool = tool; textActions.Hide();
@@ -532,6 +541,7 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (textSearch.HandleKey(e)) return;
             if (canvas.HandleGestureKey(e)) return;
             if (canvas.HandleTextKey(e)) return;
             if (canvas.HandleRecognitionKey(e)) return;

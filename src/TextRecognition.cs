@@ -86,7 +86,7 @@ namespace ShotInk
                     await EnsureStarted();
                     int id = ++requestId;
                     await worker.StandardInput.WriteLineAsync("{\"id\":" + id + ",\"png\":\"" + Convert.ToBase64String(png) + "\"}");
-                    var result = Parse(await ReadLine(60000));
+                    var result = Parse(await ReadLine(RecognitionTimeout(image.Width, image.Height)));
                     if (!string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException(result.Error);
                     if (result.Id != id) { ResetWorker(); throw new InvalidOperationException("文字识别响应不匹配，请重试。"); }
                     if (result.Width != image.Width || result.Height != image.Height) throw new InvalidOperationException("文字坐标与图片尺寸不匹配。");
@@ -97,6 +97,11 @@ namespace ShotInk
                 catch (IOException) { ResetWorker(); throw new InvalidOperationException("文字识别组件已关闭，请重新识别。"); }
                 finally { gate.Release(); }
             }, cancellation);
+        }
+        internal static int RecognitionTimeout(int width, int height)
+        {
+            long tiles = ((long)width + 1119) / 1120 * (((long)height + 1119) / 1120);
+            return (int)Math.Min(600000, Math.Max(60000, tiles * 15000));
         }
         internal Task WarmUpAsync()
         {
@@ -112,7 +117,7 @@ namespace ShotInk
         {
             if (worker != null && !worker.HasExited) return;
             ResetWorker();
-            if (!File.Exists(executable)) throw new InvalidOperationException("缺少文字识别组件。请运行 ShotInk-Setup.exe 完整安装包，或将便携包完整解压后再启动程序。");
+            if (!File.Exists(executable)) throw new InvalidOperationException("缺少文字识别组件。请完整解压 ShotInk-portable.zip，并保留同目录的 ocr 文件夹后再启动程序。");
             var start = new ProcessStartInfo(executable, arguments) { WorkingDirectory = workingDirectory, UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = new UTF8Encoding(false), StandardErrorEncoding = new UTF8Encoding(false) };
@@ -138,7 +143,7 @@ namespace ShotInk
         internal static OcrDocument Parse(string json)
         {
             using (var data = new MemoryStream(Encoding.UTF8.GetBytes(json)))
-                return (OcrDocument)new DataContractJsonSerializer(typeof(OcrDocument)).ReadObject(data);
+                return (OcrDocument)new DataContractJsonSerializer(typeof(OcrDocument), new DataContractJsonSerializerSettings { MaxItemsInObjectGraph = int.MaxValue }).ReadObject(data);
         }
         private void ResetWorker()
         {

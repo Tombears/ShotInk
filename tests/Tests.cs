@@ -65,6 +65,8 @@ namespace ShotInk
                 Run("initial selection rendering preserves frozen pixels and reuses its dimmed background", TestInitialSelectionPaint);
                 Run("oval sliders support bounded dragging and keyboard adjustments", TestOvalSlider);
                 Run("OCR selection preserves columns, punctuation and screenshot pixels", TestOcrSelection);
+                Run("OCR search locates matches throughout a long image without changing export or clipboard selection", TestOcrSearch);
+                Run("large OCR responses preserve all character coordinates", TestLargeOcrResponse);
                 Run("OCR requests suppress reentry and ignore stale or cancelled results", TestOcrSession);
                 Run("mosaic brush follows continuous strokes and keeps sizes independent", TestMosaicBrush);
                 Run("mosaic selection ignores brush size and respects pixel size", TestMosaicSelection);
@@ -328,17 +330,18 @@ namespace ShotInk
             using (var content = Pattern(320, 1800, 519))
             using (var stitcher = new VerticalStitcher())
             {
-                int origin = 200, previous = origin, furthest = origin;
+                int origin = 200, previous = origin, furthest = origin, earliest = origin;
                 foreach (int top in new[] { 200, 280, 390, 310, 230, 150, 90, 170, 250, 350, 420, 510, 400, 300, 400, 500, 590, 680 })
                 using (var frame = content.Clone(new Rectangle(0, top, 320, 300), PixelFormat.Format24bppRgb))
                 {
                     var status = stitcher.Add(frame, Math.Sign(top - previous));
                     Assert(status != StitchStatus.Unmatched, "A valid reverse scroll lost alignment at " + top);
                     furthest = Math.Max(furthest, top);
-                    Assert(stitcher.Height == 300 + furthest - origin, "Revisited rows were appended again at " + top);
+                    earliest = Math.Min(earliest, top);
+                    Assert(stitcher.Height == 300 + furthest - earliest, "Bidirectional capture lost new rows or duplicated revisited rows at " + top);
                     previous = top;
                 }
-                using (var expected = content.Clone(new Rectangle(0, origin, 320, furthest - origin + 300), PixelFormat.Format24bppRgb))
+                using (var expected = content.Clone(new Rectangle(0, earliest, 320, furthest - earliest + 300), PixelFormat.Format24bppRgb))
                 using (var actual = stitcher.Build()) EqualPixels(expected, actual, expected.Height);
             }
             using (var content = Pattern(100, 1100, 526))
@@ -801,6 +804,13 @@ namespace ShotInk
                         Assert(stitcher.Add(frame) == StitchStatus.Added, "A text page failed to match at offset " + offset + ".");
                 Console.WriteLine("Text-page matching: " + clock.ElapsedMilliseconds + " ms for 11 frames at 1280 x 720.");
                 using (var result = stitcher.Build()) EqualPixels(content, result, content.Height);
+                using (var upward = new VerticalStitcher())
+                {
+                    foreach (int offset in new[] { 600, 480, 360, 240, 120, 0, 120, 240, 360, 480, 600, 720, 840, 960, 1080 })
+                    using (var frame = content.Clone(new Rectangle(0, offset, 1280, 720), PixelFormat.Format24bppRgb))
+                        Assert(upward.Add(frame) != StitchStatus.Unmatched, "Upward text capture lost alignment at " + offset);
+                    using (var result = upward.Build()) EqualPixels(content, result, content.Height);
+                }
                 using (var revisit = new VerticalStitcher())
                 {
                     int furthest = 0;
@@ -1464,6 +1474,80 @@ namespace ShotInk
                 RecognizedLine("编号A01", 10, 10), RecognizedLine("release-sit", 200, 10),
                 RecognizedLine("编号B02", 10, 50), RecognizedLine("hotfix-20261021", 200, 50),
                 RecognizedLine("中文123，A_B-9.50!", 10, 100) } };
+        }
+        private static void TestOcrSearch()
+        {
+            using (var owner = new Form { ClientSize = new Size(700, 450) })
+            using (var canvas = new AnnotationCanvas(new Bitmap(600, 4500)))
+            using (var search = new OcrSearchPanel())
+            {
+                using (var g = Graphics.FromImage(canvas.Image)) g.Clear(Color.White);
+                canvas.UseDocumentViewport(new Size(600, 360)); owner.Controls.Add(canvas);
+                search.Bind(canvas); search.Location = new Point(240, 10); owner.Controls.Add(search); owner.Show();
+                canvas.SetTextRecognition(new OcrDocument { Width = 600, Height = 4500, Lines = new[] {
+                    RecognizedLine("Needle 目标", 15, 20), RecognizedLine("another NEEDLE target", 15, 2200), RecognizedLine("needle 目标", 15, 4200) } });
+                Assert(search.Visible, "OCR did not show the search box.");
+                var query = Option<TextBox>(search, "ocr-search-query"); query.Text = "NEEDLE";
+                Assert(canvas.SearchMatchCount == 3 && canvas.SearchMatchNumber == 1, "Case-insensitive search missed a match.");
+                string selected = Field<OcrSelectionModel>(canvas, "recognition").SelectedText;
+                canvas.MoveSearchMatch(1); Assert(canvas.DocumentOffsetY > 1900 && canvas.DocumentOffsetY < 2300, "Search did not reveal a middle long-image match.");
+                canvas.MoveSearchMatch(1); Assert(canvas.DocumentOffsetY > 3900, "Search did not reveal the last match.");
+                canvas.MoveSearchMatch(1); Assert(canvas.SearchMatchNumber == 1 && canvas.DocumentOffsetY == 0, "Next match did not wrap to the top.");
+                canvas.MoveSearchMatch(-1); Assert(canvas.SearchMatchNumber == 3, "Previous match did not wrap to the bottom.");
+                Assert(Field<OcrSelectionModel>(canvas, "recognition").SelectedText == selected, "Searching changed copied selection.");
+                canvas.SetZoom(0.5F); canvas.SearchText("目标"); canvas.MoveSearchMatch(1);
+                Assert(canvas.SearchMatchCount == 2 && canvas.DocumentOffsetY > 3500, "Zoomed Chinese search used viewport coordinates as image coordinates.");
+                using (var exported = canvas.Render()) Assert(exported.GetPixel(16, 4201).ToArgb() == Color.White.ToArgb(), "Search highlight leaked into export.");
+                query.Focus();
+                var enter = new KeyEventArgs(Keys.Enter); Assert(search.HandleKey(enter) && enter.SuppressKeyPress, "Enter could complete the screenshot while searching.");
+                var copy = new KeyEventArgs(Keys.Control | Keys.C); Assert(search.HandleKey(copy) && !copy.SuppressKeyPress, "Search box could not copy its own text.");
+                query.Text = "absent"; Assert(canvas.SearchMatchCount == 0 && Option<Label>(search, "ocr-search-count").Text == "0/0", "No-match counter is stale.");
+                canvas.Tool = DrawTool.Pen; Assert(!search.Visible, "Search remained visible after leaving OCR."); owner.Close();
+            }
+            using (var editor = new EditorForm(new Bitmap(700, 4500), delegate(Bitmap image) { image.Dispose(); }))
+            {
+                editor.Show(); var canvas = Field<AnnotationCanvas>(editor, "canvas"); canvas.SetZoom(1);
+                canvas.SetTextRecognition(new OcrDocument { Width = 700, Height = 4500, Lines = new[] { RecognizedLine("bottom target", 20, 4200) } });
+                var search = Field<OcrSearchPanel>(editor, "textSearch"); Point location = search.Location;
+                canvas.SearchText("target");
+                Assert(Field<Panel>(editor, "viewport").AutoScrollPosition.Y < -3500, "History editor search did not scroll to its result.");
+                Assert(search.Location == location, "Editor search box scrolled out of the upper-right corner."); editor.Close();
+            }
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(0, 0, 900, 600)))
+            {
+                overlay.Show(); Select(overlay); overlay.ShowLongPreview(new Bitmap(700, 4500));
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                canvas.SetTextRecognition(new OcrDocument { Width = 700, Height = 4500, Lines = new[] {
+                    RecognizedLine("target", 20, 20), RecognizedLine("target", 20, 4200) } });
+                var search = Field<OcrSearchPanel>(overlay, "textSearch");
+                Assert(search.Visible && search.Right <= overlay.ClientSize.Width, "Long-image search is missing or outside the screen.");
+                Key(overlay, Keys.Control | Keys.F); Option<TextBox>(search, "ocr-search-query").Text = "target";
+                Key(overlay, Keys.Enter);
+                Assert(!overlay.IsDisposed && canvas.SearchMatchNumber == 2 && canvas.DocumentOffsetY > 3800, "Enter in long-image search completed the screenshot instead of navigating.");
+                Key(overlay, Keys.Escape);
+                Assert(!overlay.IsDisposed && canvas.HasTextRecognition && !search.Visible, "Closing search also closed OCR or the screenshot.");
+                Key(overlay, Keys.Control | Keys.F); Assert(search.Visible, "Ctrl+F could not reopen search.");
+                Option<TextBox>(search, "ocr-search-query").Text = "target";
+                overlay.Activate(); Application.DoEvents();
+                if (Native.GetForegroundWindow() == overlay.Handle)
+                    Assert(OcrSearchPanel.ForwardGlobalFindNext() && canvas.SearchMatchNumber == 2, "The default F3 pin hotkey swallowed OCR find-next.");
+                overlay.Close();
+            }
+        }
+        private static void TestLargeOcrResponse()
+        {
+            var lines = new OcrLine[120];
+            for (int index = 0; index < lines.Length; index++) lines[index] = RecognizedLine(new string('a', 100), 0, index * 200);
+            var document = new OcrDocument { Width = 1200, Height = 30000, Lines = lines };
+            using (var stream = new MemoryStream())
+            {
+                var serializer = new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(OcrDocument),
+                    new System.Runtime.Serialization.Json.DataContractJsonSerializerSettings { MaxItemsInObjectGraph = int.MaxValue });
+                serializer.WriteObject(stream, document);
+                var parsed = RapidTextRecognizer.Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+                Assert(parsed.Lines.Length == 120 && parsed.Lines[119].Characters.Length == 100, "Large OCR response lost characters at the serializer quota.");
+            }
+            Assert(RapidTextRecognizer.RecognitionTimeout(1000, 30000) > 60000, "Full-height OCR still uses the short-screenshot timeout.");
         }
         private static void TestOcrSelection()
         {

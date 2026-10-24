@@ -107,6 +107,7 @@ namespace ShotInk
                     BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
             };
             next.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
+            textSearch.Bind(next);
             Controls.Remove(previous); previous.Dispose(); ResetRecognitionSession();
             SyncSettings(); toolbar.SetLongPreview(true); toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo);
             UpdateSelectionChrome(); PositionToolbar(); canvas.Focus();

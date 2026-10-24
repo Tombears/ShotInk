@@ -232,6 +232,7 @@ namespace ShotInk
             {
                 if (settingsOpen) return;
                 int id = m.WParam.ToInt32();
+                if (id == 2 && settings.PinShortcut == Keys.F3 && OcrSearchPanel.ForwardGlobalFindNext()) return;
                 if (id == 1) BeginCapture(false);
                 if (id == 2 && !captureBusy) PinClipboard();
                 if (id == 3) BeginCapture(true);

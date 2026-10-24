@@ -49,8 +49,7 @@ while (Console.ReadLine() is { } requestLine)
         id = request.Id;
         using var image = SKBitmap.Decode(Convert.FromBase64String(request.Png)) ?? throw new InvalidDataException("Invalid image");
         var clock = Stopwatch.StartNew();
-        var result = ocr.Detect(image, settings);
-        var lines = result.TextBlocks.Select(block => ConvertLine(block, image.Width, image.Height)).Where(line => line.Text.Length > 0).ToArray();
+        var lines = RecognizeImage(ocr, image, settings);
         protocol.WriteLine(JsonSerializer.Serialize(new
         {
             id, width = image.Width, height = image.Height, elapsedMs = clock.Elapsed.TotalMilliseconds,
@@ -58,6 +57,44 @@ while (Console.ReadLine() is { } requestLine)
         }, json));
     }
     catch (Exception error) { protocol.WriteLine(JsonSerializer.Serialize(new { id, error = error.Message }, json)); }
+}
+
+static TextLine[] RecognizeImage(RapidOcr ocr, SKBitmap image, RapidOcrOptions settings)
+{
+    // Detecting a 30,000-pixel image in one pass shrinks normal text to a few
+    // pixels. Overlapping tiles preserve readable scale and original coordinates.
+    if (image.Width <= 1600 && image.Height <= 1600)
+        return ocr.Detect(image, settings).TextBlocks.Select(block => ConvertLine(block, image.Width, image.Height)).Where(line => line.Text.Length > 0).ToArray();
+    const int side = 1280, overlap = 160;
+    var lines = new List<TextLine>();
+    int[] ys = TileStarts(image.Height, side, overlap);
+    for (int row = 0; row < ys.Length; row++)
+    {
+        int y = ys[row];
+        int width = image.Width, height = Math.Min(side, image.Height - y);
+        using var tile = new SKBitmap(width, height);
+        using (var canvas = new SKCanvas(tile)) { canvas.Clear(SKColors.White); canvas.DrawBitmap(image, 0, -y); }
+        float top = row == 0 ? 0 : (ys[row - 1] + side + y) / 2f;
+        float bottom = row == ys.Length - 1 ? image.Height : (y + side + ys[row + 1]) / 2f;
+        // Keep each text line at full width; horizontal tiles split long lines
+        // and can duplicate the characters in their overlap.
+        foreach (var block in ocr.Detect(tile, settings with { LimitSideLen = Math.Min(4096, Math.Max(width, height)) }).TextBlocks)
+        {
+            var line = ConvertLine(block, width, height);
+            float centerY = line.Box[1] + line.Box[3] / 2 + y;
+            if (line.Text.Length == 0 || centerY < top || centerY >= bottom) continue;
+            line.Box[1] += y;
+            foreach (var character in line.Characters) character.Box[1] += y;
+            lines.Add(line);
+        }
+    }
+    return lines.OrderBy(line => line.Box[1]).ThenBy(line => line.Box[0]).ToArray();
+}
+static int[] TileStarts(int length, int side, int overlap)
+{
+    var starts = new List<int> { 0 };
+    while (starts[^1] + side < length) starts.Add(Math.Min(length - side, starts[^1] + side - overlap));
+    return starts.ToArray();
 }
 
 static TextLine ConvertLine(TextBlock block, int width, int height)
