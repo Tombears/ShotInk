@@ -22,6 +22,12 @@ namespace ShotInk
         private readonly List<Glyph> glyphs = new List<Glyph>();
         private readonly HashSet<Glyph> selected = new HashSet<Glyph>();
         private readonly List<RectangleF> matches = new List<RectangleF>();
+        private sealed class SearchRow
+        {
+            internal string Text;
+            internal Glyph[] Characters;
+        }
+        private readonly List<SearchRow> searchRows = new List<SearchRow>();
         internal int MatchCount { get { return matches.Count; } }
         internal int MatchIndex { get; private set; }
         internal RectangleF CurrentMatch { get { return matches.Count == 0 ? RectangleF.Empty : matches[MatchIndex]; } }
@@ -44,10 +50,39 @@ namespace ShotInk
             foreach (var line in rows.SelectMany(row => row.OrderBy(item => item.Source.Bounds.Left)))
             {
                 var characters = line.Source.Characters;
-                if (characters == null || characters.Length == 0) characters = FallbackCharacters(line.Source);
-                foreach (var character in characters.OrderBy(item => item.Start))
-                    if (!string.IsNullOrWhiteSpace(character.Text) && character.Start >= 0 && character.Length > 0 && character.Start + character.Length <= line.Source.Text.Length)
-                        glyphs.Add(new Glyph { Line = line, Character = character });
+                var valid = (characters ?? new OcrCharacter[0]).Where(character => !string.IsNullOrWhiteSpace(character.Text) && character.Start >= 0 && character.Length > 0 && character.Start + character.Length <= line.Source.Text.Length).ToList();
+                // Some recognizers return line text but omit individual character boxes.
+                // Keep those characters searchable/selectable using the line's fallback geometry.
+                foreach (var fallback in FallbackCharacters(line.Source))
+                    if (!string.IsNullOrWhiteSpace(fallback.Text) && !valid.Any(character => character.Start <= fallback.Start && character.Start + character.Length >= fallback.Start + fallback.Length)) valid.Add(fallback);
+                foreach (var character in valid.OrderBy(item => item.Start)) glyphs.Add(new Glyph { Line = line, Character = character });
+            }
+            BuildSearchIndex();
+        }
+        private static string NormalizeSearch(string text)
+        {
+            var normalized = new System.Text.StringBuilder();
+            foreach (char value in text.Normalize(System.Text.NormalizationForm.FormKC))
+                if (!char.IsWhiteSpace(value) && char.GetUnicodeCategory(value) != UnicodeCategory.Format) normalized.Append(value);
+            return normalized.ToString();
+        }
+        private void BuildSearchIndex()
+        {
+            foreach (var row in glyphs.GroupBy(glyph => glyph.Line.Row))
+            {
+                var text = new System.Text.StringBuilder(); var positions = new List<Glyph>();
+                foreach (var line in row.GroupBy(glyph => glyph.Line))
+                {
+                    var characters = line.ToArray();
+                    var iterator = StringInfo.GetTextElementEnumerator(line.Key.Source.Text);
+                    while (iterator.MoveNext())
+                    {
+                        string element = iterator.GetTextElement(), normalized = NormalizeSearch(element);
+                        var glyph = characters.FirstOrDefault(item => item.Character.Start < iterator.ElementIndex + element.Length && item.Character.Start + item.Character.Length > iterator.ElementIndex);
+                        foreach (char value in normalized) { text.Append(value); positions.Add(glyph); }
+                    }
+                }
+                searchRows.Add(new SearchRow { Text = text.ToString(), Characters = positions.ToArray() });
             }
         }
         private static OcrCharacter[] FallbackCharacters(OcrLine line)
@@ -107,13 +142,15 @@ namespace ShotInk
         {
             matches.Clear(); MatchIndex = 0;
             if (string.IsNullOrWhiteSpace(query)) return;
-            foreach (var group in glyphs.GroupBy(glyph => glyph.Line))
+            query = NormalizeSearch(query);
+            if (query.Length == 0) return;
+            foreach (var row in searchRows)
             {
-                string text = group.Key.Source.Text;
+                string text = row.Text;
                 int offset = 0, start;
                 while (offset <= text.Length - query.Length && (start = text.IndexOf(query, offset, StringComparison.OrdinalIgnoreCase)) >= 0)
                 {
-                    var characters = group.Where(glyph => glyph.Character.Start < start + query.Length && glyph.Character.Start + glyph.Character.Length > start).ToArray();
+                    var characters = row.Characters.Skip(start).Take(query.Length).Where(glyph => glyph != null).Distinct().ToArray();
                     if (characters.Length > 0)
                         matches.Add(RectangleF.FromLTRB(characters.Min(glyph => glyph.Character.Bounds.Left), characters.Min(glyph => glyph.Character.Bounds.Top),
                             characters.Max(glyph => glyph.Character.Bounds.Right), characters.Max(glyph => glyph.Character.Bounds.Bottom)));

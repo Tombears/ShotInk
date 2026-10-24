@@ -1477,6 +1477,18 @@ namespace ShotInk
         }
         private static void TestOcrSearch()
         {
+            var spaced = new OcrSelectionModel(new OcrDocument { Lines = new[] {
+                RecognizedLine("Collections.empty L i s t();", 15, 20),
+                RecognizedLine("Ｌｉｓｔ", 15, 60), RecognizedLine("li\u200bst", 15, 100),
+                RecognizedLine("Lis", 15, 140), RecognizedLine("t", 50, 140) } });
+            spaced.Search(" l i s t "); Assert(spaced.MatchCount == 4, "Search missed OCR spaces, zero-width characters, full-width text or same-row fragments.");
+            spaced.Search("emptylist"); Assert(spaced.MatchCount == 1, "Search could not match spaced letters inside source code.");
+            Assert(spaced.AllText.Contains("L i s t") && spaced.AllText.Contains("Ｌｉｓｔ"), "Search normalization altered copied OCR text.");
+            var separateRows = new OcrSelectionModel(new OcrDocument { Lines = new[] { RecognizedLine("li", 15, 20), RecognizedLine("st", 15, 60) } });
+            separateRows.Search("list"); Assert(separateRows.MatchCount == 0, "Search incorrectly joined separate text rows.");
+            var partial = RecognizedLine("List", 15, 20); partial.Characters = new[] { partial.Characters[0] };
+            var missingBoxes = new OcrSelectionModel(new OcrDocument { Lines = new[] { partial } });
+            missingBoxes.Search("ist"); Assert(missingBoxes.MatchCount == 1 && missingBoxes.CurrentMatch.Width > 0, "Missing character metadata prevented line-text search.");
             using (var owner = new Form { ClientSize = new Size(700, 450) })
             using (var canvas = new AnnotationCanvas(new Bitmap(600, 4500)))
             using (var search = new OcrSearchPanel())

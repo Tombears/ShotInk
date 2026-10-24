@@ -6,7 +6,7 @@ using Microsoft.ML.OnnxRuntime;
 using RapidOcrNet;
 using SkiaSharp;
 
-// One process and one set of ONNX sessions are retained across screenshots.
+// Reuse bounded, independent ONNX engines across screenshots and long-image tiles.
 Console.InputEncoding = new UTF8Encoding(false);
 Console.OutputEncoding = new UTF8Encoding(false);
 var protocol = Console.Out;
@@ -14,13 +14,10 @@ Console.SetOut(Console.Error);
 Directory.SetCurrentDirectory(AppContext.BaseDirectory);
 var json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 string model = args.Contains("--fast") ? "tiny" : "small";
-using var ocr = new RapidOcr();
+using var engines = new OcrEngines(model);
 try
 {
-    using var options = RapidOcr.GetDefaultSessionOptions(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
-    options.InterOpNumThreads = 1;
-    options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
-    ocr.InitModels(model == "tiny" ? RapidOcrModelSet.PPOCRv6Tiny : RapidOcrModelSet.PPOCRv6Small, options);
+    engines.EnsureCount(1);
 }
 catch (Exception error)
 {
@@ -49,7 +46,8 @@ while (Console.ReadLine() is { } requestLine)
         id = request.Id;
         using var image = SKBitmap.Decode(Convert.FromBase64String(request.Png)) ?? throw new InvalidDataException("Invalid image");
         var clock = Stopwatch.StartNew();
-        var lines = RecognizeImage(ocr, image, settings);
+        image.SetImmutable();
+        var lines = RecognizeImage(engines, image, settings, args.Contains("--serial-tiles") ? 1 : Math.Clamp(Environment.ProcessorCount / 4, 1, 2));
         protocol.WriteLine(JsonSerializer.Serialize(new
         {
             id, width = image.Width, height = image.Height, elapsedMs = clock.Elapsed.TotalMilliseconds,
@@ -59,17 +57,23 @@ while (Console.ReadLine() is { } requestLine)
     catch (Exception error) { protocol.WriteLine(JsonSerializer.Serialize(new { id, error = error.Message }, json)); }
 }
 
-static TextLine[] RecognizeImage(RapidOcr ocr, SKBitmap image, RapidOcrOptions settings)
+static TextLine[] RecognizeImage(OcrEngines engines, SKBitmap image, RapidOcrOptions settings, int workers)
 {
     // Detecting a 30,000-pixel image in one pass shrinks normal text to a few
     // pixels. Overlapping tiles preserve readable scale and original coordinates.
     if (image.Width <= 1600 && image.Height <= 1600)
-        return ocr.Detect(image, settings).TextBlocks.Select(block => ConvertLine(block, image.Width, image.Height)).Where(line => line.Text.Length > 0).ToArray();
+        return engines[0].Detect(image, settings).TextBlocks.Select(block => ConvertLine(block, image.Width, image.Height)).Where(line => line.Text.Length > 0).ToArray();
     const int side = 1280, overlap = 160;
-    var lines = new List<TextLine>();
     int[] ys = TileStarts(image.Height, side, overlap);
-    for (int row = 0; row < ys.Length; row++)
+    workers = Math.Min(workers, ys.Length);
+    engines.EnsureCount(workers);
+    var results = new TextLine[ys.Length][];
+    Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
     {
+      // Each worker owns an engine and processes only one tile at a time.
+      for (int row = worker; row < ys.Length; row += workers)
+      {
+        var lines = new List<TextLine>();
         int y = ys[row];
         int width = image.Width, height = Math.Min(side, image.Height - y);
         using var tile = new SKBitmap(width, height);
@@ -78,7 +82,9 @@ static TextLine[] RecognizeImage(RapidOcr ocr, SKBitmap image, RapidOcrOptions s
         float bottom = row == ys.Length - 1 ? image.Height : (y + side + ys[row + 1]) / 2f;
         // Keep each text line at full width; horizontal tiles split long lines
         // and can duplicate the characters in their overlap.
-        foreach (var block in ocr.Detect(tile, settings with { LimitSideLen = Math.Min(4096, Math.Max(width, height)) }).TextBlocks)
+        // LimitSideLen targets the SHORT side and used to enlarge narrow tiles unnecessarily.
+        // Preserve native text scale, with a cap for unusually wide images.
+        foreach (var block in engines[worker].Detect(tile, settings with { ImgResize = Math.Min(2048, Math.Max(width, height)), RecMaxDegreeOfParallelism = 1 }).TextBlocks)
         {
             var line = ConvertLine(block, width, height);
             float centerY = line.Box[1] + line.Box[3] / 2 + y;
@@ -87,8 +93,10 @@ static TextLine[] RecognizeImage(RapidOcr ocr, SKBitmap image, RapidOcrOptions s
             foreach (var character in line.Characters) character.Box[1] += y;
             lines.Add(line);
         }
-    }
-    return lines.OrderBy(line => line.Box[1]).ThenBy(line => line.Box[0]).ToArray();
+        results[row] = lines.ToArray();
+      }
+    });
+    return results.SelectMany(lines => lines).OrderBy(line => line.Box[1]).ThenBy(line => line.Box[0]).ToArray();
 }
 static int[] TileStarts(int length, int side, int overlap)
 {
@@ -136,3 +144,25 @@ static string Filter(string text)
 sealed record Request(int Id, string Png);
 sealed record Character(string Text, float[] Box, int Start, int Length, float Score);
 sealed record TextLine(string Text, float[] Box, Character[] Characters);
+sealed class OcrEngines(string model) : IDisposable
+{
+    private readonly List<RapidOcr> engines = [];
+    public RapidOcr this[int index] => engines[index];
+    public void EnsureCount(int count)
+    {
+        while (engines.Count < count)
+        {
+            var engine = new RapidOcr();
+            try
+            {
+                using var options = RapidOcr.GetDefaultSessionOptions(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
+                options.InterOpNumThreads = 1;
+                options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+                engine.InitModels(model == "tiny" ? RapidOcrModelSet.PPOCRv6Tiny : RapidOcrModelSet.PPOCRv6Small, options);
+                engines.Add(engine);
+            }
+            catch { engine.Dispose(); throw; }
+        }
+    }
+    public void Dispose() { foreach (var engine in engines) engine.Dispose(); }
+}

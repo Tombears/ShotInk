@@ -43,6 +43,18 @@ namespace ShotInk
                             total += inSection;
                         }
                         Console.WriteLine("PASS: long-image OCR returns " + total + " lines across all ten sections, with global character coordinates");
+                        using (var serial = new RapidTextRecognizer(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ocr", "ShotInk.OcrHost.exe"), "--serial-tiles", System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ocr")))
+                        {
+                            var reference = serial.RecognizeAsync(longImage, CancellationToken.None).GetAwaiter().GetResult();
+                            if (reference.Lines.Length != longResult.Lines.Length) throw new Exception("Parallel tiles lost or duplicated text compared with serial tiles.");
+                            for (int line = 0; line < reference.Lines.Length; line++)
+                            {
+                                if (reference.Lines[line].Text != longResult.Lines[line].Text) throw new Exception("Parallel tiles changed reading order or text.");
+                                for (int coordinate = 0; coordinate < 4; coordinate++)
+                                    if (Math.Abs(reference.Lines[line].Box[coordinate] - longResult.Lines[line].Box[coordinate]) > 1) throw new Exception("Parallel tiles changed global coordinates.");
+                            }
+                            Console.WriteLine("PASS: parallel and serial tiles return identical ordered text and matching global coordinates");
+                        }
                     }
                     Console.WriteLine("PASS: installed application resolves its bundled OCR process and returns " + characters + " characters");
                 }
