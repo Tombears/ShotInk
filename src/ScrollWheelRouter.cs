@@ -24,6 +24,7 @@ namespace ShotInk
         private IntPtr hook;
         private int pending, sentAt, sentVersion;
         private bool disposed;
+        private bool alignmentWasLost;
 
         internal ScrollWheelRouter(IntPtr overlay, Rectangle region, ScrollCaptureSession session, bool interceptMouse = true)
         {
@@ -66,12 +67,16 @@ namespace ShotInk
         {
             if (disposed || session.IsFinishing) return;
             int elapsed = unchecked(Environment.TickCount - sentAt);
-            if (session.AlignmentLost && elapsed >= 300 && ((session.IsCaughtUp && session.StableMilliseconds >= 160) || elapsed >= 1000))
-            { pending = 0; session.Finish(); return; }
+            // Hover effects can change the captured page without any scrolling.
+            // Discard the old wheel burst on mismatch, but keep capture alive and
+            // allow fresh wheel input to restore overlap with the last good frame.
+            bool lost = session.AlignmentLost;
+            if (lost && !alignmentWasLost) { alignmentWasLost = true; pending = 0; return; }
+            alignmentWasLost = lost;
             bool sampled = session.ProcessedVersion > sentVersion && session.IsCaughtUp;
             // A video or blinking caret must not prevent the page from receiving wheel input forever.
             if (!sampled) sampled = elapsed >= 200 && session.Frames > 0 && session.PendingFrames <= 1;
-            if (pending == 0 || elapsed < 16 || !sampled || session.AlignmentLost) return;
+            if (pending == 0 || elapsed < 16 || !sampled) return;
             int delta = Math.Sign(pending) * Math.Min(120, Math.Abs(pending));
             sentVersion = session.ProcessedVersion;
             session.NotifyWheel(delta);

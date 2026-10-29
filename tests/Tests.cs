@@ -23,7 +23,7 @@ namespace ShotInk
                     Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
                     Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
                     Run("integrated scroll capture keeps its selection when the pointer leaves", TestIntegratedScroll);
-                    Run("an unrecoverable page jump stops with a visible partial-capture notice", TestScrollGap);
+                    Run("page changes wait for completion and retain a partial-capture notice", TestScrollGap);
                     return 0;
                 }
                 if (args.Length == 1 && args[0] == "--initial-preview")
@@ -65,7 +65,7 @@ namespace ShotInk
                 Run("integrated scroll capture restores tools and edits within a fixed viewport", TestIntegratedScroll);
                 Run("long preview preserves native pixels and moves its frame without altering content", TestLongPreviewMove);
                 Run("settings suspend global shortcuts and prevent capture until the dialog closes", TestSettingsCaptureGuard);
-                Run("an unrecoverable page jump stops with a visible partial-capture notice", TestScrollGap);
+                Run("page changes wait for completion and retain a partial-capture notice", TestScrollGap);
                 Run("shortcut changes restore existing bindings on a registration conflict", TestHotkeyRollback);
                 Run("configured save paths work without prompts in screenshots and the editor", TestSavePreferences);
                 Run("OCR highlights form continuous bands without gaps or darker seams", TestOcrHighlight);
@@ -429,9 +429,16 @@ namespace ShotInk
             using (var content = Pattern(700, 900, 223))
             using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
             {
-                int offset = 0; Rectangle sampled = Rectangle.Empty;
+                int offset = 0, hovering = 0; Rectangle sampled = Rectangle.Empty;
                 overlay.InterceptScrollWheel = false;
-                overlay.CaptureScrollFrame = delegate(Rectangle region) { sampled = region; return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 700, 370), PixelFormat.Format24bppRgb); };
+                overlay.CaptureScrollFrame = delegate(Rectangle region)
+                {
+                    sampled = region;
+                    var frame = content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 700, 370), PixelFormat.Format24bppRgb);
+                    if (System.Threading.Volatile.Read(ref hovering) != 0)
+                        using (var graphics = Graphics.FromImage(frame)) graphics.FillRectangle(Brushes.White, 40, 40, 250, 120);
+                    return frame;
+                };
                 overlay.Show(); Select(overlay);
                 var selection = Field<Rectangle>(overlay, "selection"); var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
                 var strip = Field<ToolStrip>(toolbar, "strip"); var recognize = Field<ToolStripButton>(toolbar, "recognize"); var scroll = Field<ToolStripButton>(toolbar, "scroll");
@@ -441,6 +448,9 @@ namespace ShotInk
                 Assert(!strip.Visible && Option<Button>(toolbar, "finish-scroll-capture").Visible && !Field<AnnotationCanvas>(overlay, "canvas").Visible, "Capture mode exposed editing tools or the frozen canvas.");
                 Assert(!overlay.Region.IsVisible(selection.Left + 50, selection.Top + 50), "The selected area did not pass mouse input through to the original window.");
                 var sessionBeforeLeave = Field<ScrollCaptureSession>(overlay, "scrollSession");
+                System.Threading.Volatile.Write(ref hovering, 1);
+                WaitUntil(delegate { return sessionBeforeLeave.AlignmentLost && sessionBeforeLeave.StableMilliseconds >= 1200; });
+                Assert(!task.IsCompleted && !sessionBeforeLeave.IsFinishing, "A mouse hover change automatically completed capture.");
                 Mouse(overlay, "OnMouseMove", MouseButtons.None, selection.Right + 20, selection.Bottom + 20);
                 Mouse(overlay, "OnMouseDown", MouseButtons.Left, selection.Right + 20, selection.Bottom + 20);
                 Mouse(overlay, "OnMouseUp", MouseButtons.Left, selection.Right + 20, selection.Bottom + 20);
@@ -448,8 +458,10 @@ namespace ShotInk
                 Assert(!task.IsCompleted && object.ReferenceEquals(Field<ScrollCaptureSession>(overlay, "scrollSession"), sessionBeforeLeave)
                     && Field<Rectangle>(overlay, "selection") == selection && Field<CaptureToolbar>(overlay, "toolbar") == toolbar,
                     "Leaving or clicking outside the selection reset the active scrolling session.");
+                System.Threading.Volatile.Write(ref hovering, 0);
                 System.Threading.Volatile.Write(ref offset, 150);
                 WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 520; });
+                Assert(!sessionBeforeLeave.AlignmentLost && !task.IsCompleted, "Capture did not recover after the hover change ended.");
                 Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
                 var canvas = Field<AnnotationCanvas>(overlay, "canvas"); var viewport = Field<Panel>(overlay, "longViewport");
                 Assert(sampled == new Rectangle(100, 90, 700, 370) && viewport.Bounds == selection && canvas.Size == selection.Size, "Long capture changed the selected scope or expanded its visible frame.");
@@ -575,7 +587,11 @@ namespace ShotInk
                 overlay.Show(); Select(overlay);
                 var task = overlay.CaptureLongAsync();
                 WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Frames == 1; });
-                System.Threading.Volatile.Write(ref changed, 1); Pump(task);
+                System.Threading.Volatile.Write(ref changed, 1);
+                var captureSession = Field<ScrollCaptureSession>(overlay, "scrollSession");
+                WaitUntil(delegate { return captureSession.AlignmentLost && captureSession.StableMilliseconds >= 1200; });
+                Assert(!task.IsCompleted && !captureSession.IsFinishing, "A page change automatically completed capture.");
+                Option<Button>(Field<CaptureToolbar>(overlay, "toolbar"), "finish-scroll-capture").PerformClick(); Pump(task);
                 Assert(Field<Label>(overlay, "sizeHint").Text.Contains("页面变化过大"), "A missing overlap was silently exported as a complete capture.");
                 using (var result = Field<AnnotationCanvas>(overlay, "canvas").Render()) EqualPixels(before, result, before.Height);
                 overlay.Close();
