@@ -113,6 +113,9 @@ namespace ShotInk
             base.OnMouseDown(e);
             if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
             if (e.Button != MouseButtons.Left) return;
+            // The capture region stays fixed until the scrolling session ends.
+            // Clicking the surrounding overlay must not clear or restart that session.
+            if (scrollSession != null) return;
             if (ready && selection.Contains(e.Location)) { BeginAdjust(-1, e.Location); return; }
             ClearSelection();
             anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; Capture = true;

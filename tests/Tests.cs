@@ -18,6 +18,14 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--scroll-tests")
+                {
+                    Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
+                    Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
+                    Run("integrated scroll capture keeps its selection when the pointer leaves", TestIntegratedScroll);
+                    Run("an unrecoverable page jump stops with a visible partial-capture notice", TestScrollGap);
+                    return 0;
+                }
                 if (args.Length == 1 && args[0] == "--initial-preview")
                 {
                     Run("initial selection rendering preserves frozen pixels and reuses its dimmed background", TestInitialSelectionPaint);
@@ -432,6 +440,14 @@ namespace ShotInk
                 WaitUntil(delegate { var session = Field<ScrollCaptureSession>(overlay, "scrollSession"); return session != null && session.Height == 370; });
                 Assert(!strip.Visible && Option<Button>(toolbar, "finish-scroll-capture").Visible && !Field<AnnotationCanvas>(overlay, "canvas").Visible, "Capture mode exposed editing tools or the frozen canvas.");
                 Assert(!overlay.Region.IsVisible(selection.Left + 50, selection.Top + 50), "The selected area did not pass mouse input through to the original window.");
+                var sessionBeforeLeave = Field<ScrollCaptureSession>(overlay, "scrollSession");
+                Mouse(overlay, "OnMouseMove", MouseButtons.None, selection.Right + 20, selection.Bottom + 20);
+                Mouse(overlay, "OnMouseDown", MouseButtons.Left, selection.Right + 20, selection.Bottom + 20);
+                Mouse(overlay, "OnMouseUp", MouseButtons.Left, selection.Right + 20, selection.Bottom + 20);
+                Mouse(overlay, "OnMouseMove", MouseButtons.None, selection.Left + 50, selection.Top + 50);
+                Assert(!task.IsCompleted && object.ReferenceEquals(Field<ScrollCaptureSession>(overlay, "scrollSession"), sessionBeforeLeave)
+                    && Field<Rectangle>(overlay, "selection") == selection && Field<CaptureToolbar>(overlay, "toolbar") == toolbar,
+                    "Leaving or clicking outside the selection reset the active scrolling session.");
                 System.Threading.Volatile.Write(ref offset, 150);
                 WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 520; });
                 Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
