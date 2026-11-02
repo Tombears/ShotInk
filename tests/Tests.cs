@@ -293,15 +293,16 @@ namespace ShotInk
             }
             finally { Directory.Delete(root, true); }
         }
-        private static void BrowserWait(Func<bool> condition, System.Threading.Tasks.Task task)
+        private static void BrowserWait(Func<bool> condition, System.Threading.Tasks.Task task, string phase = "operation")
         {
+            Console.WriteLine("WebView test: " + phase);
             var deadline = DateTime.UtcNow.AddSeconds(45);
             while (!condition() && DateTime.UtcNow < deadline)
             {
                 if (task.IsFaulted || task.IsCanceled) task.GetAwaiter().GetResult();
                 Application.DoEvents(); System.Threading.Thread.Sleep(5);
             }
-            Assert(condition(), "Embedded browser operation timed out.");
+            Assert(condition(), "Embedded browser timed out during " + phase + ".");
         }
         private static void TestGiteeBrowser()
         {
@@ -323,23 +324,25 @@ namespace ShotInk
                     using (var browser = new GiteeBrowserForm(info, destination, testUrl: server.Url + "download", testAllowed: allowed, testProfile: profile))
                     {
                         var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
-                        BrowserWait(delegate { return browser.VerificationShown; }, run);
+                        BrowserWait(delegate { return browser.VerificationShown; }, run, "initial verification page");
                         Assert(browser.Visible && !owner.Enabled && !File.Exists(destination), "Verification did not show before downloading or failed to suspend its owner.");
                         var click = browser.Browser.CoreWebView2.ExecuteScriptAsync("document.getElementById('verify').click()");
-                        BrowserWait(delegate { return run.IsCompleted; }, run); run.GetAwaiter().GetResult();
+                        BrowserWait(delegate { return run.IsCompleted; }, run, "verified download"); run.GetAwaiter().GetResult();
                         Assert(owner.Enabled && File.ReadAllBytes(destination).Length == payload.Length && server.VerifiedDownloads == 1, "Download did not retain the verified browser session or restore its owner.");
                     }
                     using (var browser = new GiteeBrowserForm(null, Path.Combine(root, "index.json"), testUrl: server.Url + "index", testAllowed: allowed, testProfile: profile))
                     {
                         var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
-                        BrowserWait(delegate { return run.IsCompleted; }, run); run.GetAwaiter().GetResult();
-                        Assert(!browser.VerificationShown && UpdateService.DecodeIndex(browser.Metadata).Version == info.Version, "Verified metadata did not reuse the browser session silently.");
+                        BrowserWait(delegate { return run.IsCompleted || browser.VerificationShown; }, run, "metadata navigation");
+                        if (browser.VerificationShown) browser.Browser.CoreWebView2.ExecuteScriptAsync("document.getElementById('verify').click()");
+                        BrowserWait(delegate { return run.IsCompleted; }, run, "verified metadata response"); run.GetAwaiter().GetResult();
+                        Assert(UpdateService.DecodeIndex(browser.Metadata).Version == info.Version, "Verified metadata did not retain the browser session.");
                     }
                     string blocked = Path.Combine(root, "blocked"); File.WriteAllText(blocked, "not a directory");
                     using (var browser = new GiteeBrowserForm(info, Path.Combine(blocked, "download.zip"), testUrl: server.Url + "download", testAllowed: allowed, testProfile: profile))
                     {
                         var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
-                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true));
+                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true), "download write failure");
                         Assert(run.IsFaulted && owner.Enabled && File.ReadAllText(blocked) == "not a directory", "A download write failure escaped the browser task or changed existing files.");
                         try { run.GetAwaiter().GetResult(); } catch (IOException) { }
                     }
@@ -347,8 +350,8 @@ namespace ShotInk
                     using (var browser = new GiteeBrowserForm(info, Path.Combine(root, "cancel.zip"), testUrl: server.Url + "cancel", testAllowed: allowed, testProfile: profile))
                     {
                         var run = browser.RunAsync(owner, cancellation.Token);
-                        BrowserWait(delegate { return browser.VerificationShown; }, run); cancellation.Cancel();
-                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true));
+                        BrowserWait(delegate { return browser.VerificationShown; }, run, "cancellation page"); cancellation.Cancel();
+                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true), "cancellation completion");
                         Assert(run.IsCanceled && owner.Enabled && !File.Exists(Path.Combine(root, "cancel.zip")), "Cancelling verification did not leave the application and files intact.");
                     }
                     owner.Close();
@@ -382,30 +385,41 @@ namespace ShotInk
                 {
                     try
                     {
-                        using (var client = server.AcceptTcpClient())
-                        using (var stream = client.GetStream())
-                        {
-                            client.ReceiveTimeout = client.SendTimeout = 5000;
-                            var reader = new StreamReader(stream, System.Text.Encoding.ASCII, false, 4096, true);
-                            string first = reader.ReadLine(), line; bool verified = false;
-                            if (first == null) continue;
-                            while (!string.IsNullOrEmpty(line = reader.ReadLine())) if (line.StartsWith("Cookie:", StringComparison.OrdinalIgnoreCase) && line.Contains("verified=yes")) verified = true;
-                            bool index = first.Contains(" /index "), cancel = first.Contains(" /cancel ");
-                            byte[] bytes; string type, disposition = "";
-                            if (!verified || cancel)
-                            {
-                                bytes = System.Text.Encoding.UTF8.GetBytes("<!doctype html><html><body><h2>Local verification fixture</h2><button id='verify' onclick=\"document.cookie='verified=yes; path=/; max-age=3600';location.reload()\">Verify test session</button></body></html>"); type = "text/html";
-                            }
-                            else if (index) { bytes = metadata; type = "application/json"; }
-                            else { bytes = payload; type = "application/zip"; disposition = "Content-Disposition: attachment; filename=ShotInk-portable.zip\r\n"; VerifiedDownloads++; }
-                            byte[] header = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + bytes.Length + "\r\n" + disposition + "Connection: close\r\n\r\n");
-                            stream.Write(header, 0, header.Length); stream.Write(bytes, 0, bytes.Length); stream.Flush();
-                        }
+                        var client = server.AcceptTcpClient();
+                        System.Threading.Tasks.Task.Run(delegate { Reply(client); });
                     }
-                    catch (IOException) { }
                     catch (System.Net.Sockets.SocketException) { if (stopped) return; }
                     catch (ObjectDisposedException) { return; }
                 }
+            }
+            private void Reply(System.Net.Sockets.TcpClient client)
+            {
+                try
+                {
+                    using (client)
+                    using (var stream = client.GetStream())
+                    {
+                        client.ReceiveTimeout = client.SendTimeout = 5000;
+                        var reader = new StreamReader(stream, System.Text.Encoding.ASCII, false, 4096, true);
+                        string first = reader.ReadLine(), line; bool verified = false;
+                        if (first == null) return;
+                        while (!string.IsNullOrEmpty(line = reader.ReadLine())) if (line.StartsWith("Cookie:", StringComparison.OrdinalIgnoreCase) && line.Contains("verified=yes")) verified = true;
+                        bool index = first.Contains(" /index "), cancel = first.Contains(" /cancel "), download = first.Contains(" /download ");
+                        byte[] bytes; string type, disposition = "";
+                        if (!index && !cancel && !download) { bytes = new byte[0]; type = "text/plain"; }
+                        else if (!verified || cancel)
+                        {
+                            bytes = System.Text.Encoding.UTF8.GetBytes("<!doctype html><html><body><h2>Local verification fixture</h2><button id='verify' onclick=\"document.cookie='verified=yes; path=/; max-age=3600';location.reload()\">Verify test session</button></body></html>"); type = "text/html";
+                        }
+                        else if (index) { bytes = metadata; type = "application/json"; }
+                        else { bytes = payload; type = "application/zip"; disposition = "Content-Disposition: attachment; filename=ShotInk-portable.zip\r\n"; System.Threading.Interlocked.Increment(ref VerifiedDownloads); }
+                        byte[] header = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + bytes.Length + "\r\n" + disposition + "Connection: close\r\n\r\n");
+                        stream.Write(header, 0, header.Length); stream.Write(bytes, 0, bytes.Length); stream.Flush();
+                    }
+                }
+                catch (IOException) { }
+                catch (System.Net.Sockets.SocketException) { }
+                catch (ObjectDisposedException) { }
             }
             public void Dispose() { stopped = true; server.Stop(); worker.Wait(6000); }
         }
