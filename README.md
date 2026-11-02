@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 
 默认同时构建两版：完整版位于 `dist\`，交付 `ShotInk-portable.zip`；轻量版位于 `dist-lite\`，交付 `ShotInk-portable-lite.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。主程序保持 .NET Framework 4.8。
 
-OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](https://gitee.com/clear_wind_and_rain/ShotInk/blob/main/docs/ocr.md)。
+OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](https://github.com/Tombears/ShotInk/blob/main/docs/ocr.md)。
 
 ## 普通截图操作
 
@@ -61,15 +61,15 @@ OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime �
 
 ## 版本更新
 
-程序启动后检查一次，之后每小时自动从 Gitee 检查更新。检测结果只在设置中显示，不自动弹窗或显示托盘气泡。从工作台、设置或托盘菜单点击「检查更新」会立即重新检测，并在设置中显示结果。发现更新后，点击「查看并更新」查看说明，再点击「下载更新」；校验完成后点击「确认更新并重启」，程序会备份并替换文件后重新启动，保留保存目录、快捷键、工具参数和截图历史。同版本修复包也能识别，已安装相同构建时不重复更新，不降级安装旧版本。
+更新仅在点击「检查更新」时检测，启动和后台均不自动检查。检测结果显示在设置中，不自动弹窗或显示托盘气泡。从工作台、设置或托盘菜单点击「检查更新」会立即重新检测。发现更新后，点击「查看并更新」查看说明，再点击「下载更新」；校验完成后点击「确认更新并重启」，程序会备份并替换文件后重新启动，保留保存目录、快捷键、工具参数和截图历史。同版本修复包也能识别，已安装相同构建时不重复更新，不降级安装旧版本。
 
-更新前请结束并关闭截图、贴图和剪辑窗口；从设置窗口更新时会先保存当前设置。设置保存失败或安装目录没有写入权限时不会关闭程序。下载缓存优先放在 E 盘，更新目录保留安装备份；复制失败时尝试恢复原文件。设置中可关闭「每小时自动检查更新」，关闭后仍可手动检查。
+更新前请结束并关闭截图、贴图和剪辑窗口；从设置窗口更新时会先保存当前设置。设置保存失败或安装目录没有写入权限时不会关闭程序。下载缓存优先放在 E 盘，更新目录保留安装备份；复制失败时尝试恢复原文件。遇到请求限流时提示稍后重试，有验证码时才打开软件内验证窗口。
 
-首次使用本功能需完整解压新版便携包，保留 `ShotInk.build.sha256`、`update-portable.ps1` 和 WebView2 组件。更新检查及下载均使用 Gitee，无需提供账号或令牌。
+首次使用本功能需完整解压新版便携包，保留 `ShotInk.build.sha256`、`update-portable.ps1` 和 WebView2 组件。检查和下载更新均在软件内完成，无需提供账号或令牌。
 
-Gitee 要求人机验证时，下载流程会弹出内嵌验证窗口，由你完成验证后继续在同一浏览器会话中下载，再校验更新包。版本查询被拦截时，后台只在设置中显示「完成验证」入口，点击后才打开验证页面；关闭验证窗口可取消，程序继续运行。验证完成后若页面没有自动继续，可点击「已完成验证，继续」。
+更新服务要求人机验证时，下载流程会弹出内嵌验证窗口，由你完成验证后继续在同一浏览器会话中下载，再校验更新包。版本查询需要验证时，设置中显示「完成验证」入口，点击后才打开验证页面；关闭验证窗口可取消，程序继续运行。验证完成后若页面没有自动继续，可点击「已完成验证，继续」。
 
-验证窗口需要 Microsoft Edge WebView2 Runtime；未安装时会显示原因，可从[微软官网下载](https://developer.microsoft.com/microsoft-edge/webview2/)安装后重试。若 Gitee 不接受内嵌验证，可从 Gitee 发行页下载 ZIP，退出程序后完整解压覆盖原目录。
+验证窗口需要 Microsoft Edge WebView2 Runtime；未安装时会显示原因，可从[微软官网下载](https://developer.microsoft.com/microsoft-edge/webview2/)安装后重试。验证失败时可关闭窗口，稍后重新检查或下载更新。
 
 ## 两种便携版
 

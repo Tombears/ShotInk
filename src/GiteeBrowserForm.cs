@@ -89,11 +89,11 @@ namespace ShotInk
             if (metadataResponse || !e.IsSuccess && e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
             try
             {
+                string body = await browser.CoreWebView2.ExecuteScriptAsync("document.querySelector('pre') ? document.querySelector('pre').textContent.slice(0,262145) : (document.body ? document.body.innerText.slice(0,262145) : '')");
+                if (disposed || completion.Task.IsCompleted) return;
+                string text = UpdateService.ReadJson<string>(Encoding.UTF8.GetBytes(body));
                 if (package == null && e.IsSuccess)
                 {
-                    string body = await browser.CoreWebView2.ExecuteScriptAsync("document.querySelector('pre') ? document.querySelector('pre').textContent : (document.body ? document.body.innerText : '')");
-                    if (disposed || completion.Task.IsCompleted) return;
-                    string text = UpdateService.ReadJson<string>(Encoding.UTF8.GetBytes(body));
                     byte[] bytes = Encoding.UTF8.GetBytes(text ?? "");
                     if (bytes.Length > 256 * 1024) throw new InvalidDataException("更新信息超过允许大小。");
                     try { UpdateService.DecodeIndex(bytes); Metadata = bytes; completion.TrySetResult(true); return; }
@@ -101,8 +101,8 @@ namespace ShotInk
                     catch (InvalidDataException) { }
                     catch (FormatException) { }
                 }
-                if (!e.IsSuccess && e.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled)
-                    status.Text = "页面加载失败（" + e.WebErrorStatus + "），可点击下方按钮重试。";
+                var failure = UpdateService.ResponseFailure(e.HttpStatusCode, "text/html", text);
+                if (!(failure is VerificationRequiredException)) { Fail(failure); return; }
                 BeginInvoke(new Action(ShowVerification));
             }
             catch (Exception error) { Fail(error); }
@@ -123,7 +123,10 @@ namespace ShotInk
                     while ((count = await input.ReadAsync(buffer, 0, buffer.Length)) > 0)
                     { if (output.Length + count > 256 * 1024) throw new InvalidDataException("更新信息超过允许大小。"); output.Write(buffer, 0, count); }
                     if (disposed || completion.Task.IsCompleted) return;
-                    byte[] bytes = output.ToArray(); UpdateService.DecodeIndex(bytes); Metadata = bytes; completion.TrySetResult(true);
+                    byte[] bytes = output.ToArray();
+                    var failure = UpdateService.ResponseFailure(e.Response.StatusCode, e.Response.Headers.GetHeader("Content-Type"), Encoding.UTF8.GetString(bytes));
+                    if (failure != null) throw failure;
+                    UpdateService.DecodeIndex(bytes); Metadata = bytes; completion.TrySetResult(true);
                 }
             }
             catch (Exception error) { if (!disposed && !completion.Task.IsCompleted) Fail(error); }

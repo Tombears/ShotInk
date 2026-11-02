@@ -41,7 +41,7 @@ namespace ShotInk
             buttons.Controls.Add(check); buttons.Controls.Add(action); layout.Controls.Add(buttons, 0, 4);
             layout.Controls.Add(new Label { Text = "校验下载包后再确认更新并重启，保留保存目录、快捷键和截图历史。", ForeColor = Color.DimGray, Dock = DockStyle.Fill }, 0, 5);
             Controls.Add(layout);
-            Shown += async delegate { if (info != null) ShowInfo(); await CheckAsync(); };
+            Shown += async delegate { if (info != null) ShowInfo(); else await CheckAsync(); };
         }
         private void ShowInfo()
         {

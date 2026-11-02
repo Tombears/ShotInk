@@ -28,7 +28,6 @@ namespace ShotInk
         private readonly TextBox folder;
         private readonly CheckBox ask;
         private readonly CheckBox startup;
-        private readonly CheckBox checkUpdates;
         private readonly Label error;
         private readonly Label[] shortcutStatus = new Label[3];
         private readonly Timer statusTimer;
@@ -42,12 +41,12 @@ namespace ShotInk
             this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
-            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 616); MinimumSize = new Size(640, 644);
+            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 584); MinimumSize = new Size(640, 612);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 14 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-            foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 32, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 0, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
@@ -66,8 +65,6 @@ namespace ShotInk
             layout.Controls.Add(startup, 0, 7); layout.SetColumnSpan(startup, 3);
             var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
             layout.Controls.Add(startupHint, 0, 8); layout.SetColumnSpan(startupHint, 3);
-            checkUpdates = new CheckBox { Name = "check-updates", Text = "每小时自动检查更新", Checked = current.CheckUpdates, Dock = DockStyle.Fill };
-            layout.Controls.Add(checkUpdates, 0, 9); layout.SetColumnSpan(checkUpdates, 3);
             var version = new Label { Text = "当前版本 " + Application.ProductVersion + (BuildFeatures.Ocr ? " · 完整版" : " · 轻量版"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(version, 0, 10); layout.SetColumnSpan(version, 2);
             updateCheck = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = updates != null };
@@ -145,7 +142,7 @@ namespace ShotInk
         internal AppSettings ReadSettings()
         {
             var candidate = original.Clone(); candidate.CaptureShortcut = capture.ShortcutValue; candidate.PinShortcut = pin.ShortcutValue; candidate.ScrollShortcut = scroll.ShortcutValue;
-            candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.CheckUpdates = checkUpdates.Checked; candidate.Validate(); return candidate;
+            candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.Validate(); return candidate;
         }
     }
 }

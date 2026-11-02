@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace ShotInk
@@ -88,7 +89,7 @@ namespace ShotInk
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
                 Run("settings survive profile selection, restart and damaged or locked configuration", TestSettingsRecovery);
-                Run("Gitee updates check hourly, refresh settings silently and validate update packages", TestUpdates);
+                Run("Updates run only on request, refresh settings silently and validate update packages", TestUpdates);
                 Run("Gitee verification retains browser cookies, resumes downloads and cancels safely", TestGiteeBrowser);
                 Run("pinned images detect edges and resize proportionally while preserving original pixels", TestPinResize);
                 Run("settings refresh shortcut conflicts without saving or leaking probe registrations", TestShortcutStatus);
@@ -260,40 +261,33 @@ namespace ShotInk
                     form.Close();
                 }
                 int verifiedChecks = 0;
-                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info,
+                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, null,
                     delegate { throw new VerificationRequiredException(); }, delegate { verifiedChecks++; return System.Threading.Tasks.Task.FromResult(info); }))
                 {
                     form.Show(); Application.DoEvents();
                     Assert(verifiedChecks == 1 && Field<Button>(form, "action").Enabled, "Update details could not continue after a metadata verification challenge."); form.Close();
                 }
-                bool automatic = true; int requests = 0, details = 0;
-                using (var controller = new UpdateController(delegate { return automatic; }, "1.0.0", "",
+                int requests = 0, details = 0;
+                using (var controller = new UpdateController("1.0.0", "",
                     delegate { requests++; return System.Threading.Tasks.Task.FromResult(info); }))
                 using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller, delegate { details++; }))
                 {
-                    var timer = Field<System.Windows.Forms.Timer>(controller, "timer");
-                    var tick = typeof(System.Windows.Forms.Timer).GetMethod("OnTick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                    controller.Start();
-                    Assert(timer.Enabled && timer.Interval == 10000, "Initial automatic check was not scheduled.");
                     int windows = Application.OpenForms.Count;
-                    tick.Invoke(timer, new object[] { EventArgs.Empty });
-                    Assert(requests == 1 && timer.Enabled && timer.Interval == 3600000, "Automatic check did not reschedule hourly.");
-                    Assert(Application.OpenForms.Count == windows && details == 0, "Background update check opened a window.");
                     options.Show(); Application.DoEvents();
-                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDetails").Enabled, "Settings did not display the detected update.");
+                    Assert(requests == 0 && options.Controls.Find("check-updates", true).Length == 0, "Opening settings checked for updates or retained automatic checking.");
+                    Assert(!typeof(UpdateController).GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Any(field => field.FieldType == typeof(System.Windows.Forms.Timer)), "Update controller retained a polling timer.");
                     windows = Application.OpenForms.Count;
-                    automatic = false; tick.Invoke(timer, new object[] { EventArgs.Empty });
-                    Assert(requests == 1 && timer.Enabled, "Disabled automatic check still requested the server.");
                     Field<Button>(options, "updateCheck").PerformClick(); Application.DoEvents();
-                    Assert(requests == 2 && Application.OpenForms.Count == windows && details == 0, "Manual check used cached data or opened an update window.");
+                    Assert(requests == 1 && Application.OpenForms.Count == windows && details == 0, "Manual check used cached data or opened an update window.");
+                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDetails").Enabled, "Settings did not display the detected update.");
                     Field<Button>(options, "updateDetails").PerformClick();
                     Assert(details == 1, "Explicit update-details click did not open the update flow.");
                     using (var image = new Bitmap(options.Width, options.Height)) { options.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-settings-updates.png")); }
                     options.Close();
                     controller.CheckAsync().GetAwaiter().GetResult();
-                    Assert(requests == 3 && Application.OpenForms.Count == windows - 1, "Closed settings broke silent update checks.");
+                    Assert(requests == 2 && Application.OpenForms.Count == windows - 1, "Closed settings broke explicit update checks.");
                 }
-                using (var controller = new UpdateController(delegate { return true; }, "1.0.0", "", delegate { throw new VerificationRequiredException(); }))
+                using (var controller = new UpdateController("1.0.0", "", delegate { throw new VerificationRequiredException(); }))
                 using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller,
                     delegate { controller.CheckAsync(delegate { return System.Threading.Tasks.Task.FromResult(info); }).GetAwaiter().GetResult(); }))
                 {
@@ -304,8 +298,22 @@ namespace ShotInk
                     Field<Button>(options, "updateDetails").PerformClick();
                     Assert(!controller.NeedsVerification && controller.Available != null, "Verified metadata did not restore the available update."); options.Close();
                 }
-                var settings = new AppSettings { CheckUpdates = false }; string settingsPath = Path.Combine(root, "settings.ini"); settings.Save(settingsPath);
-                Assert(!AppSettings.Load(settingsPath).CheckUpdates && !settings.Clone().CheckUpdates, "Update-check preference did not persist.");
+                Assert(UpdateService.ResponseFailure(403, "text/plain", "403 Forbidden (Rate Limit Exceeded)") is UpdateRateLimitException &&
+                    UpdateService.ResponseFailure(429, "application/json", "{}") is UpdateRateLimitException &&
+                    UpdateService.ResponseFailure(403, "text/html", "<p>Rate limit exceeded</p><p>captcha</p>") is UpdateRateLimitException,
+                    "Rate limiting was mistaken for an interactive challenge.");
+                Assert(UpdateService.ResponseFailure(403, "text/html", "<h1>安全验证</h1><p>请输入验证码</p>") is VerificationRequiredException &&
+                    !(UpdateService.ResponseFailure(403, "text/plain", "Forbidden") is VerificationRequiredException) &&
+                    !(UpdateService.ResponseFailure(200, "text/html", "Service unavailable") is VerificationRequiredException), "Noninteractive errors opened verification.");
+                using (var controller = new UpdateController("1.0.0", "", delegate { throw new UpdateRateLimitException(); }))
+                {
+                    controller.CheckAsync().GetAwaiter().GetResult();
+                    Assert(!controller.NeedsVerification && controller.Status.Contains("稍后"), "Rate limiting exposed a verification action in settings.");
+                }
+                string settingsPath = Path.Combine(root, "settings.ini");
+                File.WriteAllText(settingsPath, "check-updates=1\nsave-directory=" + root);
+                var settings = AppSettings.Load(settingsPath); settings.Save(settingsPath);
+                Assert(!File.ReadAllText(settingsPath).Contains("check-updates="), "Legacy settings restored automatic checks.");
             }
             finally { Directory.Delete(root, true); }
         }
@@ -337,6 +345,20 @@ namespace ShotInk
                     owner.Show(); Application.DoEvents(); string profile = Path.Combine(root, "profile");
                     Func<Uri, bool> allowed = delegate(Uri uri) { return uri.Scheme == "http" && uri.IsLoopback && uri.Port == server.Port; };
                     string destination = Path.Combine(root, "download.zip");
+                    var responseTask = (System.Threading.Tasks.Task<System.Net.HttpWebResponse>)typeof(UpdateService).GetMethod("ResponseAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                        .Invoke(null, new object[] { System.Net.WebRequest.Create(server.Url + "rate-limit") });
+                    bool limited = false; try { responseTask.GetAwaiter().GetResult(); } catch (UpdateRateLimitException) { limited = true; }
+                    Assert(limited, "HTTP 403 rate-limit response was not recognized before opening a browser.");
+                    foreach (string route in new[] { "rate-limit", "limit-json", "denied" })
+                    using (var browser = new GiteeBrowserForm(null, Path.Combine(root, route + ".json"), testUrl: server.Url + route, testAllowed: allowed, testProfile: profile))
+                    {
+                        var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
+                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true), route + " response");
+                        Exception failure = null; try { run.GetAwaiter().GetResult(); } catch (IOException error) { failure = error; }
+                        Assert(failure != null && !(failure is VerificationRequiredException) && !browser.VerificationShown && owner.Enabled,
+                            "A noninteractive rejection displayed a verification window.");
+                        Assert(route == "denied" || failure is UpdateRateLimitException, "Browser rate limiting did not return a friendly retry message.");
+                    }
                     using (var browser = new GiteeBrowserForm(info, destination, testUrl: server.Url + "download", testAllowed: allowed, testProfile: profile))
                     {
                         var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
@@ -421,15 +443,18 @@ namespace ShotInk
                         if (first == null) return;
                         while (!string.IsNullOrEmpty(line = reader.ReadLine())) if (line.StartsWith("Cookie:", StringComparison.OrdinalIgnoreCase) && line.Contains("verified=yes")) verified = true;
                         bool index = first.Contains(" /index "), cancel = first.Contains(" /cancel "), download = first.Contains(" /download ");
-                        byte[] bytes; string type, disposition = "";
-                        if (!index && !cancel && !download) { bytes = new byte[0]; type = "text/plain"; }
+                        byte[] bytes; string type, disposition = "", status = "200 OK";
+                        if (first.Contains(" /rate-limit ")) { bytes = System.Text.Encoding.UTF8.GetBytes("403 Forbidden (Rate Limit Exceeded)"); type = "text/plain"; status = "403 Forbidden"; }
+                        else if (first.Contains(" /limit-json ")) { bytes = System.Text.Encoding.UTF8.GetBytes("{\"message\":\"Rate limit exceeded\"}"); type = "application/json"; status = "429 Too Many Requests"; }
+                        else if (first.Contains(" /denied ")) { bytes = System.Text.Encoding.UTF8.GetBytes("Forbidden"); type = "text/plain"; status = "403 Forbidden"; }
+                        else if (!index && !cancel && !download) { bytes = new byte[0]; type = "text/plain"; }
                         else if (!verified || cancel)
                         {
                             bytes = System.Text.Encoding.UTF8.GetBytes("<!doctype html><html><body><h2>Local verification fixture</h2><button id='verify' onclick=\"document.cookie='verified=yes; path=/; max-age=3600';location.reload()\">Verify test session</button></body></html>"); type = "text/html";
                         }
                         else if (index) { bytes = metadata; type = "application/json"; }
                         else { bytes = payload; type = "application/zip"; disposition = "Content-Disposition: attachment; filename=ShotInk-portable.zip\r\n"; System.Threading.Interlocked.Increment(ref VerifiedDownloads); }
-                        byte[] header = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + bytes.Length + "\r\n" + disposition + "Connection: close\r\n\r\n");
+                        byte[] header = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 " + status + "\r\nContent-Type: " + type + "\r\nContent-Length: " + bytes.Length + "\r\n" + disposition + "Connection: close\r\n\r\n");
                         stream.Write(header, 0, header.Length); stream.Write(bytes, 0, bytes.Length); stream.Flush();
                     }
                 }

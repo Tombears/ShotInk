@@ -15,6 +15,8 @@ namespace ShotInk
 {
     internal sealed class VerificationRequiredException : IOException
     { internal VerificationRequiredException() : base("更新需要人机验证，请在验证窗口完成操作。") { } }
+    internal sealed class UpdateRateLimitException : IOException
+    { internal UpdateRateLimitException() : base("更新服务暂时限制请求，请稍后再试。") { } }
     [DataContract]
     internal sealed class UpdateInfo
     {
@@ -97,16 +99,39 @@ namespace ShotInk
             using (var browser = new GiteeBrowserForm(null, Path.Combine(folder, "index.json")))
             { await browser.RunAsync(owner, token); return DecodeIndex(browser.Metadata); }
         }
+        internal static Exception ResponseFailure(int status, string contentType, string body)
+        {
+            string text = (body ?? "").ToLowerInvariant();
+            bool html = (contentType ?? "").IndexOf("html", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (status == 429 || (status >= 400 || html || (contentType ?? "").StartsWith("text/plain", StringComparison.OrdinalIgnoreCase)) &&
+                (text.Contains("rate limit") || text.Contains("too many requests") || text.Contains("请求过于频繁") || text.Contains("访问过于频繁")))
+                return new UpdateRateLimitException();
+            if (html && (text.Contains("captcha") || text.Contains("verification") || text.Contains("challenge") || text.Contains("人机验证") || text.Contains("安全验证") || text.Contains("验证码") || text.Contains("人机校验")))
+                return new VerificationRequiredException();
+            if (status >= 400) return new IOException("更新服务暂时无法访问（HTTP " + status + "），请稍后重试。");
+            return html ? new IOException("更新服务返回了无法识别的页面，请稍后重试。") : null;
+        }
+        private static async Task<string> ResponsePreviewAsync(Stream stream)
+        {
+            using (var buffer = new MemoryStream())
+            {
+                byte[] bytes = new byte[4096]; int count;
+                while (buffer.Length < 32768 && (count = await stream.ReadAsync(bytes, 0, Math.Min(bytes.Length, 32768 - (int)buffer.Length)).ConfigureAwait(false)) > 0)
+                    buffer.Write(bytes, 0, count);
+                return Encoding.UTF8.GetString(buffer.ToArray());
+            }
+        }
         private static async Task<HttpWebResponse> ResponseAsync(HttpWebRequest request)
         {
+            HttpWebResponse response;
             try { return (HttpWebResponse)await request.GetResponseAsync().ConfigureAwait(false); }
             catch (WebException error)
             {
-                var response = error.Response as HttpWebResponse;
-                if (response != null && (response.StatusCode == HttpStatusCode.Forbidden || response.StatusCode == HttpStatusCode.Unauthorized || (int)response.StatusCode == 429))
-                { response.Dispose(); throw new VerificationRequiredException(); }
-                if (response != null) response.Dispose(); throw;
+                response = error.Response as HttpWebResponse;
+                if (response == null) throw;
             }
+            using (response) using (var input = response.GetResponseStream())
+                throw ResponseFailure((int)response.StatusCode, response.ContentType, await ResponsePreviewAsync(input).ConfigureAwait(false)) ?? new IOException("更新请求未完成，请稍后重试。");
         }
         private static async Task FetchAsync(string url, Stream output, long maximum, CancellationToken token, IProgress<int> progress)
         {
@@ -122,7 +147,7 @@ namespace ShotInk
                 {
                     if (response.ResponseUri.Scheme != "https") throw new InvalidDataException("更新连接必须使用 HTTPS。");
                     if (response.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) || response.ContentType.StartsWith("application/xhtml", StringComparison.OrdinalIgnoreCase))
-                        throw new VerificationRequiredException();
+                        throw ResponseFailure((int)response.StatusCode, response.ContentType, await ResponsePreviewAsync(input).ConfigureAwait(false));
                     if (response.ContentLength > maximum) throw new InvalidDataException("更新数据超过允许的大小。");
                     var buffer = new byte[65536]; long total = 0; int count;
                     while ((count = await input.ReadAsync(buffer, 0, buffer.Length, timeout.Token).ConfigureAwait(false)) != 0)

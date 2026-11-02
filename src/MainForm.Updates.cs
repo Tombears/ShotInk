@@ -14,8 +14,7 @@ namespace ShotInk
         private UpdateForm updateWindow;
         private void SetupUpdateCheck()
         {
-            updates = new UpdateController(delegate { return settings.CheckUpdates; }, Application.ProductVersion, UpdateService.InstalledRevision(AppDomain.CurrentDomain.BaseDirectory));
-            updates.Start();
+            updates = new UpdateController(Application.ProductVersion, UpdateService.InstalledRevision(AppDomain.CurrentDomain.BaseDirectory));
         }
         private async void ShowUpdates()
         {

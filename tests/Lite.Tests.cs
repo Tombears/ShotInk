@@ -23,8 +23,7 @@ namespace ShotInk
                 if (BuildFeatures.Ocr || !UpdateService.IndexUrl.Contains("latest-lite.json")) throw new Exception("Lite update channel is incorrect.");
                 using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }))
                 {
-                    var checkbox = (CheckBox)options.Controls.Find("check-updates", true)[0];
-                    if (checkbox.Text.Contains("Gitee")) throw new Exception("Settings retained update-source branding.");
+                    if (options.Controls.Find("check-updates", true).Length != 0) throw new Exception("Settings retained automatic update checks.");
                 }
                 using (var toolbar = new CaptureToolbar())
                 {
