@@ -19,6 +19,7 @@
     <Reference Include="System.Drawing" /><Reference Include="System.Windows.Forms" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="Accessibility" />
+    <Reference Include="System.IO.Compression" /><Reference Include="System.IO.Compression.FileSystem" />
     <Compile Include="src\*.cs" />
     <EmbeddedResource Include="assets\shotink.ico"><LogicalName>ShotInk.ApplicationIcon</LogicalName></EmbeddedResource>
   </ItemGroup>

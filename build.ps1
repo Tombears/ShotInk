@@ -13,7 +13,7 @@ $buildRoot = Join-Path $projectRoot 'build'
 $distRoot = Join-Path $projectRoot 'dist'
 New-Item -ItemType Directory -Path $buildRoot, $distRoot -Force | Out-Null
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
-$references = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', '/r:Accessibility.dll')
+$references = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', '/r:Accessibility.dll', '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll')
 $common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references
 $appPath = Join-Path $distRoot 'ShotInk.exe'
 & $compiler @common '/target:winexe' ('/out:' + $appPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/win32icon:' + (Join-Path $projectRoot 'assets\shotink.ico')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources
@@ -36,10 +36,13 @@ if ($Test -or $Preview) {
     if ($Test) {
         & (Join-Path $projectRoot 'tests\Run.Tests.ps1')
         & (Join-Path $projectRoot 'tests\Release.Tests.ps1') -BinaryPath $appPath
+        & (Join-Path $projectRoot 'tests\Update.Tests.ps1') -BinaryPath $appPath
+        & (Join-Path $projectRoot 'tests\Update.Smoke.Tests.ps1')
     }
 }
 $archive = Join-Path $projectRoot 'ShotInk-portable.zip'
-Compress-Archive -LiteralPath $appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ocr'), $docsRoot -DestinationPath $archive -Force
 [IO.File]::WriteAllText((Join-Path $distRoot 'ShotInk.build.sha256'), $sourceSignature)
+[IO.File]::WriteAllText((Join-Path $distRoot 'update-portable.ps1'), [IO.File]::ReadAllText((Join-Path $projectRoot 'scripts\update-portable.ps1')), (New-Object Text.UTF8Encoding($true)))
+Compress-Archive -LiteralPath $appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ocr'), $docsRoot, (Join-Path $distRoot 'ShotInk.build.sha256'), (Join-Path $distRoot 'update-portable.ps1') -DestinationPath $archive -Force
 Write-Host ('Built: ' + $appPath)
 Write-Host ('Portable: ' + $archive)

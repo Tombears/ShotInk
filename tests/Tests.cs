@@ -18,6 +18,13 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 2 && args[0] == "--update-live")
+                {
+                    var info = UpdateService.CheckAsync(System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+                    var prepared = UpdateService.DownloadAsync(info, Path.Combine(args[1], "install"), System.Threading.CancellationToken.None,
+                        new Progress<int>(delegate { }), args[1]).GetAwaiter().GetResult();
+                    Console.WriteLine("PASS anonymous Gitee check, ZIP hash and component validation: " + prepared.Info.Version); return 0;
+                }
                 if (args.Length == 1 && args[0] == "--gif-tests")
                 {
                     Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
@@ -67,6 +74,7 @@ namespace ShotInk
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
                 Run("settings survive profile selection, restart and damaged or locked configuration", TestSettingsRecovery);
+                Run("Gitee updates identify patch builds and reject unsafe packages", TestUpdates);
                 Run("pinned images detect edges and resize proportionally while preserving original pixels", TestPinResize);
                 Run("settings refresh shortcut conflicts without saving or leaking probe registrations", TestShortcutStatus);
                 Run("released shortcut conflicts recover automatically without unregistering healthy bindings", TestHotkeyRecovery);
@@ -180,6 +188,60 @@ namespace ShotInk
                     next.ShowTool(DrawTool.Pen); Assert(next.Stroke == 8 && next.Ink == Color.Blue, "A new editor lost the shared preferences.");
                 }
             }
+        }
+        private static void AddUpdateEntry(System.IO.Compression.ZipArchive zip, string name, byte[] bytes)
+        { using (var stream = zip.CreateEntry(name).Open()) stream.Write(bytes, 0, bytes.Length); }
+        private static void TestUpdates()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-update-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+            try
+            {
+                string revision = new string('A', 64), zipPath = Path.Combine(root, "update.zip");
+                using (var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
+                {
+                    AddUpdateEntry(zip, "ShotInk.exe", File.ReadAllBytes(System.Reflection.Assembly.GetExecutingAssembly().Location));
+                    AddUpdateEntry(zip, "ShotInk.build.sha256", System.Text.Encoding.UTF8.GetBytes(revision));
+                    AddUpdateEntry(zip, "update-portable.ps1", System.Text.Encoding.UTF8.GetBytes("test helper"));
+                    AddUpdateEntry(zip, "ocr/ShotInk.OcrHost.exe", new byte[] { 1, 2, 3 });
+                }
+                var info = new UpdateInfo { Version = Application.ProductVersion, Revision = revision, Sha256 = UpdateService.Digest(zipPath), Size = new FileInfo(zipPath).Length,
+                    Url = "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v" + Application.ProductVersion + "/ShotInk-portable.zip", Notes = "更新说明" };
+                info.Validate();
+                Assert(!info.IsNewer(Application.ProductVersion, revision.ToLowerInvariant()) && info.IsNewer(Application.ProductVersion, new string('B', 64)), "Same-version build detection repeated an installed build or missed a patch.");
+                Assert(info.IsNewer("1.0.0", revision) && !info.IsNewer("99.0.0", new string('B', 64)), "Update comparison allowed a downgrade or missed a new version.");
+                var prepared = UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "stage"), int.MaxValue, System.Threading.CancellationToken.None);
+                var plan = UpdateService.ReadJson<UpdatePlan>(File.ReadAllBytes(prepared.PlanPath));
+                Assert(plan.Files.Length == 4 && File.Exists(prepared.HelperPath) && UpdateService.InstalledRevision(plan.Payload) == revision, "Update staging lost components or revision metadata.");
+                foreach (string invalid in new[] { "../outside", "C:/outside", "/outside", "foo\\bar", "x/.. /outside", "aux.txt", "foo./bar" })
+                {
+                    bool rejected = false; try { UpdateService.SafePath(root, invalid); } catch (InvalidDataException) { rejected = true; }
+                    Assert(rejected, "Unsafe update path accepted: " + invalid);
+                }
+                string validUrl = info.Url; info.Url = "https://github.com/other/release/ShotInk-portable.zip";
+                bool unsafeUrl = false; try { info.Validate(); } catch (InvalidDataException) { unsafeUrl = true; }
+                Assert(unsafeUrl, "Updater accepted a non-Gitee publisher URL."); info.Url = validUrl;
+                string digest = info.Sha256; info.Sha256 = new string('0', 64);
+                bool badHash = false; try { UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "bad-hash"), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { badHash = true; }
+                Assert(badHash, "Corrupted package hash was accepted."); info.Sha256 = digest;
+                foreach (string invalidEntry in new[] { "../escape.txt", "settings.ini", "captures/history.png", "ocr/../ShotInk.exe" })
+                {
+                    string malicious = Path.Combine(root, Guid.NewGuid().ToString("N") + ".zip");
+                    using (var zip = System.IO.Compression.ZipFile.Open(malicious, System.IO.Compression.ZipArchiveMode.Create)) AddUpdateEntry(zip, invalidEntry, new byte[] { 1 });
+                    info.Size = new FileInfo(malicious).Length; info.Sha256 = UpdateService.Digest(malicious);
+                    bool rejected = false; try { UpdateService.Prepare(malicious, info, Path.Combine(root, "install"), Path.Combine(root, Guid.NewGuid().ToString("N")), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { rejected = true; }
+                    Assert(rejected, "Update package could write user data or escape staging.");
+                }
+                info.Size = new FileInfo(zipPath).Length; info.Sha256 = digest;
+                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info))
+                {
+                    form.Show(); Application.DoEvents(); Assert(Field<Button>(form, "action").Text == "下载更新" && Field<Label>(form, "status").Text.Contains("修复更新"), "Update UI did not offer a same-version patch.");
+                    using (var image = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-update-options.png")); }
+                    form.Close();
+                }
+                var settings = new AppSettings { CheckUpdates = false }; string settingsPath = Path.Combine(root, "settings.ini"); settings.Save(settingsPath);
+                Assert(!AppSettings.Load(settingsPath).CheckUpdates && !settings.Clone().CheckUpdates, "Update-check preference did not persist.");
+            }
+            finally { Directory.Delete(root, true); }
         }
         private static void PinDrag(PinForm pin, Point localStart, Point delta)
         {

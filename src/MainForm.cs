@@ -11,7 +11,7 @@ using System.Windows.Forms;
 
 namespace ShotInk
 {
-    internal sealed class MainForm : Form
+    internal sealed partial class MainForm : Form
     {
         private readonly string dataRoot;
         private readonly string historyRoot;
@@ -74,6 +74,7 @@ namespace ShotInk
             shortcuts.Location = new Point(25, 292); sidebar.Controls.Add(shortcuts);
             var preferences = Theme.Button("设置", false, 145); preferences.Location = new Point(25, 460);
             preferences.Click += delegate { OpenSettings(); }; sidebar.Controls.Add(preferences);
+            var updates = Theme.Button("检查更新", false, 145); updates.Location = new Point(25, 500); updates.Click += delegate { ShowUpdates(); }; sidebar.Controls.Add(updates);
             var local = Theme.Label("所有截图保存在本机\n无需登录 · 无云端上传", 8, Color.FromArgb(130, 148, 176)); local.Location = new Point(25, 540); sidebar.Controls.Add(local);
             Controls.Add(sidebar);
 
@@ -125,6 +126,7 @@ namespace ShotInk
             if (desktopIntegration) SetupTray();
             RefreshShortcutLabels();
             if (settings.LoadWarning != null) notice.Text = settings.LoadWarning;
+            if (desktopIntegration) SetupUpdateCheck();
         }
 
         internal static string ResolveDataRoot(string localApplicationData)
@@ -151,7 +153,7 @@ namespace ShotInk
             if (startup != null) settings.StartWithWindows = startup.IsEnabled;
             settingsOpen = true;
             if (hotkeys != null) hotkeys.Clear();
-            try { using (var dialog = new SettingsForm(settings, ApplySettings)) dialog.ShowDialog(this); }
+            try { using (var dialog = new SettingsForm(settings, ApplySettings, null, ShowUpdates)) dialog.ShowDialog(this); }
             finally
             {
                 if (!IsDisposed && hotkeys != null)
@@ -218,6 +220,7 @@ namespace ShotInk
             menu.Items.Add("剪贴板贴图  F3", null, delegate { PinClipboard(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("设置", null, delegate { ShowHome(); OpenSettings(); });
+            menu.Items.Add("检查更新", null, delegate { ShowUpdates(); });
             menu.Items.Add("退出", null, delegate { Quit(); });
             tray = new NotifyIcon { Icon = appIcon, Text = "ShotInk · F1 截图 / Ctrl+Alt+L 长截图", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += delegate { ShowHome(); };
@@ -406,6 +409,7 @@ namespace ShotInk
             {
                 settingsTimer.Stop(); PersistSettings(); settingsTimer.Dispose();
                 hotkeyTimer.Stop(); hotkeyTimer.Dispose();
+                DisposeUpdates();
                 if (tray != null) { tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
                 if (thumbnails != null) thumbnails.Dispose();
                 if (appIcon != null) appIcon.Dispose();
