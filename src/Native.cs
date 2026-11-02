@@ -9,8 +9,20 @@ namespace ShotInk
     internal static class Native
     {
         internal const int HotKeyMessage = 0x0312;
-        [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
+        [DllImport("user32.dll", SetLastError = true)] internal static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
         [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+        internal static bool ShortcutAvailable(IntPtr window, Keys keys)
+        {
+            const int probeId = 0x6001;
+            if (!RegisterHotKey(window, probeId, Shortcut.Modifiers(keys), (uint)(keys & Keys.KeyCode)))
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (error == 1409) return false;
+                throw new System.ComponentModel.Win32Exception(error);
+            }
+            try { return true; }
+            finally { UnregisterHotKey(window, probeId); }
+        }
         [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extra);

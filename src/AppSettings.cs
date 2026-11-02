@@ -158,9 +158,16 @@ namespace ShotInk
         internal HotkeyBindings(Func<int, Keys, bool> register, Action<int> unregister) { this.register = register; this.unregister = unregister; }
         internal string RegisterInitial(Keys[] keys)
         {
-            Clear(); var conflicts = new List<string>();
+            Clear(); return RetryMissing(keys);
+        }
+        internal string RetryMissing(Keys[] keys)
+        {
+            var conflicts = new List<string>();
             for (int i = 0; i < keys.Length; i++) if (keys[i] != Keys.None)
-            { if (register(i + 1, keys[i])) active.Add(i + 1, keys[i]); else conflicts.Add(Shortcut.Display(keys[i])); }
+            {
+                if (active.ContainsKey(i + 1)) continue;
+                if (register(i + 1, keys[i])) active.Add(i + 1, keys[i]); else conflicts.Add(Shortcut.Display(keys[i]));
+            }
             return string.Join("、", conflicts.ToArray());
         }
         internal bool TryApply(Keys[] keys, out string error)

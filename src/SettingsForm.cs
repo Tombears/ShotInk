@@ -29,20 +29,24 @@ namespace ShotInk
         private readonly CheckBox ask;
         private readonly CheckBox startup;
         private readonly Label error;
-        internal SettingsForm(AppSettings current, Func<AppSettings, string> apply)
+        private readonly Label[] shortcutStatus = new Label[3];
+        private readonly Timer statusTimer;
+        private readonly Func<Keys, bool> shortcutAvailable;
+        internal SettingsForm(AppSettings current, Func<AppSettings, string> apply, Func<Keys, bool> shortcutAvailable = null)
         {
+            this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
             Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 510); MinimumSize = new Size(640, 540);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 11 };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
             foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
-            var hint = new Label { Text = "点击输入框后按快捷键；Backspace 清除。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft };
+            var hint = new Label { Text = "点击输入框后按快捷键；Backspace 清除。占用状态每秒刷新。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(hint, 0, 3); layout.SetColumnSpan(hint, 3);
             layout.Controls.Add(new Label { Text = "默认保存文件夹", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 4);
             folder = new TextBox { Name = "save-directory", Dock = DockStyle.Fill, Text = current.SaveDirectory, Margin = new Padding(3, 8, 3, 3) }; layout.Controls.Add(folder, 1, 4);
@@ -71,12 +75,45 @@ namespace ShotInk
             buttons.Controls.Add(save); buttons.Controls.Add(cancel); buttons.Controls.Add(reset);
             layout.Controls.Add(buttons, 0, 10); layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout); AcceptButton = save; CancelButton = cancel;
+            statusTimer = new Timer { Interval = 1000 };
+            statusTimer.Tick += delegate { RefreshShortcutStatus(); };
+            foreach (var box in new[] { capture, pin, scroll })
+                box.TextChanged += delegate { if (IsHandleCreated) RefreshShortcutStatus(); };
         }
-        private static ShortcutBox AddShortcut(TableLayoutPanel layout, string title, int row, Keys value)
+        protected override void OnShown(EventArgs e)
+        { base.OnShown(e); RefreshShortcutStatus(); statusTimer.Start(); }
+        internal void RefreshShortcutStatus()
+        {
+            var keys = new[] { capture.ShortcutValue, pin.ShortcutValue, scroll.ShortcutValue };
+            for (int i = 0; i < keys.Length; i++)
+            {
+                string state; Color color = Theme.Muted;
+                if (keys[i] == Keys.None) state = "未设置";
+                else if (!Shortcut.Valid(keys[i])) { state = "无效快捷键"; color = Color.Firebrick; }
+                else if (Array.FindAll(keys, delegate(Keys key) { return key == keys[i]; }).Length > 1)
+                { state = "本页重复"; color = Color.Firebrick; }
+                else
+                {
+                    try
+                    {
+                        bool available = shortcutAvailable(keys[i]);
+                        state = available ? "未占用" : "已被占用";
+                        color = available ? Color.ForestGreen : Color.Firebrick;
+                    }
+                    catch (System.ComponentModel.Win32Exception) { state = "检测失败"; color = Color.Firebrick; }
+                }
+                shortcutStatus[i].Text = state; shortcutStatus[i].ForeColor = color;
+            }
+        }
+        protected override void Dispose(bool disposing)
+        { if (disposing && statusTimer != null) { statusTimer.Stop(); statusTimer.Dispose(); } base.Dispose(disposing); }
+        private ShortcutBox AddShortcut(TableLayoutPanel layout, string title, int row, Keys value)
         {
             layout.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
             var box = new ShortcutBox { Name = "hotkey-" + row, ShortcutValue = value, Dock = DockStyle.Fill, Margin = new Padding(3, 6, 3, 3) };
-            layout.Controls.Add(box, 1, row); layout.SetColumnSpan(box, 2); return box;
+            layout.Controls.Add(box, 1, row);
+            shortcutStatus[row] = new Label { Name = "hotkey-status-" + row, Text = "待检测", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(10, 0, 0, 0) };
+            layout.Controls.Add(shortcutStatus[row], 2, row); return box;
         }
         internal AppSettings ReadSettings()
         {

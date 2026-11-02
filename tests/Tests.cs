@@ -56,6 +56,8 @@ namespace ShotInk
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
+                Run("settings refresh shortcut conflicts without saving or leaking probe registrations", TestShortcutStatus);
+                Run("released shortcut conflicts recover automatically without unregistering healthy bindings", TestHotkeyRecovery);
                 Run("startup registration handles quoted paths, disabling and save rollback without touching real startup entries", TestStartupRegistration);
                 Run("startup mode stays hidden and can reopen the workbench", TestStartupTray);
                 Run("history defaults to ten and its on-screen limit persists and prunes only history", TestHistoryLimit);
@@ -612,6 +614,65 @@ namespace ShotInk
             Assert(!bindings.TryApply(new[] { Keys.F7, Keys.F8, Keys.F9 }, delegate { throw new IOException("disk unavailable"); }, out error) &&
                 live.Count == 2 && live[1] == Keys.F3 && live[2] == Keys.F1, "Failed settings persistence left the new shortcuts active.");
             bindings.Clear(); Assert(live.Count == 0, "Disposal leaked hotkey registrations.");
+        }
+        private static void TestShortcutStatus()
+        {
+            bool occupied = true;
+            var settings = new AppSettings { CaptureShortcut = Keys.Control | Keys.Q, ScrollShortcut = Keys.None };
+            using (var dialog = new SettingsForm(settings, delegate { throw new Exception("Detection saved settings."); },
+                delegate(Keys key) { return key != settings.CaptureShortcut || !occupied; }))
+            {
+                dialog.Show(); Application.DoEvents();
+                Assert(Option<Label>(dialog, "hotkey-status-0").Text == "已被占用" && Option<Label>(dialog, "hotkey-status-2").Text == "未设置", "Initial shortcut status is incorrect.");
+                occupied = false;
+                WaitUntil(delegate { return Option<Label>(dialog, "hotkey-status-0").Text == "未占用"; });
+                Option<ShortcutBox>(dialog, "hotkey-1").ShortcutValue = settings.CaptureShortcut;
+                Assert(Option<Label>(dialog, "hotkey-status-0").Text == "本页重复" && Option<Label>(dialog, "hotkey-status-1").Text == "本页重复", "Duplicate shortcuts were reported as available.");
+                Option<ShortcutBox>(dialog, "hotkey-1").ShortcutValue = Keys.A;
+                Assert(Option<Label>(dialog, "hotkey-status-1").Text == "无效快捷键" && settings.PinShortcut == Keys.F3, "Invalid detection mutated saved settings.");
+                dialog.Close();
+            }
+            using (var owner = new Form())
+            using (var probe = new Form())
+            {
+                Keys key = Keys.None;
+                for (Keys candidate = Keys.F13; candidate <= Keys.F24; candidate++)
+                {
+                    var attempt = Keys.Control | Keys.Shift | candidate;
+                    if (Native.RegisterHotKey(owner.Handle, 20902, Shortcut.Modifiers(attempt), (uint)candidate)) { key = attempt; break; }
+                }
+                Assert(key != Keys.None, "No free test shortcut was found.");
+                try { Assert(!Native.ShortcutAvailable(probe.Handle, key), "Native detection missed an occupied key."); }
+                finally { Native.UnregisterHotKey(owner.Handle, 20902); }
+                Assert(Native.ShortcutAvailable(probe.Handle, key) && Native.ShortcutAvailable(owner.Handle, key), "Detection did not release its temporary registration.");
+            }
+        }
+        private static void TestHotkeyRecovery()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-hotkey-recovery-" + Guid.NewGuid().ToString("N"));
+            bool blocked = true; int unregisters = 0;
+            var live = new System.Collections.Generic.Dictionary<int, Keys>();
+            var bindings = new HotkeyBindings(delegate(int id, Keys key)
+            { if (id == 1 && blocked) return false; live.Add(id, key); return true; }, delegate(int id) { unregisters++; live.Remove(id); });
+            try
+            {
+                using (var home = new MainForm(root, false))
+                {
+                    home.Show();
+                    var keys = new AppSettings().Shortcuts;
+                    string conflicts = bindings.RegisterInitial(keys);
+                    typeof(MainForm).GetField("hotkeys", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(home, bindings);
+                    typeof(MainForm).GetMethod("UpdateHotkeyNotice", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, new object[] { conflicts });
+                    Assert(live.Count == 2 && conflicts.Contains("F1"), "Initial conflict was not retained.");
+                    blocked = false;
+                    WaitUntil(delegate { return live.Count == 3; });
+                    Assert(unregisters == 0 && Field<Label>(home, "notice").Text.Contains("已自动恢复"), "Automatic recovery reset a healthy key or left stale status.");
+                    Assert(bindings.RetryMissing(keys) == "" && unregisters == 0, "Recovery registered an active key twice.");
+                    home.Close();
+                }
+                Assert(live.Count == 0, "Closing the application leaked hotkeys.");
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
         private static void TestSavePreferences()
         {

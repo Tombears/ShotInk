@@ -31,6 +31,8 @@ namespace ShotInk
         private HotkeyBindings hotkeys;
         private readonly AppSettings settings;
         private readonly Timer settingsTimer;
+        private readonly Timer hotkeyTimer;
+        private string hotkeyWarning;
         private bool settingsDirty;
         private readonly Label shortcuts;
         private readonly List<Button> actionCards = new List<Button>();
@@ -47,6 +49,9 @@ namespace ShotInk
             if (this.startup != null) settings.StartWithWindows = this.startup.IsEnabled;
             settingsTimer = new Timer { Interval = 350 };
             settingsTimer.Tick += delegate { settingsTimer.Stop(); PersistSettings(); };
+            hotkeyTimer = new Timer { Interval = 1000 };
+            hotkeyTimer.Tick += delegate { if (!settingsOpen && !captureBusy && hotkeys != null) UpdateHotkeyNotice(hotkeys.RetryMissing(settings.Shortcuts)); };
+            hotkeyTimer.Start();
             settings.Changed += delegate { settingsDirty = true; settingsTimer.Stop(); settingsTimer.Start(); };
             historyRoot = Path.Combine(dataRoot, "captures");
             Directory.CreateDirectory(historyRoot);
@@ -147,7 +152,7 @@ namespace ShotInk
                 if (!IsDisposed && hotkeys != null)
                 {
                     string conflicts = hotkeys.RegisterInitial(settings.Shortcuts);
-                    if (conflicts.Length > 0) notice.Text = conflicts + " 已被占用，请在设置中修改快捷键。";
+                    UpdateHotkeyNotice(conflicts);
                 }
                 settingsOpen = false;
             }
@@ -220,7 +225,21 @@ namespace ShotInk
             hotkeys = new HotkeyBindings(delegate(int id, Keys keys) { return Native.RegisterHotKey(window, id, Shortcut.Modifiers(keys), (uint)(keys & Keys.KeyCode)); },
                 delegate(int id) { Native.UnregisterHotKey(window, id); });
             string conflicts = hotkeys.RegisterInitial(settings.Shortcuts);
-            if (conflicts.Length > 0 && notice != null) notice.Text = conflicts + " 已被占用，可在设置中修改，或使用工作台与托盘菜单。";
+            UpdateHotkeyNotice(conflicts);
+        }
+        private void UpdateHotkeyNotice(string conflicts)
+        {
+            if (notice == null) return;
+            if (conflicts.Length > 0)
+            {
+                hotkeyWarning = conflicts + " 已被占用，将自动重试；可在设置中查看状态或修改。";
+                notice.Text = hotkeyWarning;
+            }
+            else if (hotkeyWarning != null)
+            {
+                if (notice.Text == hotkeyWarning) notice.Text = "快捷键占用已解除，已自动恢复。";
+                hotkeyWarning = null;
+            }
         }
         protected override void OnHandleDestroyed(EventArgs e)
         {
@@ -379,6 +398,7 @@ namespace ShotInk
             if (disposing)
             {
                 settingsTimer.Stop(); PersistSettings(); settingsTimer.Dispose();
+                hotkeyTimer.Stop(); hotkeyTimer.Dispose();
                 if (tray != null) { tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
                 if (thumbnails != null) thumbnails.Dispose();
                 if (appIcon != null) appIcon.Dispose();
