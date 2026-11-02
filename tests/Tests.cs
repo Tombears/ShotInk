@@ -21,9 +21,9 @@ namespace ShotInk
                 if (args.Length == 2 && args[0] == "--update-live")
                 {
                     var info = UpdateService.CheckAsync(System.Threading.CancellationToken.None).GetAwaiter().GetResult();
-                    var prepared = UpdateService.DownloadAsync(info, Path.Combine(args[1], "install"), System.Threading.CancellationToken.None,
-                        new Progress<int>(delegate { }), args[1]).GetAwaiter().GetResult();
-                    Console.WriteLine("PASS anonymous Gitee check, ZIP hash and component validation: " + prepared.Info.Version); return 0;
+                    string opened = null;
+                    UpdateService.OpenDownload(info, delegate(System.Diagnostics.ProcessStartInfo link) { opened = link.FileName; });
+                    Console.WriteLine("PASS anonymous Gitee version check and browser download URL: " + info.Version + " " + opened); return 0;
                 }
                 if (args.Length == 1 && args[0] == "--gif-tests")
                 {
@@ -74,7 +74,7 @@ namespace ShotInk
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
                 Run("settings survive profile selection, restart and damaged or locked configuration", TestSettingsRecovery);
-                Run("Gitee updates identify patch builds and reject unsafe packages", TestUpdates);
+                Run("Gitee updates check hourly, refresh settings silently and open the browser only on request", TestUpdates);
                 Run("pinned images detect edges and resize proportionally while preserving original pixels", TestPinResize);
                 Run("settings refresh shortcut conflicts without saving or leaking probe registrations", TestShortcutStatus);
                 Run("released shortcut conflicts recover automatically without unregistering healthy bindings", TestHotkeyRecovery);
@@ -189,60 +189,34 @@ namespace ShotInk
                 }
             }
         }
-        private static void AddUpdateEntry(System.IO.Compression.ZipArchive zip, string name, byte[] bytes)
-        { using (var stream = zip.CreateEntry(name).Open()) stream.Write(bytes, 0, bytes.Length); }
         private static void TestUpdates()
         {
             string root = Path.Combine(Path.GetTempPath(), "ShotInk-update-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
             try
             {
-                string revision = new string('A', 64), zipPath = Path.Combine(root, "update.zip");
-                using (var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
-                {
-                    AddUpdateEntry(zip, "ShotInk.exe", File.ReadAllBytes(System.Reflection.Assembly.GetExecutingAssembly().Location));
-                    AddUpdateEntry(zip, "ShotInk.build.sha256", System.Text.Encoding.UTF8.GetBytes(revision));
-                    AddUpdateEntry(zip, "update-portable.ps1", System.Text.Encoding.UTF8.GetBytes("test helper"));
-                    AddUpdateEntry(zip, "ocr/ShotInk.OcrHost.exe", new byte[] { 1, 2, 3 });
-                }
-                var info = new UpdateInfo { Version = Application.ProductVersion, Revision = revision, Sha256 = UpdateService.Digest(zipPath), Size = new FileInfo(zipPath).Length,
+                string revision = new string('A', 64);
+                var info = new UpdateInfo { Version = Application.ProductVersion, Revision = revision, Sha256 = new string('B', 64), Size = 123,
                     Url = "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v" + Application.ProductVersion + "/ShotInk-portable.zip", Notes = "更新说明" };
                 info.Validate();
                 Assert(!info.IsNewer(Application.ProductVersion, revision.ToLowerInvariant()) && info.IsNewer(Application.ProductVersion, new string('B', 64)), "Same-version build detection repeated an installed build or missed a patch.");
                 Assert(info.IsNewer("1.0.0", revision) && !info.IsNewer("99.0.0", new string('B', 64)), "Update comparison allowed a downgrade or missed a new version.");
-                var prepared = UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "stage"), int.MaxValue, System.Threading.CancellationToken.None);
-                var plan = UpdateService.ReadJson<UpdatePlan>(File.ReadAllBytes(prepared.PlanPath));
-                Assert(plan.Files.Length == 4 && File.Exists(prepared.HelperPath) && UpdateService.InstalledRevision(plan.Payload) == revision, "Update staging lost components or revision metadata.");
-                foreach (string invalid in new[] { "../outside", "C:/outside", "/outside", "foo\\bar", "x/.. /outside", "aux.txt", "foo./bar" })
+                string validUrl = info.Url; bool unsafeUrl = false, launched = false;
+                foreach (string invalid in new[] { "https://github.com/other/release/ShotInk-portable.zip", "file:///C:/Windows/notepad.exe", "https://gitee.com.evil.test/ShotInk-portable.zip", "http://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v1.8.0/ShotInk-portable.zip" })
                 {
-                    bool rejected = false; try { UpdateService.SafePath(root, invalid); } catch (InvalidDataException) { rejected = true; }
-                    Assert(rejected, "Unsafe update path accepted: " + invalid);
+                    info.Url = invalid; unsafeUrl = false;
+                    try { UpdateService.OpenDownload(info, delegate { launched = true; }); } catch (InvalidDataException) { unsafeUrl = true; }
+                    Assert(unsafeUrl && !launched, "Browser update accepted an untrusted download URL.");
                 }
-                string validUrl = info.Url; info.Url = "https://github.com/other/release/ShotInk-portable.zip";
-                bool unsafeUrl = false; try { info.Validate(); } catch (InvalidDataException) { unsafeUrl = true; }
-                Assert(unsafeUrl, "Updater accepted a non-Gitee publisher URL."); info.Url = validUrl;
-                string digest = info.Sha256; info.Sha256 = new string('0', 64);
-                bool badHash = false; try { UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "bad-hash"), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { badHash = true; }
-                Assert(badHash, "Corrupted package hash was accepted."); info.Sha256 = digest;
-                foreach (string invalidEntry in new[] { "../escape.txt", "settings.ini", "captures/history.png", "ocr/../ShotInk.exe" })
-                {
-                    string malicious = Path.Combine(root, Guid.NewGuid().ToString("N") + ".zip");
-                    using (var zip = System.IO.Compression.ZipFile.Open(malicious, System.IO.Compression.ZipArchiveMode.Create)) AddUpdateEntry(zip, invalidEntry, new byte[] { 1 });
-                    info.Size = new FileInfo(malicious).Length; info.Sha256 = UpdateService.Digest(malicious);
-                    bool rejected = false; try { UpdateService.Prepare(malicious, info, Path.Combine(root, "install"), Path.Combine(root, Guid.NewGuid().ToString("N")), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { rejected = true; }
-                    Assert(rejected, "Update package could write user data or escape staging.");
-                }
-                info.Size = new FileInfo(zipPath).Length; info.Sha256 = digest;
-                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info,
-                    delegate { return System.Threading.Tasks.Task.FromResult(info); }))
-                {
-                    form.Show(); Application.DoEvents(); Assert(Field<Button>(form, "action").Text == "下载更新" && Field<Label>(form, "status").Text.Contains("修复更新"), "Update UI did not offer a same-version patch.");
-                    using (var image = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-update-options.png")); }
-                    form.Close();
-                }
-                bool automatic = true; int requests = 0, details = 0;
+                info.Url = validUrl;
+                bool automatic = true, browserFailure = false; int requests = 0, downloads = 0;
                 using (var controller = new UpdateController(delegate { return automatic; }, "1.0.0", "",
                     delegate { requests++; return System.Threading.Tasks.Task.FromResult(info); }))
-                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller, delegate { details++; }))
+                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller,
+                    delegate(System.Diagnostics.ProcessStartInfo link)
+                    {
+                        if (browserFailure) throw new System.ComponentModel.Win32Exception("Browser unavailable");
+                        Assert(link.UseShellExecute && link.FileName == validUrl && string.IsNullOrEmpty(link.Arguments), "Update did not delegate the exact Gitee link to the default browser."); downloads++;
+                    }))
                 {
                     var timer = Field<System.Windows.Forms.Timer>(controller, "timer");
                     var tick = typeof(System.Windows.Forms.Timer).GetMethod("OnTick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
@@ -251,20 +225,28 @@ namespace ShotInk
                     int windows = Application.OpenForms.Count;
                     tick.Invoke(timer, new object[] { EventArgs.Empty });
                     Assert(requests == 1 && timer.Enabled && timer.Interval == 3600000, "Automatic check did not reschedule hourly.");
-                    Assert(Application.OpenForms.Count == windows && details == 0, "Background update check opened a window.");
+                    Assert(Application.OpenForms.Count == windows && downloads == 0, "Background update check opened a window or browser.");
                     options.Show(); Application.DoEvents();
-                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDetails").Enabled, "Settings did not display the detected update.");
+                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDownload").Enabled, "Settings did not display the detected update.");
                     windows = Application.OpenForms.Count;
                     automatic = false; tick.Invoke(timer, new object[] { EventArgs.Empty });
                     Assert(requests == 1 && timer.Enabled, "Disabled automatic check still requested the server.");
                     Field<Button>(options, "updateCheck").PerformClick(); Application.DoEvents();
-                    Assert(requests == 2 && Application.OpenForms.Count == windows && details == 0, "Manual check used cached data or opened an update window.");
-                    Field<Button>(options, "updateDetails").PerformClick();
-                    Assert(details == 1, "Explicit update-details click did not open the update flow.");
+                    Assert(requests == 2 && Application.OpenForms.Count == windows && downloads == 0, "Manual check used cached data or opened a window or browser.");
+                    Field<Button>(options, "updateDownload").PerformClick();
+                    Assert(downloads == 1 && Application.OpenForms.Count == windows, "Explicit download click did not open the browser directly.");
                     using (var image = new Bitmap(options.Width, options.Height)) { options.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-settings-updates.png")); }
-                    options.Close();
-                    controller.CheckAsync().GetAwaiter().GetResult();
+                    browserFailure = true; Field<Button>(options, "updateDownload").PerformClick();
+                    Assert(Field<Label>(options, "updateStatus").Text.Contains("无法打开下载链接") && Application.OpenForms.Count == windows, "Browser failure was not displayed inside settings.");
+                    options.Close(); controller.CheckAsync().GetAwaiter().GetResult();
                     Assert(requests == 3 && Application.OpenForms.Count == windows - 1, "Closed settings broke silent update checks.");
+                }
+                using (var controller = new UpdateController(delegate { return true; }, info.Version, info.Revision, delegate { return System.Threading.Tasks.Task.FromResult(info); }))
+                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller, checkVersion: true))
+                {
+                    options.Show(); Application.DoEvents();
+                    Assert(Field<Label>(options, "updateStatus").Text.Contains("最新版本") && !Field<Button>(options, "updateDownload").Enabled, "An installed build still offered a download.");
+                    options.Close();
                 }
                 var settings = new AppSettings { CheckUpdates = false }; string settingsPath = Path.Combine(root, "settings.ini"); settings.Save(settingsPath);
                 Assert(!AppSettings.Load(settingsPath).CheckUpdates && !settings.Clone().CheckUpdates, "Update-check preference did not persist.");

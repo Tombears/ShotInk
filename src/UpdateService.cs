@@ -1,13 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -40,41 +36,17 @@ namespace ShotInk
         }
     }
     [DataContract] internal sealed class GiteeContent { [DataMember(Name = "content")] internal string Content; [DataMember(Name = "encoding")] internal string Encoding; }
-    [DataContract] internal sealed class UpdateFile
-    {
-        [DataMember] internal string Path;
-        [DataMember] internal string Sha256;
-    }
-    [DataContract] internal sealed class UpdatePlan
-    {
-        [DataMember] internal string Target;
-        [DataMember] internal string Payload;
-        [DataMember] internal string Backup;
-        [DataMember] internal int ProcessId;
-        [DataMember] internal string Version;
-        [DataMember] internal UpdateFile[] Files;
-    }
-    internal sealed class PreparedUpdate
-    {
-        internal string Folder, PlanPath, HelperPath;
-        internal UpdateInfo Info;
-    }
     internal static class UpdateService
     {
         internal const string ReleasePage = "https://gitee.com/clear_wind_and_rain/ShotInk/releases";
         internal const string IndexUrl = "https://gitee.com/api/v5/repos/clear_wind_and_rain/ShotInk/contents/updates/latest.json?ref=main";
-        internal static string CacheRoot { get { return Directory.Exists(@"E:\DevData") ? @"E:\DevData\ShotInk\updates" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShotInk-updates"); } }
         internal static T ReadJson<T>(byte[] bytes)
         { using (var stream = new MemoryStream(bytes)) return (T)new DataContractJsonSerializer(typeof(T)).ReadObject(stream); }
-        internal static byte[] Json<T>(T value)
-        { using (var stream = new MemoryStream()) { new DataContractJsonSerializer(typeof(T)).WriteObject(stream, value); return stream.ToArray(); } }
         internal static string InstalledRevision(string directory)
         {
             try { return File.ReadAllText(Path.Combine(directory, "ShotInk.build.sha256")).Trim(); }
             catch (IOException) { return ""; } catch (UnauthorizedAccessException) { return ""; }
         }
-        internal static string Digest(string path)
-        { using (var stream = File.OpenRead(path)) using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", "").ToLowerInvariant(); }
         internal static async Task<UpdateInfo> CheckAsync(CancellationToken token)
         {
             using (var stream = new MemoryStream())
@@ -109,54 +81,11 @@ namespace ShotInk
                 }
             }
         }
-        internal static async Task<PreparedUpdate> DownloadAsync(UpdateInfo info, string target, CancellationToken token, IProgress<int> progress, string cacheRoot = null)
-        {
-            info.Validate(); string folder = Path.Combine(cacheRoot ?? CacheRoot, Guid.NewGuid().ToString("N")); Directory.CreateDirectory(folder);
-            string archive = Path.Combine(folder, "ShotInk-portable.zip");
-            using (var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
-                await FetchAsync(info.Url, output, info.Size, token, progress).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token).ConfigureAwait(false);
-        }
-        internal static string SafePath(string root, string relative)
-        {
-            if (string.IsNullOrEmpty(relative) || Path.IsPathRooted(relative) || relative.Contains(":") || relative.Contains("\\") || relative.Split('/').Any(part => part == ".." || part == "."))
-                throw new InvalidDataException("更新包包含不安全的路径。");
-            foreach (string part in relative.TrimEnd('/').Split('/'))
-                if (part.Length == 0 || part.TrimEnd(' ', '.') != part || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
-                    System.Text.RegularExpressions.Regex.IsMatch(part, @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])($|\.)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                    throw new InvalidDataException("更新包包含无效文件名。");
-            string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            string result = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
-            if (!result.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("更新文件超出目标目录。");
-            return result;
-        }
-        internal static PreparedUpdate Prepare(string archive, UpdateInfo info, string target, string folder, int processId, CancellationToken token)
+        internal static void OpenDownload(UpdateInfo info, Action<System.Diagnostics.ProcessStartInfo> open = null)
         {
             info.Validate();
-            if (new FileInfo(archive).Length != info.Size || !string.Equals(Digest(archive), info.Sha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("更新包校验失败，请重新下载。");
-            string payload = Path.Combine(folder, "payload"); Directory.CreateDirectory(payload);
-            var files = new List<UpdateFile>(); var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); long expanded = 0;
-            using (var zip = ZipFile.OpenRead(archive)) foreach (var entry in zip.Entries)
-            {
-                token.ThrowIfCancellationRequested(); string name = entry.FullName; string destination = SafePath(payload, name);
-                if ((entry.ExternalAttributes & 0xF0000000) == 0xA0000000) throw new InvalidDataException("更新包不能包含符号链接。");
-                if (name.EndsWith("/", StringComparison.Ordinal)) continue;
-                if (!names.Add(name) || names.Count > 6000 || (expanded += entry.Length) > 1536L * 1024 * 1024) throw new InvalidDataException("更新包内容异常。");
-                string lower = name.ToLowerInvariant();
-                if (lower.Contains("settings.ini") || lower.StartsWith("captures/") || lower.StartsWith("updates/")) throw new InvalidDataException("更新包不能覆盖用户设置或历史。");
-                Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                using (var input = entry.Open()) using (var output = new FileStream(destination, FileMode.CreateNew)) input.CopyTo(output);
-                files.Add(new UpdateFile { Path = name, Sha256 = Digest(destination) });
-            }
-            foreach (string required in new[] { "ShotInk.exe", "ShotInk.build.sha256", "ocr/ShotInk.OcrHost.exe", "update-portable.ps1" })
-                if (!names.Contains(required)) throw new InvalidDataException("更新包缺少必要组件：" + required);
-            if (!string.Equals(InstalledRevision(payload), info.Revision, StringComparison.OrdinalIgnoreCase) || System.Reflection.AssemblyName.GetAssemblyName(Path.Combine(payload, "ShotInk.exe")).Version.ToString(3) != info.Version)
-                throw new InvalidDataException("更新包版本与 Gitee 发布信息不一致。");
-            var plan = new UpdatePlan { Target = Path.GetFullPath(target), Payload = payload, Backup = Path.Combine(folder, "backup"), ProcessId = processId, Version = info.Version, Files = files.ToArray() };
-            string planPath = Path.Combine(folder, "update-plan.json"); File.WriteAllBytes(planPath, Json(plan));
-            string helper = Path.Combine(folder, "update-portable.ps1"); File.Copy(Path.Combine(payload, "update-portable.ps1"), helper);
-            return new PreparedUpdate { Folder = folder, PlanPath = planPath, HelperPath = helper, Info = info };
+            var start = new System.Diagnostics.ProcessStartInfo(info.Url) { UseShellExecute = true };
+            if (open != null) open(start); else System.Diagnostics.Process.Start(start);
         }
     }
 }

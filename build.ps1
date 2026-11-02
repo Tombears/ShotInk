@@ -36,13 +36,10 @@ if ($Test -or $Preview) {
     if ($Test) {
         & (Join-Path $projectRoot 'tests\Run.Tests.ps1')
         & (Join-Path $projectRoot 'tests\Release.Tests.ps1') -BinaryPath $appPath
-        & (Join-Path $projectRoot 'tests\Update.Tests.ps1') -BinaryPath $appPath
-        & (Join-Path $projectRoot 'tests\Update.Smoke.Tests.ps1')
     }
 }
 $archive = Join-Path $projectRoot 'ShotInk-portable.zip'
 [IO.File]::WriteAllText((Join-Path $distRoot 'ShotInk.build.sha256'), $sourceSignature)
-[IO.File]::WriteAllText((Join-Path $distRoot 'update-portable.ps1'), [IO.File]::ReadAllText((Join-Path $projectRoot 'scripts\update-portable.ps1')), (New-Object Text.UTF8Encoding($true)))
-Compress-Archive -LiteralPath $appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ocr'), $docsRoot, (Join-Path $distRoot 'ShotInk.build.sha256'), (Join-Path $distRoot 'update-portable.ps1') -DestinationPath $archive -Force
+Compress-Archive -LiteralPath $appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ocr'), $docsRoot, (Join-Path $distRoot 'ShotInk.build.sha256') -DestinationPath $archive -Force
 Write-Host ('Built: ' + $appPath)
 Write-Host ('Portable: ' + $archive)

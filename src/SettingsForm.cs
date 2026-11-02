@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -35,8 +36,8 @@ namespace ShotInk
         private readonly Func<Keys, bool> shortcutAvailable;
         private readonly UpdateController updates;
         private readonly Label updateStatus;
-        private readonly Button updateCheck, updateDetails;
-        internal SettingsForm(AppSettings current, Func<AppSettings, string> apply, Func<Keys, bool> shortcutAvailable = null, UpdateController updates = null, Action showUpdateDetails = null, bool checkVersion = false)
+        private readonly Button updateCheck, updateDownload;
+        internal SettingsForm(AppSettings current, Func<AppSettings, string> apply, Func<Keys, bool> shortcutAvailable = null, UpdateController updates = null, Action<ProcessStartInfo> openDownload = null, bool checkVersion = false)
         {
             this.updates = updates;
             this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
@@ -74,8 +75,17 @@ namespace ShotInk
             updateCheck.Click += async delegate { if (updates != null) await updates.CheckAsync(); }; layout.Controls.Add(updateCheck, 2, 10);
             updateStatus = new Label { Name = "update-status", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
             layout.Controls.Add(updateStatus, 0, 11); layout.SetColumnSpan(updateStatus, 2);
-            updateDetails = new Button { Name = "view-update", Text = "查看并更新", Dock = DockStyle.Fill, Enabled = false };
-            updateDetails.Click += delegate { if (showUpdateDetails != null) showUpdateDetails(); }; layout.Controls.Add(updateDetails, 2, 11);
+            updateDownload = new Button { Name = "download-update", Text = "下载更新", Dock = DockStyle.Fill, Enabled = false };
+            updateDownload.Click += delegate
+            {
+                if (updates == null || updates.Available == null) return;
+                try
+                {
+                    UpdateService.OpenDownload(updates.Available, openDownload);
+                    updateStatus.Text = "请在浏览器下载，退出程序后解压覆盖原目录。"; updateStatus.ForeColor = Theme.Muted;
+                }
+                catch (Exception failure) { updateStatus.Text = "无法打开下载链接：" + failure.Message; updateStatus.ForeColor = Color.Firebrick; }
+            }; layout.Controls.Add(updateDownload, 2, 11);
             error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" }; layout.Controls.Add(error, 0, 12); layout.SetColumnSpan(error, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             var save = new Button { Text = "保存", Width = 85, Height = 30 };
@@ -103,7 +113,7 @@ namespace ShotInk
             if (IsDisposed) return;
             updateStatus.Text = updates == null ? "尚未检查更新。" : updates.Status;
             updateStatus.ForeColor = updates != null && updates.Available != null ? Color.ForestGreen : ToolAppearance.Muted;
-            updateDetails.Enabled = updates != null && updates.Available != null;
+            updateDownload.Enabled = updates != null && updates.Available != null;
             updateCheck.Enabled = updates != null && !updates.Checking;
         }
         protected override void OnShown(EventArgs e)

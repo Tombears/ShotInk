@@ -28,20 +28,22 @@ def saved_token():
         ctypes.memset(result.data, 0, result.size)
         ctypes.windll.kernel32.LocalFree(result.data)
 
-def request(path, token='', method='GET', body=None, content_type=None, binary=False):
+def request(path, token='', method='GET', body=None, content_type=None, binary=False, content_length=None):
     url = path if path.startswith('https://') else API + path
     headers = {'User-Agent': 'ShotInk-Publisher'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     if content_type:
         headers['Content-Type'] = content_type
+    if content_length is not None:
+        headers['Content-Length'] = str(content_length)
     # Authenticated API operations never follow a redirect carrying credentials.
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     try:
-        response = opener.open(urllib.request.Request(url, body, headers, method=method), timeout=180)
+        response = opener.open(urllib.request.Request(url, body, headers, method=method), timeout=900 if content_length is not None else 180)
     except urllib.error.HTTPError as error:
         if error.code == 404 and method == 'GET':
             return None
@@ -62,8 +64,17 @@ def form(path, token, method, data):
 def upload(path, token, data):
     boundary = 'ShotInk' + uuid.uuid4().hex
     prefix = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="ShotInk-portable.zip"\r\nContent-Type: application/zip\r\n\r\n').encode()
-    body = prefix + data + ('\r\n--' + boundary + '--\r\n').encode()
-    return request(path, token, 'POST', body, 'multipart/form-data; boundary=' + boundary)
+    suffix = ('\r\n--' + boundary + '--\r\n').encode()
+    # Keep a fixed Content-Length while limiting each TLS write on slow connections.
+    def parts():
+        yield prefix
+        for offset in range(0, len(data), 65536):
+            yield memoryview(data)[offset:offset + 65536]
+            sent = min(offset + 65536, len(data))
+            if sent % (8 * 1024 * 1024) == 0 or sent == len(data):
+                print('Sent ' + str(sent) + ' / ' + str(len(data)) + ' package bytes.', file=sys.stderr, flush=True)
+        yield suffix
+    return request(path, token, 'POST', parts(), 'multipart/form-data; boundary=' + boundary, content_length=len(prefix) + len(data) + len(suffix))
 
 def main():
     parser = argparse.ArgumentParser()
@@ -78,7 +89,7 @@ def main():
         revision = package.read('ShotInk.build.sha256').decode('utf-8-sig').strip()
         if not re.fullmatch('[a-fA-F0-9]{64}', revision):
             raise RuntimeError('Portable ZIP omitted its build revision.')
-        for name in ('ShotInk.exe', 'ocr/ShotInk.OcrHost.exe', 'update-portable.ps1'):
+        for name in ('ShotInk.exe', 'ocr/ShotInk.OcrHost.exe'):
             if name not in package.namelist():
                 raise RuntimeError('Portable ZIP omitted ' + name)
     notes = (ROOT / 'releases' / (tag + '.md')).read_text(encoding='utf-8')
@@ -92,6 +103,7 @@ def main():
     assets = request(files_path + '?per_page=100', token) or []
     existing = next((asset for asset in assets if asset['name'] == 'ShotInk-portable.zip'), None)
     url = 'https://gitee.com/' + REPOSITORY + '/releases/download/' + tag + '/ShotInk-portable.zip'
+    print('Checking the existing Gitee attachment.', file=sys.stderr, flush=True)
     previous = request(url, binary=True) if existing else None
     if existing and previous is None:
         raise RuntimeError('Cannot back up the existing Gitee package; leaving it unchanged.')
@@ -99,7 +111,9 @@ def main():
         if existing:
             request(files_path + '/' + str(existing['id']), token, 'DELETE')
         try:
+            print('Uploading the verified portable ZIP to Gitee.', file=sys.stderr, flush=True)
             upload(files_path, token, raw)
+            print('Verifying the anonymous Gitee download.', file=sys.stderr, flush=True)
             check = request(url + '?verify=' + uuid.uuid4().hex, binary=True)
             if check is None or hashlib.sha256(check).hexdigest() != digest:
                 raise RuntimeError('Anonymous Gitee download checksum mismatch.')
