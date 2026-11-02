@@ -16,6 +16,11 @@ namespace ShotInk
         private readonly ToolStripButton redo;
         private readonly ToolStripButton recognize;
         private readonly ToolStripButton scroll;
+        private readonly ToolStripButton gif;
+        private readonly Control dragGrip;
+        private bool movingToolbar;
+        private Point moveAnchor, moveOrigin;
+        internal bool UserPlaced { get; private set; }
         private readonly Button finishScroll;
         private readonly OcrSelectionActions textActions;
         private DrawTool currentTool = DrawTool.None;
@@ -36,6 +41,8 @@ namespace ShotInk
         internal event Action CopyAllText;
         internal event Action ScrollClicked;
         internal event Action ScrollFinishClicked;
+        internal event Action GifClicked;
+        internal event Action ToolbarMoved;
 
         internal CaptureToolbar(AppSettings settings = null)
         {
@@ -43,9 +50,15 @@ namespace ShotInk
             BackColor = Color.White;
             Font = ToolAppearance.Font;
             strip = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.None, AutoSize = false,
-                Location = new Point(1, 1), Height = 32, Padding = new Padding(4, 1, 4, 1), CanOverflow = false,
+                Location = new Point(15, 1), Height = 28, Padding = new Padding(1, 0, 1, 0), CanOverflow = false,
                 BackColor = BackColor, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
             strip.Renderer = new ToolbarRenderer();
+            dragGrip = new ToolbarGrip { Name = "toolbar-drag", Location = new Point(1, 1), Size = new Size(14, 26), Cursor = Cursors.SizeAll };
+            dragGrip.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { movingToolbar = true; moveAnchor = MousePosition; moveOrigin = Location; dragGrip.Capture = true; } };
+            dragGrip.MouseMove += delegate { if (movingToolbar && Parent != null) { var delta = new Point(MousePosition.X - moveAnchor.X, MousePosition.Y - moveAnchor.Y); Location = Clamp(new Point(moveOrigin.X + delta.X, moveOrigin.Y + delta.Y), Parent.ClientRectangle, Size); UserPlaced = true; if (ToolbarMoved != null) ToolbarMoved(); } };
+            dragGrip.MouseUp += delegate { movingToolbar = false; dragGrip.Capture = false; };
+            dragGrip.MouseCaptureChanged += delegate { if (!dragGrip.Capture) movingToolbar = false; };
+            Controls.Add(dragGrip);
             AddTool("move", "移动选区", DrawTool.None);
             var shape = Button("shape", "形状：单击使用矩形，下面可切换椭圆", delegate { ActivateTool(DrawTool.Rectangle); });
             tools.Add(DrawTool.Rectangle, shape); tools.Add(DrawTool.Ellipse, shape);
@@ -62,6 +75,8 @@ namespace ShotInk
             recognize.MouseEnter += delegate { if (RecognitionHovered != null) RecognitionHovered(); };
             scroll = Button("scroll", "滚动长截图：使用当前选框，手动滚动后点击完成", delegate { if (ScrollClicked != null) ScrollClicked(); });
             scroll.Name = "scroll-capture";
+            gif = Button("gif", "GIF 录制：使用当前选框，停止后裁剪区段", delegate { if (GifClicked != null) GifClicked(); });
+            gif.Name = "gif-capture";
             strip.Items.Add(new ToolStripSeparator());
             undo = Button("undo", "撤销 (Ctrl+Z)", delegate { if (UndoClicked != null) UndoClicked(); });
             redo = Button("redo", "重做 (Ctrl+Y)", delegate { if (RedoClicked != null) RedoClicked(); });
@@ -72,19 +87,19 @@ namespace ShotInk
             Button("save", "保存 PNG (Ctrl+S)", delegate { Finish(CaptureAction.Save); });
             Button("copy", "复制并完成 (Enter / Ctrl+C)", delegate { Finish(CaptureAction.Copy); });
             int width = strip.Padding.Horizontal + 2;
-            foreach (ToolStripItem item in strip.Items) width += item is ToolStripSeparator ? 6 : item.Width;
+            foreach (ToolStripItem item in strip.Items) { item.Margin = Padding.Empty; if (item is ToolStripSeparator) { item.AutoSize = false; item.Width = 5; } width += item.Width; }
             strip.Width = width;
             Controls.Add(strip);
-            options = new AnnotationOptions(settings) { Location = new Point(1, 36), Width = width, Visible = false };
+            options = new AnnotationOptions(settings) { Location = new Point(1, 30), Width = width + 14, Visible = false };
             options.SettingsChanged += delegate { if (SettingsChanged != null) SettingsChanged(); };
             options.ToolChanged += SelectTool;
             options.SizeChanged += delegate {
                 if (!options.Visible || textSelection || !strip.Visible) return;
-                Height = options.Bottom + 3;
+                Height = options.Bottom + 1;
                 if (LayoutChanged != null) LayoutChanged();
             };
             Controls.Add(options);
-            textActions = new OcrSelectionActions { Location = new Point(1, 36), Width = width, Visible = false };
+            textActions = new OcrSelectionActions { Location = new Point(1, 30), Width = width + 14, Visible = false };
             textActions.CopySelected += delegate { if (CopySelectedText != null) CopySelectedText(); };
             textActions.CopyAll += delegate { if (CopyAllText != null) CopyAllText(); };
             textActions.ExitSelection += delegate { SelectTool(DrawTool.None); };
@@ -92,25 +107,26 @@ namespace ShotInk
             finishScroll = new ToolOptionButton { Name = "finish-scroll-capture", Text = "完成", Size = new Size(100, 30), Visible = false,
                 AccentColor = ToolAppearance.Accent("scroll"), Selected = true };
             finishScroll.Click += delegate { if (ScrollFinishClicked != null) ScrollFinishClicked(); }; Controls.Add(finishScroll);
-            Size = new Size(width + 2, 35);
+            Size = new Size(width + 16, 30);
         }
         internal void SetScrollCapture(bool capturing)
         {
             finishScroll.Visible = capturing; finishScroll.Enabled = true; finishScroll.Text = "完成";
-            Width = capturing ? 108 : strip.Width + 2;
+            Width = capturing ? 128 : strip.Width + 16;
             strip.Visible = !capturing; options.Hide(); textActions.Hide();
-            if (capturing) { Height = 38; finishScroll.Location = new Point((Width - finishScroll.Width) / 2, 4); finishScroll.BringToFront(); }
+            if (capturing) { Height = 36; finishScroll.Location = new Point(22, 3); finishScroll.BringToFront(); }
             else SelectTool(DrawTool.None);
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
-        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; }
+        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; }
+        internal void SetRecordingText(string text) { finishScroll.Text = text; }
 
         private ToolStripButton Button(string icon, string hint, Action clicked)
         {
             var normal = Icon(icon); var active = ToolbarIcons.Create(icon, ToolAppearance.Accent(icon)); icons.Add(active);
             var button = new ToolStripButton { Image = normal, Tag = ToolAppearance.Accent(icon), ToolTipText = hint, DisplayStyle = ToolStripItemDisplayStyle.Image,
-                ImageScaling = ToolStripItemImageScaling.None, AutoSize = false, Width = 30, Height = 29, Padding = Padding.Empty };
+                ImageScaling = ToolStripItemImageScaling.None, AutoSize = false, Width = 25, Height = 26, Padding = Padding.Empty, Margin = Padding.Empty };
             button.CheckedChanged += delegate { button.Image = button.Checked ? active : normal; strip.Invalidate(); };
             button.MouseEnter += delegate { if (button.Enabled) button.Image = active; };
             button.MouseLeave += delegate { button.Image = button.Checked ? active : normal; };
@@ -133,7 +149,7 @@ namespace ShotInk
                 var button = tools[tool] as ToolStripButton; if (button != null) button.Checked = true;
             }
             options.ShowTool(tool);
-            Height = tool == DrawTool.None ? 35 : options.Bottom + 3;
+            Height = tool == DrawTool.None ? 30 : options.Bottom + 1;
             if (ToolChanged != null) ToolChanged(tool);
             if (LayoutChanged != null) LayoutChanged();
         }
@@ -146,13 +162,13 @@ namespace ShotInk
             {
                 foreach (var pair in tools)
                 { pair.Value.BackColor = Color.Transparent; ((ToolStripButton)pair.Value).Checked = false; }
-                textSelection = true; recognize.Checked = true; options.Hide(); textActions.Show(); Height = textActions.Bottom + 3;
+                textSelection = true; recognize.Checked = true; options.Hide(); textActions.Show(); Height = textActions.Bottom + 1;
             }
             else if (textSelection)
             {
                 textSelection = false; recognize.Checked = false; textActions.Hide(); options.ShowTool(currentTool);
                 if (tools.ContainsKey(currentTool)) ((ToolStripButton)tools[currentTool]).Checked = true;
-                Height = currentTool == DrawTool.None ? 35 : options.Bottom + 3;
+                Height = currentTool == DrawTool.None ? 30 : options.Bottom + 1;
             }
             if (LayoutChanged != null) LayoutChanged();
         }
@@ -163,10 +179,21 @@ namespace ShotInk
             base.OnPaint(e);
             using (var pen = new Pen(ToolAppearance.Border))
             {
-                e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
-                if (Height > 38) e.Graphics.DrawLine(pen, 1, 34, Width - 2, 34);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 9)) e.Graphics.DrawPath(pen, path);
+                if (Height > 38) e.Graphics.DrawLine(pen, 1, 29, Width - 2, 29);
             }
         }
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            if (Width < 2 || Height < 2) return;
+            using (var path = ToolAppearance.Rounded(new RectangleF(0, 0, Width, Height), 9))
+            { var previous = Region; Region = new Region(path); if (previous != null) previous.Dispose(); }
+            Invalidate();
+        }
+        internal static Point Clamp(Point point, Rectangle work, Size size)
+        { return new Point(Math.Max(work.Left, Math.Min(point.X, work.Right - size.Width)), Math.Max(work.Top, Math.Min(point.Y, work.Bottom - size.Height))); }
         protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) foreach (var image in icons) image.Dispose(); }
 
         internal static Point Place(Rectangle selection, Rectangle work, Size toolbar)
@@ -185,6 +212,11 @@ namespace ShotInk
             public override Color ToolStripBorder { get { return ToolStripGradientBegin; } }
             public override Color ButtonSelectedHighlight { get { return Color.FromArgb(222, 236, 255); } }
             public override Color ButtonSelectedBorder { get { return Color.FromArgb(124, 177, 246); } }
+        }
+        private sealed class ToolbarGrip : Control
+        {
+            protected override void OnPaint(PaintEventArgs e)
+            { using (var brush = new SolidBrush(ToolAppearance.Muted)) for (int x = 4; x <= 10; x += 6) for (int y = 6; y <= 22; y += 5) e.Graphics.FillEllipse(brush, x, y, 2, 2); }
         }
         private sealed class ToolbarRenderer : ToolStripProfessionalRenderer
         {
@@ -223,6 +255,14 @@ namespace ShotInk
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
                 switch (name)
                 {
+                    case "grip":
+                        for (int x = 7; x <= 13; x += 6) for (int y = 5; y <= 15; y += 5) g.FillEllipse(brush, x, y, 2, 2);
+                        break;
+                    case "gif":
+                        using (var path = ToolAppearance.Rounded(new RectangleF(2, 3, 16, 14), 3)) g.DrawPath(pen, path);
+                        g.FillPolygon(brush, new[] { new Point(8, 6), new Point(8, 14), new Point(14, 10) });
+                        g.DrawLine(pen, 4, 1, 7, 1); g.DrawLine(pen, 13, 19, 16, 19);
+                        break;
                     case "scroll":
                         g.DrawLines(pen, new[] { new Point(6, 2), new Point(3, 2), new Point(3, 18), new Point(6, 18) });
                         g.DrawLines(pen, new[] { new Point(14, 2), new Point(17, 2), new Point(17, 18), new Point(14, 18) });

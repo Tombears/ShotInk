@@ -18,6 +18,15 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--gif-tests")
+                {
+                    Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
+                    Run("GIF editor trims and seeks one frame per arrow key", TestGifEditor);
+                    Run("GIF sampling stops and cancels cleanly", TestGifSampling);
+                    Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
+                    Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
+                    return 0;
+                }
                 if (args.Length == 1 && args[0] == "--scroll-tests")
                 {
                     Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
@@ -62,6 +71,11 @@ namespace ShotInk
                 Run("startup mode stays hidden and can reopen the workbench", TestStartupTray);
                 Run("history defaults to ten and its on-screen limit persists and prunes only history", TestHistoryLimit);
                 Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
+                Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
+                Run("GIF editor trims and seeks one frame per arrow key", TestGifEditor);
+                Run("GIF sampling stops and cancels cleanly", TestGifSampling);
+                Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
+                Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
                 Run("slow stitching retains every queued overlap frame under pressure", TestScrollBackPressure);
                 Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
                 Run("integrated scroll capture restores tools and edits within a fixed viewport", TestIntegratedScroll);
@@ -311,6 +325,120 @@ namespace ShotInk
                 Assert(AppSettings.Load(Path.Combine(root, "settings.ini")).HistoryLimit == 3, "History count was not persisted.");
             }
             finally { Directory.Delete(root, true); }
+        }
+        private static GifClip GifFixture()
+        {
+            var clip = new GifClip { Duration = 400 }; int index = 0;
+            foreach (var color in new[] { Color.Red, Color.Lime, Color.Blue })
+            using (var image = new Bitmap(64, 48)) using (var stream = new MemoryStream())
+            { using (var graphics = Graphics.FromImage(image)) graphics.Clear(color); image.Save(stream, ImageFormat.Png); clip.Frames.Add(new GifFrame { Png = stream.ToArray(), Time = new[] { 0, 80, 230 }[index++] }); }
+            return clip;
+        }
+        private static void TestGifEncoding()
+        {
+            byte[] bytes = GifEncoder.Encode(GifFixture(), 1, 2);
+            using (var stream = new MemoryStream(bytes)) using (var image = Image.FromStream(stream))
+            {
+                Assert(image.Width == 64 && image.Height == 48 && image.GetFrameCount(FrameDimension.Time) == 2, "GIF trim exported incorrect dimensions or frame count.");
+                image.SelectActiveFrame(FrameDimension.Time, 0); using (var bitmap = new Bitmap(image)) Assert(bitmap.GetPixel(30, 20).G > 220 && bitmap.GetPixel(30, 20).R < 40, "GIF lost its first selected frame or palette.");
+                image.SelectActiveFrame(FrameDimension.Time, 1); using (var bitmap = new Bitmap(image)) Assert(bitmap.GetPixel(30, 20).B > 220 && bitmap.GetPixel(30, 20).G < 40, "GIF lost its second frame or local palette.");
+                var delays = image.GetPropertyItem(0x5100).Value;
+                Assert(BitConverter.ToInt32(delays, 0) == 15 && BitConverter.ToInt32(delays, 4) == 17, "GIF timing did not preserve the trimmed interval.");
+                Assert(BitConverter.ToUInt16(image.GetPropertyItem(0x5101).Value, 0) == 0, "GIF did not loop.");
+            }
+            string directory = Path.Combine(Path.GetTempPath(), "ShotInk-gif-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string path = GifExport.WriteNew(bytes, directory); var data = GifExport.ClipboardData(bytes, path);
+                Assert(data.GetFileDropList()[0] == path && data.GetData("GIF") is MemoryStream && File.ReadAllBytes(path).Length == bytes.Length, "GIF clipboard did not retain an animated file and GIF data.");
+                Assert(GifExport.Save(null, bytes, new AppSettings { AskSaveLocation = false, SaveDirectory = directory }) && Directory.GetFiles(directory, "*.gif").Length == 2, "GIF save ignored configured output or overwrote a file.");
+                byte[] single = GifEncoder.Encode(GifFixture(), 2, 2);
+                using (var stream = new MemoryStream(single)) using (var image = Image.FromStream(stream)) Assert(image.GetFrameCount(FrameDimension.Time) == 1, "Single-frame trim was invalid.");
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+        private static void GifKey(GifEditorForm editor, Keys key)
+        { typeof(GifEditorForm).GetMethod("ProcessCmdKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(editor, new object[] { new Message(), key }); }
+        private static void TestGifEditor()
+        {
+            using (var editor = new GifEditorForm(GifFixture(), new AppSettings()))
+            {
+                editor.Show(); Application.DoEvents(); var range = Field<GifRangeSlider>(editor, "range");
+                Field<PictureBox>(editor, "preview").Focus(); GifKey(editor, Keys.Right);
+                Assert(Field<PictureBox>(editor, "preview").Focused && Field<int>(editor, "frameIndex") == 1 && range.First == 0 && range.Last == 2, "Right arrow did not seek exactly one frame without trimming.");
+                GifKey(editor, Keys.Left); Assert(Field<int>(editor, "frameIndex") == 0, "Left arrow did not seek exactly one frame.");
+                range.SelectBoundary(true); GifKey(editor, Keys.Right); Assert(range.First == 1 && range.Last == 2, "Start handle did not trim one frame independently.");
+                range.SelectBoundary(false); GifKey(editor, Keys.Left); GifKey(editor, Keys.Left);
+                Assert(range.Last == 1 && range.First == 1, "End handle crossed start or changed more than one frame.");
+                range.SetRange(0, 2);
+                Mouse(range, "OnMouseDown", MouseButtons.Left, 12, range.Height / 2);
+                Mouse(range, "OnMouseMove", MouseButtons.Left, range.Width / 2, range.Height / 2);
+                Mouse(range, "OnMouseUp", MouseButtons.Left, range.Width / 2, range.Height / 2);
+                Assert(range.First == 1 && range.Last == 2, "Dragging the shared timeline's start handle changed the wrong endpoint.");
+                Mouse(range, "OnMouseDown", MouseButtons.Left, range.Width - 12, range.Height / 2);
+                Mouse(range, "OnMouseMove", MouseButtons.Left, 0, range.Height / 2);
+                Mouse(range, "OnMouseUp", MouseButtons.Left, 0, range.Height / 2);
+                Assert(range.First == 1 && range.Last == 1, "Dragging the end handle crossed the start handle.");
+                range.SetRange(0, 2);
+                Field<Button>(editor, "play").PerformClick(); WaitUntil(delegate { return Field<int>(editor, "frameIndex") == 1; });
+                Field<PictureBox>(editor, "preview").Focus(); GifKey(editor, Keys.Right);
+                Assert(!Field<System.Windows.Forms.Timer>(editor, "playback").Enabled && Field<int>(editor, "frameIndex") == 2, "Frame seek did not pause playback.");
+                using (var image = new Bitmap(editor.Width, editor.Height)) { editor.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-gif-editor-options.png")); }
+                editor.Close();
+            }
+        }
+        private static void TestGifSampling()
+        {
+            int calls = 0;
+            using (var session = new GifCaptureSession(delegate { System.Threading.Interlocked.Increment(ref calls); return new Bitmap(40, 30); }))
+            {
+                var task = session.RunAsync(); WaitUntil(delegate { return calls >= 3; }); session.Finish(); Pump(task);
+                Assert(task.Result.Frames.Count >= 3 && task.Result.Duration > task.Result.Frames[task.Result.Frames.Count - 1].Time, "Recording lost frames or final duration.");
+            }
+            calls = 0;
+            using (var session = new GifCaptureSession(delegate { System.Threading.Interlocked.Increment(ref calls); return new Bitmap(40, 30); }))
+            { var task = session.RunAsync(); WaitUntil(delegate { return calls > 0; }); session.Dispose(); WaitUntil(delegate { return task.IsCompleted; }); Assert(task.IsCanceled, "Cancelled GIF capture continued running."); }
+        }
+        private static void TestToolbarDrag()
+        {
+            Point cursor = Cursor.Position;
+            try
+            {
+                using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+                {
+                    overlay.Show(); Select(overlay); var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); var selection = Field<Rectangle>(overlay, "selection");
+                    var strip = Field<ToolStrip>(toolbar, "strip"); var gif = Field<ToolStripButton>(toolbar, "gif");
+                    Assert(strip.Items.IndexOf(gif) == strip.Items.IndexOf(Field<ToolStripButton>(toolbar, "scroll")) + 1, "GIF button was not after long capture.");
+                    Assert(toolbar.Height == 30 && !toolbar.Region.IsVisible(0, 0), "Toolbar was not compact and rounded.");
+                    var grip = Field<Control>(toolbar, "dragGrip"); var before = toolbar.Location;
+                    Mouse(grip, "OnMouseDown", MouseButtons.Left, 4, 4);
+                    Cursor.Position = new Point(cursor.X + 30, cursor.Y - 50); Mouse(grip, "OnMouseMove", MouseButtons.Left, 30, 0); Mouse(grip, "OnMouseUp", MouseButtons.Left, 30, 0);
+                    Assert(toolbar.UserPlaced && toolbar.Location != before && Field<Rectangle>(overlay, "selection") == selection, "Dragging the toolbar moved the screenshot or failed to move.");
+                    var moved = toolbar.Location; toolbar.SelectTool(DrawTool.Pen);
+                    Assert(toolbar.Location == moved, "Changing tools reset the dragged toolbar location.");
+                    ToolPreview(overlay, "compact-toolbar");
+                    Application.DoEvents(); Native.FlushDesktop();
+                    using (var screen = Native.Capture(overlay.RectangleToScreen(overlay.ClientRectangle))) screen.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-compact-toolbar-live.png"));
+                    using (var image = new Bitmap(toolbar.Width, toolbar.Height)) { toolbar.DrawToBitmap(image, toolbar.ClientRectangle); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-toolbar-only.png")); }
+                    overlay.Close();
+                }
+            }
+            finally { Cursor.Position = cursor; }
+        }
+        private static void TestIntegratedGif()
+        {
+            using (var overlay = new CaptureOverlay(false, FlatDesktop(), new Rectangle(20, 20, 900, 600)))
+            {
+                int frames = 0; Rectangle sampled = Rectangle.Empty;
+                overlay.CaptureGifFrame = delegate(Rectangle region) { sampled = region; System.Threading.Interlocked.Increment(ref frames); return new Bitmap(700, 370); };
+                overlay.Show(); Select(overlay); var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                var task = overlay.CaptureGifAsync(); WaitUntil(delegate { return frames >= 3; });
+                Assert(!Field<AnnotationCanvas>(overlay, "canvas").Visible && Option<Button>(toolbar, "finish-scroll-capture").Text.StartsWith("停止"), "Recording did not hide the frozen screenshot or show Stop.");
+                Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
+                GifEditorForm editor = null; foreach (Form form in Application.OpenForms) if (form is GifEditorForm) editor = (GifEditorForm)form;
+                Assert(overlay.IsDisposed && editor != null && sampled == new Rectangle(100, 90, 700, 370), "Stopping GIF did not preserve the capture region or open trim editing.");
+                editor.Close();
+            }
         }
         private static void TestScrollPipeline()
         {

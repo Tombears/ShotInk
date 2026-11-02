@@ -40,6 +40,7 @@ namespace ShotInk
                 case "eraser": return Color.FromArgb(190, 67, 140);
                 case "ocr": return Color.FromArgb(8, 130, 161);
                 case "scroll": return Color.FromArgb(87, 93, 206);
+                case "gif": return Color.FromArgb(209, 67, 112);
                 case "save": return Color.FromArgb(32, 137, 92);
                 case "cancel": return Color.FromArgb(209, 67, 67);
                 default: return Color.FromArgb(89, 108, 133);
@@ -80,12 +81,12 @@ namespace ShotInk
             g.Clear(Parent == null ? Color.White : Parent.BackColor);
             if (IsSwatch)
             {
-                var circle = new RectangleF(Width / 2F - 8, Height / 2F - 8, 16, 16);
+                var circle = new RectangleF(Width / 2F - 7, Height / 2F - 7, 14, 14);
                 using (var fill = new SolidBrush(BackColor)) g.FillEllipse(fill, circle);
                 using (var border = new Pen(Color.FromArgb(180, 187, 198))) g.DrawEllipse(border, circle);
                 if (Selected || hovering)
                 {
-                    circle.Inflate(4, 4);
+                    circle.Inflate(3, 3);
                     using (var ring = new Pen(Selected ? AccentColor : ToolAppearance.Border, Selected ? 2 : 1)) g.DrawEllipse(ring, circle);
                 }
             }

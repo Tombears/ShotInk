@@ -115,7 +115,7 @@ namespace ShotInk
             if (e.Button != MouseButtons.Left) return;
             // The capture region stays fixed until the scrolling session ends.
             // Clicking the surrounding overlay must not clear or restart that session.
-            if (scrollSession != null) return;
+            if (scrollSession != null || gifSession != null) return;
             if (ready && selection.Contains(e.Location)) { BeginAdjust(-1, e.Location); return; }
             ClearSelection();
             anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; Capture = true;
@@ -131,7 +131,7 @@ namespace ShotInk
 
         private void BeginAdjust(int handle, Point location)
         {
-            if (!ready || scrollSession != null || (longViewport != null && handle != -1)) return;
+            if (!ready || scrollSession != null || gifSession != null || (longViewport != null && handle != -1)) return;
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
             if (longViewport != null)
             {
@@ -217,7 +217,9 @@ namespace ShotInk
             toolbar.LayoutChanged += PositionToolbar;
             ResetRecognitionSession();
             toolbar.ScrollClicked += StartLongCapture;
-            toolbar.ScrollFinishClicked += FinishLongCapture;
+            toolbar.ScrollFinishClicked += delegate { if (gifSession != null) { toolbar.SetScrollFinishing(); gifSession.Finish(); } else FinishLongCapture(); };
+            toolbar.GifClicked += StartGifCapture;
+            toolbar.ToolbarMoved += delegate { PositionToolbar(); UpdateRecordingRegion(); };
             toolbar.RecognitionClicked += async delegate { await recognition.RecognizeAsync(); };
             toolbar.RecognitionHovered += delegate { RapidTextRecognizer.Shared.WarmUpAsync(); };
             toolbar.CopySelectedText += delegate { canvas.CopyRecognizedText(false); };
@@ -237,7 +239,7 @@ namespace ShotInk
             var work = Screen.FromRectangle(global).WorkingArea;
             work.Offset(-screenBounds.X, -screenBounds.Y);
             work = Rectangle.Intersect(work, ClientRectangle);
-            toolbar.Location = CaptureToolbar.Place(selection, work, toolbar.Size);
+            toolbar.Location = toolbar.UserPlaced ? CaptureToolbar.Clamp(toolbar.Location, work, toolbar.Size) : CaptureToolbar.Place(selection, work, toolbar.Size);
             toolbar.BringToFront();
             if (textSearch != null && textSearch.Visible)
             {
@@ -259,7 +261,7 @@ namespace ShotInk
             var points = SelectionGeometry.Handles(selection);
             for (int i = 0; i < grips.Length; i++)
             {
-                grips[i].Visible = ready && longViewport == null && scrollSession == null;
+                grips[i].Visible = ready && longViewport == null && scrollSession == null && gifSession == null;
                 grips[i].Location = new Point(points[i].X - 4, points[i].Y - 4);
                 grips[i].BringToFront();
             }
@@ -298,7 +300,7 @@ namespace ShotInk
 
         private void Finish(CaptureAction action)
         {
-            if (!ready || completed || scrollSession != null) return;
+            if (!ready || completed || scrollSession != null || gifSession != null) return;
             var image = canvas.Render();
             if (action == CaptureAction.Save)
             {
@@ -316,6 +318,12 @@ namespace ShotInk
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (gifSession != null)
+            {
+                if (e.KeyCode == Keys.Escape) Close();
+                else if (e.KeyCode == Keys.Enter) { toolbar.SetScrollFinishing(); gifSession.Finish(); }
+                e.SuppressKeyPress = true; return;
+            }
             if (textSearch != null && textSearch.HandleKey(e)) return;
             if (scrollSession != null)
             {
@@ -342,7 +350,7 @@ namespace ShotInk
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
         private void ClearLongDragPreview() { if (longDragPreview != null) { longDragPreview.Dispose(); longDragPreview = null; } }
-        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

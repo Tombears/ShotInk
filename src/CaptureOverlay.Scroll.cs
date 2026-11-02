@@ -24,7 +24,7 @@ namespace ShotInk
         private async void StartLongCapture() { await CaptureLongAsync(); }
         internal async Task CaptureLongAsync()
         {
-            if (!ready || scrollSession != null || longViewport != null) return;
+            if (!ready || scrollSession != null || gifSession != null || longViewport != null) return;
             if (selection.Width < 80 || selection.Height < 120)
             { MessageBox.Show(this, "长截图区域至少需要 80 × 120 像素。", "选区过小"); return; }
             var region = new Rectangle(selection.X + screenBounds.X, selection.Y + screenBounds.Y, selection.Width, selection.Height);
@@ -36,6 +36,7 @@ namespace ShotInk
                 foreach (var grip in grips) grip.Hide();
                 PositionToolbar();
                 bool excluded = Native.ExcludeFromCapture(Handle, true);
+                captureChromeExcluded = excluded;
                 if (toolbar.Bounds.IntersectsWith(selection) && !excluded)
                     throw new InvalidOperationException("请缩小选区，为完成按钮留出屏幕空间。");
                 var surface = new Region(ClientRectangle); var hole = selection; hole.Inflate(5, 5);
@@ -87,7 +88,7 @@ namespace ShotInk
         {
             if (message.Msg == 0x020A && scrollWheel != null)
             { scrollWheel.QueueWheel(unchecked((short)(message.WParam.ToInt64() >> 16))); return; }
-            if (message.Msg == Native.HotKeyMessage && message.WParam.ToInt32() == 1001 && scrollSession != null) { Close(); return; }
+            if (message.Msg == Native.HotKeyMessage && message.WParam.ToInt32() == 1001 && (scrollSession != null || gifSession != null)) { Close(); return; }
             base.WndProc(ref message);
         }
         internal void ShowLongPreview(Bitmap image)

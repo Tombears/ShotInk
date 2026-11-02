@@ -29,7 +29,7 @@ namespace ShotInk
             FlowDirection = FlowDirection.TopDown;
             WrapContents = false;
             Margin = Padding.Empty;
-            Padding = new Padding(12, 8, 12, 8);
+            Padding = new Padding(7, 3, 7, 3);
             BackColor = Color.White;
             Font = ToolAppearance.Font;
             ForeColor = ToolAppearance.Ink;
@@ -105,10 +105,10 @@ namespace ShotInk
                     var text = Row(); Caption(text, "文字样式");
                     var size = new NumericUpDown { Name = "text-font-size", AccessibleName = "文字字号", Minimum = 6, Maximum = 300,
                         DecimalPlaces = 1, Value = Math.Max(6, Math.Min(300, (decimal)TextFontSize)), Width = 72, Font = Font,
-                        BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 6, 6, 0) };
+                        BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 2, 4, 0) };
                     size.ValueChanged += delegate { TextFontSize = (float)size.Value; NotifySettings(); };
                     text.Controls.Add(size);
-                    text.Controls.Add(new Label { Text = "pt", Width = 24, Height = 32, TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
+                    text.Controls.Add(new Label { Text = "pt", Width = 26, Height = 26, TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
                     Choice(text, "粗体", "text-bold", (TextFontStyle & FontStyle.Bold) != 0, delegate { TextFontStyle ^= FontStyle.Bold; NotifySettings(); ShowTool(tool); });
                     Choice(text, "斜体", "text-italic", (TextFontStyle & FontStyle.Italic) != 0, delegate { TextFontStyle ^= FontStyle.Italic; NotifySettings(); ShowTool(tool); });
                 }
@@ -130,19 +130,19 @@ namespace ShotInk
                 Caption(colors, "颜色");
                 foreach (var color in new[] { Color.FromArgb(239, 64, 76), Color.FromArgb(255, 174, 38), Color.FromArgb(250, 216, 49), Color.FromArgb(37, 181, 114), Color.FromArgb(47, 135, 246), Color.FromArgb(150, 89, 224), Color.Black, Color.White })
                 {
-                    var swatch = new ToolOptionButton { Width = 29, Height = 32, Margin = new Padding(0, 0, 3, 0), BackColor = color, Tag = color,
+                    var swatch = new ToolOptionButton { Width = 24, Height = 26, Margin = new Padding(0, 0, 1, 0), BackColor = color, Tag = color,
                         IsSwatch = true, AccentColor = ToolAppearance.Accent(tool), Selected = color.ToArgb() == Ink.ToArgb(), AccessibleName = "颜色 " + color.Name };
                     swatch.Click += delegate(object sender, EventArgs e) { Ink = (Color)((Control)sender).Tag; NotifySettings(); ShowTool(tool); };
                     colors.Controls.Add(swatch);
                 }
-                var custom = new ToolOptionButton { Text = "自定", Name = "custom-color", AccessibleName = "自定义颜色", Width = 54, Height = 30, Margin = new Padding(4, 1, 0, 0), AccentColor = ToolAppearance.Accent(tool) };
+                var custom = new ToolOptionButton { Text = "自定", Name = "custom-color", AccessibleName = "自定义颜色", Width = 48, Height = 26, Margin = new Padding(2, 0, 0, 0), AccentColor = ToolAppearance.Accent(tool) };
                 custom.Click += delegate { using (var dialog = new ColorDialog { Color = Ink, FullOpen = true }) if (dialog.ShowDialog(FindForm()) == DialogResult.OK) { Ink = dialog.Color; NotifySettings(); ShowTool(tool); } };
                 colors.Controls.Add(custom);
                 if (tool != DrawTool.Text)
                 {
                     var widths = Row(); Caption(widths, "线宽");
                     var stroke = new NumericUpDown { Name = "tool-stroke", AccessibleName = "线条宽度", Minimum = 1, Maximum = 12, Value = (decimal)Stroke,
-                        Width = 58, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(6, 6, 5, 0) };
+                        Width = 50, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(4, 2, 3, 0) };
                     var presets = new[] { 1, 3, 6 };
                     foreach (int value in presets)
                     {
@@ -158,7 +158,7 @@ namespace ShotInk
                         }
                     };
                     widths.Controls.Add(stroke);
-                    widths.Controls.Add(new Label { Text = "px", Width = 24, Height = 32, TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
+                    widths.Controls.Add(new Label { Text = "px", Width = 26, Height = 26, TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
                 }
                 if (tool == DrawTool.Text) Hint("单击图片输入文字 · Ctrl+Enter 完成 · 双击文字再次编辑");
                 if (tool == DrawTool.Arrow || tool == DrawTool.Line || tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline)
@@ -173,8 +173,8 @@ namespace ShotInk
 
         private FlowLayoutPanel Row()
         {
-            var row = new FlowLayoutPanel { Height = 36, Width = Math.Max(0, ClientSize.Width - Padding.Horizontal), WrapContents = false,
-                Margin = new Padding(0, 0, 0, 3), Padding = Padding.Empty, BackColor = Color.White };
+            var row = new FlowLayoutPanel { Height = 28, Width = Math.Max(0, ClientSize.Width - Padding.Horizontal), WrapContents = false,
+                Margin = new Padding(0, 0, 0, 1), Padding = Padding.Empty, BackColor = Color.White };
             Controls.Add(row); return row;
         }
         private void Header(DrawTool tool)
@@ -190,22 +190,22 @@ namespace ShotInk
                 case DrawTool.Mosaic: title = "马赛克"; description = "遮挡截图中的敏感信息"; break;
                 default: title = "橡皮擦"; description = "擦除标注，恢复原图"; break;
             }
-            var header = Row(); header.Height = 30; header.Margin = new Padding(0, 0, 0, 6);
-            header.Controls.Add(new Label { Text = title, Width = 72, Height = 28, Font = ToolAppearance.HeadingFont, ForeColor = ToolAppearance.Accent(tool), TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
-            header.Controls.Add(new Label { Text = description, AutoSize = false, Width = 320, Height = 28, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
+            var header = Row(); header.Height = 20; header.Margin = new Padding(0, 0, 0, 1);
+            header.Controls.Add(new Label { Text = title, Width = 52, Height = 20, Font = ToolAppearance.HeadingFont, ForeColor = ToolAppearance.Accent(tool), TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
+            header.Controls.Add(new Label { Text = description, AutoSize = false, Width = Math.Max(0, header.Width - 52), Height = 20, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
         }
         private void Hint(string text)
         {
-            var row = Row(); row.Height = 25; row.Margin = Padding.Empty;
-            row.Controls.Add(new Label { Text = text, AutoEllipsis = true, Width = row.Width, Height = 25, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
+            var row = Row(); row.Height = 22; row.Margin = Padding.Empty;
+            row.Controls.Add(new Label { Text = text, AutoEllipsis = true, Width = row.Width, Height = 22, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
         }
         private static void Caption(FlowLayoutPanel row, string text)
         {
-            row.Controls.Add(new Label { Text = text, Width = 72, Height = 32, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
+            row.Controls.Add(new Label { Text = text, Width = 56, Height = 26, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty });
         }
         private void Choice(FlowLayoutPanel row, string text, string name, bool selected, Action clicked)
         {
-            var button = new ToolOptionButton { Name = name, Text = text, Width = text.Length > 3 ? 88 : 64, Height = 30, Margin = new Padding(0, 1, 6, 0),
+            var button = new ToolOptionButton { Name = name, Text = text, Width = text.Length > 3 ? 76 : 54, Height = 26, Margin = new Padding(0, 0, 4, 0),
                 AccentColor = ToolAppearance.Accent(currentTool), Selected = selected, AccessibleName = text };
             button.Click += delegate { clicked(); };
             row.Controls.Add(button);
@@ -215,10 +215,10 @@ namespace ShotInk
             var row = Row();
             Caption(row, label); row.Controls[0].Enabled = enabled;
             var slider = new OvalSlider { Name = name, AccessibleName = label, Minimum = minimum, Maximum = maximum, Value = value,
-                Width = Math.Max(80, row.Width - 140), Height = 32, AccentColor = ToolAppearance.Accent(currentTool),
+                Width = Math.Max(80, row.Width - 112), Height = 26, AccentColor = ToolAppearance.Accent(currentTool),
                 SmallChange = 1, LargeChange = 4, Margin = Padding.Empty, Enabled = enabled };
-            var number = new Label { Text = value + " px", Width = 64, Height = 28, TextAlign = ContentAlignment.MiddleCenter,
-                Margin = new Padding(4, 2, 0, 0), ForeColor = ToolAppearance.Accent(currentTool), BackColor = ToolAppearance.Tint(ToolAppearance.Accent(currentTool), 0.94F), Enabled = enabled };
+            var number = new Label { Text = value + " px", Width = 52, Height = 24, TextAlign = ContentAlignment.MiddleCenter,
+                Margin = new Padding(4, 1, 0, 0), ForeColor = ToolAppearance.Accent(currentTool), BackColor = ToolAppearance.Tint(ToolAppearance.Accent(currentTool), 0.94F), Enabled = enabled };
             slider.ValueChanged += delegate { number.Text = slider.Value + " px"; changed(slider.Value); };
             row.Controls.Add(slider); row.Controls.Add(number);
         }
