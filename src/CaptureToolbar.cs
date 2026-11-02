@@ -20,6 +20,7 @@ namespace ShotInk
         private readonly Control dragGrip;
         private bool movingToolbar;
         private Point moveAnchor, moveOrigin;
+        private Bitmap surface;
         internal bool UserPlaced { get; private set; }
         private readonly Button finishScroll;
         private readonly OcrSelectionActions textActions;
@@ -47,11 +48,12 @@ namespace ShotInk
         internal CaptureToolbar(AppSettings settings = null)
         {
             AutoScaleMode = AutoScaleMode.None;
-            BackColor = Color.White;
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
             Font = ToolAppearance.Font;
             strip = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.None, AutoSize = false,
                 Location = new Point(15, 1), Height = 28, Padding = new Padding(1, 0, 1, 0), CanOverflow = false,
-                BackColor = BackColor, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
+                BackColor = Color.White, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
             strip.Renderer = new ToolbarRenderer();
             dragGrip = new ToolbarGrip { Name = "toolbar-drag", Location = new Point(1, 1), Size = new Size(14, 26), Cursor = Cursors.SizeAll };
             dragGrip.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { movingToolbar = true; moveAnchor = MousePosition; moveOrigin = Location; dragGrip.Capture = true; } };
@@ -177,24 +179,37 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            using (var pen = new Pen(ToolAppearance.Border))
+            if (Height > 38) using (var pen = new Pen(ToolAppearance.Border)) e.Graphics.DrawLine(pen, 1, 29, Width - 2, 29);
+        }
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            base.OnPaintBackground(e);
+            if (surface == null) surface = ToolAppearance.RenderSmooth(ClientSize, delegate(Graphics graphics)
             {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 9)) e.Graphics.DrawPath(pen, path);
-                if (Height > 38) e.Graphics.DrawLine(pen, 1, 29, Width - 2, 29);
-            }
+                using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 9))
+                using (var fill = new SolidBrush(Color.White))
+                using (var pen = new Pen(ToolAppearance.Border)) { graphics.FillPath(fill, path); graphics.DrawPath(pen, path); }
+            });
+            e.Graphics.DrawImageUnscaled(surface, Point.Empty);
         }
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
-            if (Width < 2 || Height < 2) return;
-            using (var path = ToolAppearance.Rounded(new RectangleF(0, 0, Width, Height), 9))
-            { var previous = Region; Region = new Region(path); if (previous != null) previous.Dispose(); }
+            if (surface != null) { surface.Dispose(); surface = null; }
+            if (Width < 4 || Height < 4) return;
+            // Child windows stay inside the solid fill; the parent paints the soft
+            // alpha fringe without a binary window region cutting off its pixels.
+            foreach (var child in new Control[] { strip, options, textActions })
+            {
+                if (child == null) continue;
+                using (var path = ToolAppearance.Rounded(new RectangleF(1.5F - child.Left, 1.5F - child.Top, Width - 3, Height - 3), 8))
+                { var previous = child.Region; child.Region = new Region(path); if (previous != null) previous.Dispose(); }
+            }
             Invalidate();
         }
         internal static Point Clamp(Point point, Rectangle work, Size size)
         { return new Point(Math.Max(work.Left, Math.Min(point.X, work.Right - size.Width)), Math.Max(work.Top, Math.Min(point.Y, work.Bottom - size.Height))); }
-        protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) foreach (var image in icons) image.Dispose(); }
+        protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) { if (surface != null) { surface.Dispose(); surface = null; } foreach (var image in icons) image.Dispose(); } }
 
         internal static Point Place(Rectangle selection, Rectangle work, Size toolbar)
         {
@@ -215,8 +230,9 @@ namespace ShotInk
         }
         private sealed class ToolbarGrip : Control
         {
+            internal ToolbarGrip() { SetStyle(ControlStyles.SupportsTransparentBackColor, true); BackColor = Color.Transparent; }
             protected override void OnPaint(PaintEventArgs e)
-            { using (var brush = new SolidBrush(ToolAppearance.Muted)) for (int x = 4; x <= 10; x += 6) for (int y = 6; y <= 22; y += 5) e.Graphics.FillEllipse(brush, x, y, 2, 2); }
+            { ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics) { using (var brush = new SolidBrush(ToolAppearance.Muted)) for (int x = 4; x <= 10; x += 6) for (int y = 6; y <= 22; y += 5) graphics.FillEllipse(brush, x, y, 2, 2); }); }
         }
         private sealed class ToolbarRenderer : ToolStripProfessionalRenderer
         {
@@ -226,14 +242,16 @@ namespace ShotInk
                 var button = e.Item as ToolStripButton;
                 if (button == null || !button.Enabled || (!button.Checked && !button.Selected && !button.Pressed)) return;
                 Color accent = button.Tag is Color ? (Color)button.Tag : ToolAppearance.Accent(DrawTool.None);
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                ToolAppearance.DrawSmooth(e.Graphics, button.Size, delegate(Graphics graphics)
+                {
                 using (var path = ToolAppearance.Rounded(new RectangleF(1.5F, 1.5F, button.Width - 3, button.Height - 3), 5))
                 using (var fill = new SolidBrush(ToolAppearance.Tint(accent, button.Checked || button.Pressed ? 0.88F : 0.95F)))
                 {
-                    e.Graphics.FillPath(fill, path);
+                    graphics.FillPath(fill, path);
                     if (button.Checked)
-                        using (var border = new Pen(ToolAppearance.Tint(accent, 0.50F))) e.Graphics.DrawPath(border, path);
+                        using (var border = new Pen(ToolAppearance.Tint(accent, 0.50F))) graphics.DrawPath(border, path);
                 }
+                });
             }
             protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { }
         }
@@ -246,8 +264,8 @@ namespace ShotInk
 
         internal static Bitmap Create(string name, Color color)
         {
-            var image = new Bitmap(20, 20);
-            using (var g = Graphics.FromImage(image))
+            return ToolAppearance.RenderSmooth(new Size(20, 20), delegate(Graphics g)
+            {
             using (var pen = new Pen(color, 1.7F))
             using (var brush = new SolidBrush(pen.Color))
             {
@@ -331,7 +349,7 @@ namespace ShotInk
                         g.DrawLines(pen, new[] { new Point(4, 13), new Point(3, 13), new Point(3, 3), new Point(13, 3), new Point(13, 4) }); break;
                 }
             }
-            return image;
+            });
         }
     }
 }

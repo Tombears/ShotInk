@@ -135,7 +135,8 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+            ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
+            {
             float y = Height / 2F;
             var thumb = ThumbBounds;
             using (var track = new Pen(Enabled ? Color.FromArgb(189, 199, 211) : Color.FromArgb(215, 218, 223), 4))
@@ -153,8 +154,9 @@ namespace ShotInk
             using (var rim = new Pen(Enabled && (hovering || dragging || Focused) ? AccentColor : Color.FromArgb(145, 155, 169))) g.DrawEllipse(rim, thumb);
             var highlight = thumb; highlight.Inflate(-2, -2);
             using (var light = new Pen(Color.FromArgb(205, Color.White))) g.DrawArc(light, highlight, 190, 150);
+            });
             if (Focused && ShowFocusCues)
-            { var focus = Rectangle.Ceiling(thumb); focus.Inflate(3, 3); ControlPaint.DrawFocusRectangle(g, focus); }
+            { var focus = Rectangle.Ceiling(ThumbBounds); focus.Inflate(3, 3); ControlPaint.DrawFocusRectangle(e.Graphics, focus); }
         }
         protected override AccessibleObject CreateAccessibilityInstance() { return new SliderAccessibility(this); }
         private sealed class SliderAccessibility : ControlAccessibleObject

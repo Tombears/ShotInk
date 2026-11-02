@@ -46,14 +46,17 @@ namespace ShotInk
         protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); Invalidate(); }
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e); var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+            base.OnPaint(e);
+            ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
+            {
             float y = Height / 2F, a = Pixel(first), b = Pixel(last);
             using (var path = ToolAppearance.Rounded(new RectangleF(5, y - 8, Math.Max(14, Width - 10), 16), 7))
             using (var brush = new SolidBrush(Color.FromArgb(232, 236, 243))) g.FillPath(brush, path);
             using (var brush = new SolidBrush(Color.FromArgb(186, 213, 255))) g.FillRectangle(brush, a, y - 8, Math.Max(1, b - a), 16);
             DrawHandle(g, a, y, true); DrawHandle(g, b, y, false);
-            TextRenderer.DrawText(g, "起点", Font, new Point(4, (int)y - 32), ToolAppearance.Ink);
-            var size = TextRenderer.MeasureText("终点", Font); TextRenderer.DrawText(g, "终点", Font, new Point(Math.Max(4, Width - size.Width - 4), (int)y - 32), ToolAppearance.Ink);
+            });
+            TextRenderer.DrawText(e.Graphics, "起点", Font, new Point(4, Height / 2 - 32), ToolAppearance.Ink);
+            var size = TextRenderer.MeasureText("终点", Font); TextRenderer.DrawText(e.Graphics, "终点", Font, new Point(Math.Max(4, Width - size.Width - 4), Height / 2 - 32), ToolAppearance.Ink);
         }
         private void DrawHandle(Graphics g, float x, float y, bool start)
         {

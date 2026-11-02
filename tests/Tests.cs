@@ -61,6 +61,7 @@ namespace ShotInk
                 Run("mosaic rectangles remain editable with independent undo", TestEditableMosaic);
                 Run("point-click polylines complete, cancel and undo as one annotation", TestPolylines);
                 Run("application icon contains the supplied pen and colorful corners in transparent multi-size images", TestApplicationIcon);
+                Run("toolbar corners and color circles have soft edges without losing their fill", TestToolRendering);
                 Run("undo and redo restore additions and annotation erasing", TestUndoRedoErase);
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
@@ -326,6 +327,35 @@ namespace ShotInk
             }
             finally { Directory.Delete(root, true); }
         }
+        private static void TestToolRendering()
+        {
+            using (var host = new Form { BackColor = Color.FromArgb(40, 50, 70), ClientSize = new Size(700, 250) })
+            using (var toolbar = new CaptureToolbar { Location = new Point(20, 20) })
+            {
+                host.Controls.Add(toolbar); host.Show(); Application.DoEvents();
+                using (var bitmap = new Bitmap(toolbar.Width, toolbar.Height))
+                {
+                    toolbar.DrawToBitmap(bitmap, toolbar.ClientRectangle);
+                    Assert(bitmap.GetPixel(0, 0).ToArgb() == host.BackColor.ToArgb(), "Toolbar corner was cut out or painted as a white square.");
+                    var blends = new System.Collections.Generic.HashSet<int>();
+                    for (int y = 0; y < 6; y++) for (int x = 0; x < 11; x++)
+                    { var color = bitmap.GetPixel(x, y); if (color.R > 40 && color.R < 225) blends.Add(color.ToArgb()); }
+                    Assert(blends.Count >= 6, "Toolbar corner did not retain graduated edge coverage.");
+                }
+                using (var swatch = new ToolOptionButton { Size = new Size(24, 26), IsSwatch = true, BackColor = Color.Red, Selected = true })
+                using (var panel = new Panel { BackColor = Color.White })
+                using (var bitmap = new Bitmap(24, 26))
+                {
+                    panel.Controls.Add(swatch); swatch.DrawToBitmap(bitmap, swatch.ClientRectangle);
+                    Assert(bitmap.GetPixel(12, 13).R > 240 && bitmap.GetPixel(12, 13).G < 10, "Smoothing changed the swatch's center color.");
+                    var blends = new System.Collections.Generic.HashSet<int>();
+                    for (int y = 3; y < 23; y++) for (int x = 2; x < 22; x++)
+                    { var color = bitmap.GetPixel(x, y); if (color.R > color.G + 30 && color.G > 0 && color.G < 220) blends.Add(color.ToArgb()); }
+                    Assert(blends.Count >= 8, "Color circle had no graduated edge pixels.");
+                }
+                host.Close();
+            }
+        }
         private static GifClip GifFixture()
         {
             var clip = new GifClip { Duration = 400 }; int index = 0;
@@ -364,6 +394,7 @@ namespace ShotInk
             using (var editor = new GifEditorForm(GifFixture(), new AppSettings()))
             {
                 editor.Show(); Application.DoEvents(); var range = Field<GifRangeSlider>(editor, "range");
+                Assert(Field<Label>(editor, "status").Text == "" && !Field<Label>(editor, "status").Visible, "GIF editor retained the redundant drag instruction.");
                 Field<PictureBox>(editor, "preview").Focus(); GifKey(editor, Keys.Right);
                 Assert(Field<PictureBox>(editor, "preview").Focused && Field<int>(editor, "frameIndex") == 1 && range.First == 0 && range.Last == 2, "Right arrow did not seek exactly one frame without trimming.");
                 GifKey(editor, Keys.Left); Assert(Field<int>(editor, "frameIndex") == 0, "Left arrow did not seek exactly one frame.");
@@ -409,7 +440,7 @@ namespace ShotInk
                     overlay.Show(); Select(overlay); var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); var selection = Field<Rectangle>(overlay, "selection");
                     var strip = Field<ToolStrip>(toolbar, "strip"); var gif = Field<ToolStripButton>(toolbar, "gif");
                     Assert(strip.Items.IndexOf(gif) == strip.Items.IndexOf(Field<ToolStripButton>(toolbar, "scroll")) + 1, "GIF button was not after long capture.");
-                    Assert(toolbar.Height == 30 && !toolbar.Region.IsVisible(0, 0), "Toolbar was not compact and rounded.");
+                    Assert(toolbar.Height == 30, "Toolbar was not compact.");
                     var grip = Field<Control>(toolbar, "dragGrip"); var before = toolbar.Location;
                     Mouse(grip, "OnMouseDown", MouseButtons.Left, 4, 4);
                     Cursor.Position = new Point(cursor.X + 30, cursor.Y - 50); Mouse(grip, "OnMouseMove", MouseButtons.Left, 30, 0); Mouse(grip, "OnMouseUp", MouseButtons.Left, 30, 0);

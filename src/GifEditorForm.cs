@@ -42,7 +42,7 @@ namespace ShotInk
             range.RangeChanged += TrimChanged;
             var hint = new Label { Text = "预览区 ← / → 逐帧查看；点击起点或终点手柄后，← / → 每次调整一帧。", ForeColor = Color.DimGray, Dock = DockStyle.Fill };
             layout.Controls.Add(hint, 0, 3); layout.SetColumnSpan(hint, 2);
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill };
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             play = new Button { Name = "gif-play", Text = "播放选段", Width = 104, Height = 32 };
             copy = new Button { Name = "gif-copy", Text = "复制 GIF", Width = 104, Height = 32 };
             save = new Button { Name = "gif-save", Text = "保存 GIF", Width = 104, Height = 32 };
@@ -50,8 +50,9 @@ namespace ShotInk
             copy.Click += async delegate { await ExportAsync(true); }; save.Click += async delegate { await ExportAsync(false); };
             buttons.Controls.Add(play); buttons.Controls.Add(copy); buttons.Controls.Add(save);
             layout.Controls.Add(buttons, 0, 4); layout.SetColumnSpan(buttons, 2);
-            status = new Label { Dock = DockStyle.Fill, ForeColor = Color.DimGray, Text = clip.LimitReached ? "已达到录制上限，已保留内容；拖动滑块选择需要的区段。" : "拖动起点和终点滑块，选择需要的区段。" };
+            status = new Label { Dock = DockStyle.Fill, ForeColor = Color.DimGray, Visible = false };
             layout.Controls.Add(status, 0, 5); layout.SetColumnSpan(status, 2); Controls.Add(layout);
+            SetStatus(clip.LimitReached ? "已达到录制上限，已保留内容。" : "");
             playback = new System.Windows.Forms.Timer { Interval = 100 };
             playback.Tick += delegate { ShowFrame(frameIndex >= range.Last ? range.First : frameIndex + 1); playback.Interval = FrameDelay(frameIndex); };
             ShowFrame(0);
@@ -83,11 +84,16 @@ namespace ShotInk
         }
         private async void CopyFromKey() { await ExportAsync(true); }
         private async void SaveFromKey() { await ExportAsync(false); }
+        private void SetStatus(string message)
+        {
+            status.Text = message; status.Visible = message.Length > 0;
+            ((TableLayoutPanel)status.Parent).RowStyles[5].Height = message.Length > 0 ? 22 : 0;
+        }
         private async Task ExportAsync(bool copying)
         {
             if (busy) return;
             Pause(); busy = true; range.Enabled = play.Enabled = copy.Enabled = save.Enabled = false;
-            int first = range.First, last = range.Last; status.Text = "正在生成 GIF…";
+            int first = range.First, last = range.Last; SetStatus("正在生成 GIF…");
             try
             {
                 if (encoded == null || cachedFirst != first || cachedLast != last)
@@ -100,11 +106,11 @@ namespace ShotInk
                 {
                     string path = GifExport.WriteNew(encoded, GifExport.CacheDirectory);
                     Clipboard.SetDataObject(GifExport.ClipboardData(encoded, path), true, 5, 100);
-                    status.Text = "GIF 已复制，可粘贴到支持动图文件的应用。";
+                    SetStatus("GIF 已复制，可粘贴到支持动图文件的应用。");
                 }
-                else status.Text = GifExport.Save(this, encoded, settings) ? "GIF 已保存。" : "已取消保存。";
+                else SetStatus(GifExport.Save(this, encoded, settings) ? "GIF 已保存。" : "已取消保存。");
             }
-            catch (Exception error) { if (!IsDisposed) status.Text = "未完成：" + error.Message; }
+            catch (Exception error) { if (!IsDisposed) SetStatus("未完成：" + error.Message); }
             finally { if (!IsDisposed) { busy = false; range.Enabled = play.Enabled = copy.Enabled = save.Enabled = true; } }
         }
         protected override void Dispose(bool disposing)

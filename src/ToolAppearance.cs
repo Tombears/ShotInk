@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Windows.Forms;
 
 namespace ShotInk
@@ -12,6 +13,37 @@ namespace ShotInk
         internal static readonly Color Border = Color.FromArgb(226, 230, 237);
         internal static readonly Font Font = new Font("Microsoft YaHei UI", 9F);
         internal static readonly Font HeadingFont = new Font(Font, FontStyle.Bold);
+        internal static Bitmap RenderSmooth(Size size, Action<Graphics> paint)
+        {
+            const int scale = 3;
+            using (var large = new Bitmap(size.Width * scale, size.Height * scale, PixelFormat.Format32bppPArgb))
+            {
+                using (var graphics = Graphics.FromImage(large))
+                {
+                    graphics.Clear(Color.Transparent); graphics.ScaleTransform(scale, scale);
+                    graphics.SmoothingMode = SmoothingMode.HighQuality;
+                    graphics.CompositingQuality = CompositingQuality.HighQuality;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    paint(graphics);
+                }
+                var image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+                using (var graphics = Graphics.FromImage(image))
+                using (var attributes = new ImageAttributes())
+                {
+                    graphics.CompositingMode = CompositingMode.SourceCopy;
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    attributes.SetWrapMode(WrapMode.TileFlipXY);
+                    graphics.DrawImage(large, new Rectangle(Point.Empty, size), 0, 0, large.Width, large.Height, GraphicsUnit.Pixel, attributes);
+                }
+                return image;
+            }
+        }
+        internal static void DrawSmooth(Graphics target, Size size, Action<Graphics> paint)
+        {
+            if (size.Width < 1 || size.Height < 1) return;
+            using (var image = RenderSmooth(size, paint)) target.DrawImageUnscaled(image, Point.Empty);
+        }
 
         internal static Color Accent(DrawTool tool)
         {
@@ -77,8 +109,11 @@ namespace ShotInk
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hovering = false; Invalidate(); }
         protected override void OnPaint(PaintEventArgs e)
         {
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Parent == null ? Color.White : Parent.BackColor);
+            var background = Parent == null ? Color.White : Parent.BackColor;
+            if (background.A == 0) background = Color.White;
+            e.Graphics.Clear(background);
+            ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
+            {
             if (IsSwatch)
             {
                 var circle = new RectangleF(Width / 2F - 7, Height / 2F - 7, 14, 14);
@@ -97,11 +132,13 @@ namespace ShotInk
                 using (var fill = new SolidBrush(Selected ? ToolAppearance.Tint(accent, 0.90F) : hovering ? Color.FromArgb(246, 248, 251) : Color.White))
                 using (var border = new Pen(Selected ? accent : ToolAppearance.Border))
                 { g.FillPath(fill, path); g.DrawPath(border, path); }
-                TextRenderer.DrawText(g, Text, Font, ClientRectangle, !Enabled ? SystemColors.GrayText : Selected ? accent : ToolAppearance.Ink,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             }
+            });
+            if (!IsSwatch)
+                TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, !Enabled ? SystemColors.GrayText : Selected ? AccentColor : ToolAppearance.Ink,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             if (Focused && ShowFocusCues)
-            { var focus = ClientRectangle; focus.Inflate(-4, -4); ControlPaint.DrawFocusRectangle(g, focus); }
+            { var focus = ClientRectangle; focus.Inflate(-4, -4); ControlPaint.DrawFocusRectangle(e.Graphics, focus); }
         }
     }
 }
