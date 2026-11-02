@@ -31,6 +31,9 @@ namespace ShotInk
         internal Keys CaptureShortcut = Keys.F1;
         internal Keys PinShortcut = Keys.F3;
         internal Keys ScrollShortcut = Keys.Control | Keys.Alt | Keys.L;
+        internal string LoadWarning { get; private set; }
+        internal bool CanSave { get { return !loadFailed; } }
+        private bool loadFailed, recoveredFromBackup;
         private readonly Dictionary<DrawTool, ToolPreferences> tools = new Dictionary<DrawTool, ToolPreferences>();
         internal event Action Changed;
         internal ToolPreferences Tool(DrawTool tool)
@@ -47,23 +50,49 @@ namespace ShotInk
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
             StartWithWindows = other.StartWithWindows;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
+            LoadWarning = other.LoadWarning; loadFailed = other.loadFailed; recoveredFromBackup = other.recoveredFromBackup;
             tools.Clear(); foreach (var item in other.tools) tools.Add(item.Key, item.Value.Clone());
         }
         internal static AppSettings Load(string path)
         {
-            var settings = new AppSettings();
+            AppSettings settings; string failure;
+            if (TryLoad(path, out settings, out failure)) return settings;
+            string backupFailure;
+            if (TryLoad(path + ".bak", out settings, out backupFailure))
+            {
+                settings.recoveredFromBackup = true;
+                settings.LoadWarning = "原设置无法读取，已从上次保存的备份恢复。";
+                return settings;
+            }
+            settings = new AppSettings();
+            if (failure != null || backupFailure != null)
+            {
+                settings.loadFailed = true;
+                settings.LoadWarning = "设置读取失败，已暂停保存以保护原设置。请恢复设置文件后重新启动。原因：" + (failure ?? backupFailure);
+            }
+            return settings;
+        }
+        private static bool TryLoad(string path, out AppSettings settings, out string failure)
+        {
+            settings = new AppSettings(); failure = null;
             try
             {
-                if (!File.Exists(path)) return settings;
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
+                var knownKeys = new[] { "save", "history-limit", "ask-save-location", "start-with-windows", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll" };
+                if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidDataException("设置文件为空或内容无效。");
                 string value;
                 if (values.TryGetValue("save", out value)) settings.AutoHistory = value != "0";
                 settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
                 if (values.TryGetValue("ask-save-location", out value)) settings.AskSaveLocation = value != "0";
                 if (values.TryGetValue("start-with-windows", out value)) settings.StartWithWindows = value == "1";
-                if (values.TryGetValue("save-directory", out value) && AbsolutePath(value)) settings.SaveDirectory = value;
+                if (values.TryGetValue("save-directory", out value))
+                {
+                    if (!AbsolutePath(value)) throw new InvalidDataException("保存文件夹配置无效。");
+                    Path.GetFullPath(value); settings.SaveDirectory = value;
+                }
                 settings.CaptureShortcut = ReadShortcut(values, "hotkey-capture", settings.CaptureShortcut);
                 settings.PinShortcut = ReadShortcut(values, "hotkey-pin", settings.PinShortcut);
                 settings.ScrollShortcut = ReadShortcut(values, "hotkey-scroll", settings.ScrollShortcut);
@@ -82,11 +111,15 @@ namespace ShotInk
                     style.MosaicEffect = (MosaicEffect)(int)ReadNumber(values, prefix + "mosaic-effect", 0, 1, 0);
                     style.BlurRadius = (int)ReadNumber(values, prefix + "blur-radius", 1, 24, style.BlurRadius);
                 }
+                return true;
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            catch (ArgumentException) { }
-            return settings;
+            catch (FileNotFoundException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+            catch (InvalidDataException error) { failure = error.Message; }
+            catch (IOException error) { failure = error.Message; }
+            catch (UnauthorizedAccessException error) { failure = error.Message; }
+            catch (ArgumentException error) { failure = error.Message; }
+            return false;
         }
         private static Keys ReadShortcut(Dictionary<string, string> values, string name, Keys fallback)
         { string value; int number; return values.TryGetValue(name, out value) && int.TryParse(value, out number) && Shortcut.Valid((Keys)number) ? (Keys)number : fallback; }
@@ -105,6 +138,7 @@ namespace ShotInk
         { return !string.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path) && !(path.Length >= 2 && path[1] == ':' && (path.Length < 3 || path[2] != '\\' && path[2] != '/')); }
         internal void Save(string path)
         {
+            if (loadFailed) throw new IOException(LoadWarning);
             Validate(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
@@ -121,7 +155,8 @@ namespace ShotInk
             try
             {
                 File.WriteAllLines(temporary, lines, new System.Text.UTF8Encoding(false));
-                if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
+                if (File.Exists(path)) File.Replace(temporary, path, recoveredFromBackup ? null : path + ".bak"); else File.Move(temporary, path);
+                recoveredFromBackup = false; LoadWarning = null;
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }

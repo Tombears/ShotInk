@@ -124,12 +124,16 @@ namespace ShotInk
             LoadHistory();
             if (desktopIntegration) SetupTray();
             RefreshShortcutLabels();
+            if (settings.LoadWarning != null) notice.Text = settings.LoadWarning;
         }
 
         internal static string ResolveDataRoot(string localApplicationData)
         {
             var current = Path.Combine(localApplicationData, "ShotInk");
             var legacy = Path.Combine(localApplicationData, "SnipasteLite");
+            // An empty directory must not hide an existing profile on update.
+            if (File.Exists(Path.Combine(current, "settings.ini")) || File.Exists(Path.Combine(current, "settings.ini.bak"))) return current;
+            if (File.Exists(Path.Combine(legacy, "settings.ini")) || File.Exists(Path.Combine(legacy, "settings.ini.bak"))) return legacy;
             // Reuse existing history and settings when upgrading from the previous name.
             return !Directory.Exists(current) && Directory.Exists(legacy) ? legacy : current;
         }
@@ -137,6 +141,7 @@ namespace ShotInk
         private void PersistSettings()
         {
             if (!settingsDirty) return;
+            if (!settings.CanSave) { if (notice != null) notice.Text = settings.LoadWarning; return; }
             try { settings.Save(SettingsPath); settingsDirty = false; }
             catch (Exception ex) { if (notice != null) notice.Text = "设置保存失败：" + ex.Message; }
         }
@@ -159,6 +164,7 @@ namespace ShotInk
         }
         internal string ApplySettings(AppSettings candidate)
         {
+            if (!settings.CanSave) return settings.LoadWarning;
             try { candidate.Validate(); } catch (Exception ex) { return ex.Message; }
             Action persist = delegate
             {
@@ -230,6 +236,7 @@ namespace ShotInk
         private void UpdateHotkeyNotice(string conflicts)
         {
             if (notice == null) return;
+            if (!settings.CanSave) { notice.Text = settings.LoadWarning; return; }
             if (conflicts.Length > 0)
             {
                 hotkeyWarning = conflicts + " 已被占用，将自动重试；可在设置中查看状态或修改。";

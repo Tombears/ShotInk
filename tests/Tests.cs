@@ -66,6 +66,8 @@ namespace ShotInk
                 Run("tool buttons immediately activate defaults and expose independent settings", TestToolOptions);
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
+                Run("settings survive profile selection, restart and damaged or locked configuration", TestSettingsRecovery);
+                Run("pinned images detect edges and resize proportionally while preserving original pixels", TestPinResize);
                 Run("settings refresh shortcut conflicts without saving or leaking probe registrations", TestShortcutStatus);
                 Run("released shortcut conflicts recover automatically without unregistering healthy bindings", TestHotkeyRecovery);
                 Run("startup registration handles quoted paths, disabling and save rollback without touching real startup entries", TestStartupRegistration);
@@ -147,7 +149,9 @@ namespace ShotInk
                 }
                 Assert(File.ReadAllText(settings) == "save=0", "Opening the app changed the saved preference.");
                 Directory.CreateDirectory(current);
-                Assert(MainForm.ResolveDataRoot(root) == current, "An existing ShotInk directory was ignored.");
+                Assert(MainForm.ResolveDataRoot(root) == legacy, "An empty ShotInk directory hid the legacy settings.");
+                File.WriteAllText(Path.Combine(current, "settings.ini"), "save=1");
+                Assert(MainForm.ResolveDataRoot(root) == current, "An existing ShotInk settings file was ignored.");
             }
             finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
@@ -176,6 +180,99 @@ namespace ShotInk
                     next.ShowTool(DrawTool.Pen); Assert(next.Stroke == 8 && next.Ink == Color.Blue, "A new editor lost the shared preferences.");
                 }
             }
+        }
+        private static void PinDrag(PinForm pin, Point localStart, Point delta)
+        {
+            Point target = pin.PointToScreen(localStart); target.Offset(delta);
+            Mouse(pin, "OnMouseDown", MouseButtons.Left, localStart.X, localStart.Y);
+            Point move = pin.PointToClient(target); Mouse(pin, "OnMouseMove", MouseButtons.Left, move.X, move.Y);
+            Point release = pin.PointToClient(target); Mouse(pin, "OnMouseUp", MouseButtons.Left, release.X, release.Y);
+        }
+        private static void TestPinResize()
+        {
+            var original = Pattern(200, 100, 709); int originalPixel = original.GetPixel(30, 20).ToArgb();
+            using (var pin = new PinForm(original) { StartPosition = FormStartPosition.Manual, Location = new Point(200, 160) })
+            {
+                pin.Show(); Application.DoEvents();
+                foreach (var entry in new[] {
+                    new { Point = new Point(0, 50), Cursor = Cursors.SizeWE }, new { Point = new Point(199, 50), Cursor = Cursors.SizeWE },
+                    new { Point = new Point(100, 0), Cursor = Cursors.SizeNS }, new { Point = new Point(100, 99), Cursor = Cursors.SizeNS },
+                    new { Point = new Point(0, 0), Cursor = Cursors.SizeNWSE }, new { Point = new Point(199, 99), Cursor = Cursors.SizeNWSE },
+                    new { Point = new Point(199, 0), Cursor = Cursors.SizeNESW }, new { Point = new Point(0, 99), Cursor = Cursors.SizeNESW } })
+                { Mouse(pin, "OnMouseMove", MouseButtons.None, entry.Point.X, entry.Point.Y); Assert(pin.Cursor == entry.Cursor, "Pin edge/corner cursor was incorrect at " + entry.Point); }
+                Rectangle before = pin.Bounds;
+                PinDrag(pin, new Point(100, 50), new Point(25, 20));
+                Assert(pin.Size == before.Size && pin.Location == new Point(before.Left + 25, before.Top + 20), "Dragging the pin center resized it instead of moving it.");
+                before = pin.Bounds; PinDrag(pin, new Point(199, 50), new Point(100, 0));
+                Assert(pin.Width == 300 && pin.Height == 150 && pin.Left == before.Left, "Right-edge resize stretched the image or moved its anchored edge.");
+                pin.ContextMenuStrip.Items[1].PerformClick(); before = pin.Bounds;
+                PinDrag(pin, new Point(0, 50), new Point(-80, 0));
+                Assert(pin.Width == 280 && pin.Height == 140 && pin.Right == before.Right, "Left-edge resize did not anchor the opposite side.");
+                pin.ContextMenuStrip.Items[1].PerformClick(); before = pin.Bounds;
+                PinDrag(pin, new Point(100, 0), new Point(0, -50));
+                Assert(pin.Width == 300 && pin.Height == 150 && pin.Bottom == before.Bottom, "Top-edge resize did not preserve aspect ratio and bottom anchor.");
+                pin.ContextMenuStrip.Items[1].PerformClick(); before = pin.Bounds;
+                PinDrag(pin, new Point(0, 0), new Point(-60, -30));
+                Assert(pin.Width == 260 && pin.Height == 130 && pin.Right == before.Right && pin.Bottom == before.Bottom, "Corner resize moved its opposite corner or changed aspect ratio.");
+                before = pin.Bounds;
+                Mouse(pin, "OnMouseDown", MouseButtons.Left, pin.Width - 1, 50); pin.Capture = false;
+                Mouse(pin, "OnMouseMove", MouseButtons.None, pin.Width + 100, 50);
+                Assert(pin.Bounds == before, "Losing mouse capture left resizing active.");
+                MouseWheel(pin, -120); Assert(pin.Width < before.Width && Math.Abs(pin.Width - pin.Height * 2) <= 1, "Wheel zoom no longer preserved the image ratio.");
+                pin.ContextMenuStrip.Items[1].PerformClick();
+                Assert(pin.ClientSize == original.Size && Field<Bitmap>(pin, "image").GetPixel(30, 20).ToArgb() == originalPixel, "Scaling changed original pixels or broke Original Size.");
+                Mouse(pin, "OnMouseMove", MouseButtons.None, 0, 0);
+                using (var preview = new Bitmap(pin.Width, pin.Height)) { pin.DrawToBitmap(preview, pin.ClientRectangle); preview.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-pin-resize-options.png")); }
+                pin.Close();
+            }
+        }
+        private static void TestSettingsRecovery()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-settings-recovery-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "settings.ini");
+            var original = new AppSettings { SaveDirectory = Path.Combine(root, "自定义图片"), AskSaveLocation = false, CaptureShortcut = Keys.Control | Keys.Q };
+            try
+            {
+                original.Save(path);
+                using (var home = new MainForm(root, false))
+                {
+                    Assert(Field<AppSettings>(home, "settings").SaveDirectory == original.SaveDirectory, "Cold start changed the saved folder.");
+                }
+                using (var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    var blocked = AppSettings.Load(path);
+                    Assert(!blocked.CanSave && blocked.LoadWarning != null, "A read failure silently accepted default settings.");
+                    bool rejected = false; try { blocked.Clone().Save(path); } catch (IOException) { rejected = true; }
+                    Assert(rejected && !File.Exists(path + ".new"), "Unread defaults were allowed to replace a locked configuration.");
+                    using (var home = new MainForm(root, false))
+                    {
+                        Field<AppSettings>(home, "settings").NotifyChanged();
+                        typeof(MainForm).GetMethod("PersistSettings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, null);
+                        Assert(Field<Label>(home, "notice").Text.Contains("保护原设置"), "Load failure was not shown or did not block autosave.");
+                    }
+                }
+                Assert(AppSettings.Load(path).SaveDirectory == original.SaveDirectory, "A failed read overwrote the original folder.");
+                var next = AppSettings.Load(path); next.SaveDirectory = Path.Combine(root, "新图片"); next.Save(path);
+                Assert(AppSettings.Load(path + ".bak").SaveDirectory == original.SaveDirectory, "Saving did not retain the last good configuration.");
+                File.WriteAllText(path, "save-directory=invalid-relative-path");
+                var recovered = AppSettings.Load(path);
+                Assert(recovered.CanSave && recovered.LoadWarning != null && recovered.SaveDirectory == original.SaveDirectory && !recovered.AskSaveLocation,
+                    "Corrupt settings did not recover all preferences from backup.");
+                recovered.Save(path);
+                Assert(AppSettings.Load(path).SaveDirectory == original.SaveDirectory && AppSettings.Load(path + ".bak").SaveDirectory == original.SaveDirectory,
+                    "Recovery replaced the backup with corrupt settings.");
+                File.Delete(path);
+                Assert(AppSettings.Load(path).SaveDirectory == original.SaveDirectory, "Missing settings did not recover the backup.");
+                string profiles = Path.Combine(root, "profiles"), legacy = Path.Combine(profiles, "SnipasteLite"), current = Path.Combine(profiles, "ShotInk");
+                Directory.CreateDirectory(legacy); Directory.CreateDirectory(current);
+                original.Save(Path.Combine(legacy, "settings.ini"));
+                Assert(MainForm.ResolveDataRoot(profiles) == legacy && AppSettings.Load(Path.Combine(MainForm.ResolveDataRoot(profiles), "settings.ini")).SaveDirectory == original.SaveDirectory,
+                    "Update selected an empty profile instead of the user's preferences.");
+                File.Move(Path.Combine(legacy, "settings.ini"), Path.Combine(legacy, "settings.ini.bak"));
+                Assert(MainForm.ResolveDataRoot(profiles) == legacy, "Profile selection ignored a recoverable backup.");
+            }
+            finally { Directory.Delete(root, true); }
         }
         private static void TestSettings()
         {
