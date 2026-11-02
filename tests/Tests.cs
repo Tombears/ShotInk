@@ -243,6 +243,13 @@ namespace ShotInk
                     using (var image = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-update-options.png")); }
                     form.Close();
                 }
+                int verifiedChecks = 0;
+                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info,
+                    delegate { throw new VerificationRequiredException(); }, delegate { verifiedChecks++; return System.Threading.Tasks.Task.FromResult(info); }))
+                {
+                    form.Show(); Application.DoEvents();
+                    Assert(verifiedChecks == 1 && Field<Button>(form, "action").Enabled, "Update details could not continue after a metadata verification challenge."); form.Close();
+                }
                 bool automatic = true; int requests = 0, details = 0;
                 using (var controller = new UpdateController(delegate { return automatic; }, "1.0.0", "",
                     delegate { requests++; return System.Threading.Tasks.Task.FromResult(info); }))
