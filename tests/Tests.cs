@@ -18,6 +18,8 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--update-tests")
+                { Run("Gitee updates validate Windows ZIP paths and reject traversal", TestUpdates); return 0; }
                 if (args.Length == 1 && args[0] == "--verification-tests")
                 { Run("Gitee verification retains browser cookies, resumes downloads and cancels safely", TestGiteeBrowser); return 0; }
                 if (args.Length == 2 && args[0] == "--update-live")
@@ -205,7 +207,8 @@ namespace ShotInk
                     AddUpdateEntry(zip, "ShotInk.exe", File.ReadAllBytes(System.Reflection.Assembly.GetExecutingAssembly().Location));
                     AddUpdateEntry(zip, "ShotInk.build.sha256", System.Text.Encoding.UTF8.GetBytes(revision));
                     AddUpdateEntry(zip, "update-portable.ps1", System.Text.Encoding.UTF8.GetBytes("test helper"));
-                    AddUpdateEntry(zip, "ocr/ShotInk.OcrHost.exe", new byte[] { 1, 2, 3 });
+                    AddUpdateEntry(zip, "ocr\\ShotInk.OcrHost.exe", new byte[] { 1, 2, 3 });
+                    zip.CreateEntry("docs\\");
                     foreach (string name in new[] { "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll" }) AddUpdateEntry(zip, name, new byte[] { 1, 2, 3 });
                 }
                 var info = new UpdateInfo { Version = Application.ProductVersion, Revision = revision, Sha256 = UpdateService.Digest(zipPath), Size = new FileInfo(zipPath).Length,
@@ -227,7 +230,7 @@ namespace ShotInk
                 string digest = info.Sha256; info.Sha256 = new string('0', 64);
                 bool badHash = false; try { UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "bad-hash"), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { badHash = true; }
                 Assert(badHash, "Corrupted package hash was accepted."); info.Sha256 = digest;
-                foreach (string invalidEntry in new[] { "../escape.txt", "settings.ini", "captures/history.png", "ocr/../ShotInk.exe" })
+                foreach (string invalidEntry in new[] { "../escape.txt", "settings.ini", "captures/history.png", "ocr/../ShotInk.exe", "ocr\\..\\ShotInk.exe", "ocr\\..\\..\\escape.txt" })
                 {
                     string malicious = Path.Combine(root, Guid.NewGuid().ToString("N") + ".zip");
                     using (var zip = System.IO.Compression.ZipFile.Open(malicious, System.IO.Compression.ZipArchiveMode.Create)) AddUpdateEntry(zip, invalidEntry, new byte[] { 1 });

@@ -11,6 +11,7 @@ namespace ShotInk
             try
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(true);
+                if (args.Length > 1) CheckUpdateArchive(args[1]);
                 using (var recognizer = new RapidTextRecognizer())
                 using (var image = new Bitmap(args[0]))
                 {
@@ -61,6 +62,26 @@ namespace ShotInk
                 return 0;
             }
             catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+        }
+        private static void CheckUpdateArchive(string archive)
+        {
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ShotInk-package-stage-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var info = new UpdateInfo
+                {
+                    Version = System.Windows.Forms.Application.ProductVersion,
+                    Revision = UpdateService.InstalledRevision(AppDomain.CurrentDomain.BaseDirectory),
+                    Sha256 = UpdateService.Digest(archive), Size = new System.IO.FileInfo(archive).Length,
+                    Url = "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v" + System.Windows.Forms.Application.ProductVersion + "/ShotInk-portable.zip"
+                };
+                var prepared = UpdateService.Prepare(archive, info, System.IO.Path.Combine(root, "target"), System.IO.Path.Combine(root, "stage"), int.MaxValue, CancellationToken.None);
+                var plan = UpdateService.ReadJson<UpdatePlan>(System.IO.File.ReadAllBytes(prepared.PlanPath));
+                if (plan.Files.Length < 7) throw new Exception("Actual portable ZIP lost its update components.");
+                foreach (var file in plan.Files) if (file.Path.Contains("\\")) throw new Exception("Update staging did not normalize ZIP separators.");
+                Console.WriteLine("PASS: actual portable ZIP stages through the updater with all required components");
+            }
+            finally { if (System.IO.Directory.Exists(root)) System.IO.Directory.Delete(root, true); }
         }
     }
 }

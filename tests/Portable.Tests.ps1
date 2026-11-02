@@ -28,7 +28,7 @@ try {
     $probe = Join-Path $fixture 'ShotInk.PackageTests.exe'
     & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @sources (Join-Path $PSScriptRoot 'Installed.Tests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Packaged OCR probe compilation failed.' }
-    & $probe (Join-Path $PSScriptRoot 'fixtures\ocr-mixed.png')
+    & $probe (Join-Path $PSScriptRoot 'fixtures\ocr-mixed.png') $archive
     if ($LASTEXITCODE -ne 0) { throw 'Extracted ZIP cannot find or run its bundled OCR environment.' }
     if (-not (Get-Process -Name ShotInk -ErrorAction SilentlyContinue)) {
         $application = Start-Process -FilePath (Join-Path $fixture 'ShotInk.exe') -WorkingDirectory $fixture -WindowStyle Hidden -PassThru

@@ -172,7 +172,7 @@ namespace ShotInk
             var files = new List<UpdateFile>(); var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); long expanded = 0;
             using (var zip = ZipFile.OpenRead(archive)) foreach (var entry in zip.Entries)
             {
-                token.ThrowIfCancellationRequested(); string name = entry.FullName; string destination = SafePath(payload, name);
+                token.ThrowIfCancellationRequested(); string name = entry.FullName.Replace('\\', '/'); string destination = SafePath(payload, name);
                 if ((entry.ExternalAttributes & 0xF0000000) == 0xA0000000) throw new InvalidDataException("更新包不能包含符号链接。");
                 if (name.EndsWith("/", StringComparison.Ordinal)) continue;
                 if (!names.Add(name) || names.Count > 6000 || (expanded += entry.Length) > 1536L * 1024 * 1024) throw new InvalidDataException("更新包内容异常。");
