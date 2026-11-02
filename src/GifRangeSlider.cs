@@ -21,6 +21,11 @@ namespace ShotInk
             TabStop = true; AccessibleName = "GIF 起点与终点区段"; Cursor = Cursors.Hand; BackColor = Color.White;
         }
         internal void SelectBoundary(bool start) { EditingStart = start; Focus(); Invalidate(); }
+        internal void Reset(int maximum)
+        {
+            if (maximum < 0) throw new ArgumentOutOfRangeException("maximum");
+            dragging = false; Capture = false; Maximum = maximum; EditingStart = true; SetRange(0, maximum);
+        }
         internal void SetRange(int start, int end)
         {
             if (start < 0 || end < start || end > Maximum) throw new ArgumentOutOfRangeException("start");

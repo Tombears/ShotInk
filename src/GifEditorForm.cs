@@ -13,7 +13,7 @@ namespace ShotInk
         private readonly PictureBox preview;
         private readonly GifRangeSlider range;
         private readonly Label position, status;
-        private readonly Button play, copy, save;
+        private readonly Button play, copy, save, delete;
         private readonly System.Windows.Forms.Timer playback;
         private readonly CancellationTokenSource generation = new CancellationTokenSource();
         private int frameIndex;
@@ -44,11 +44,13 @@ namespace ShotInk
             layout.Controls.Add(hint, 0, 3); layout.SetColumnSpan(hint, 2);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             play = new Button { Name = "gif-play", Text = "播放选段", Width = 104, Height = 32 };
+            delete = new Button { Name = "gif-delete", Text = "删除选中", Width = 104, Height = 32, ForeColor = Color.Firebrick };
             copy = new Button { Name = "gif-copy", Text = "复制 GIF", Width = 104, Height = 32 };
             save = new Button { Name = "gif-save", Text = "保存 GIF", Width = 104, Height = 32 };
             play.Click += delegate { if (playback.Enabled) Pause(); else { ShowFrame(range.First); play.Text = "暂停"; playback.Interval = FrameDelay(frameIndex); playback.Start(); } };
             copy.Click += async delegate { await ExportAsync(true); }; save.Click += async delegate { await ExportAsync(false); };
-            buttons.Controls.Add(play); buttons.Controls.Add(copy); buttons.Controls.Add(save);
+            delete.Click += delegate { DeleteSelected(); };
+            buttons.Controls.Add(play); buttons.Controls.Add(delete); buttons.Controls.Add(copy); buttons.Controls.Add(save);
             layout.Controls.Add(buttons, 0, 4); layout.SetColumnSpan(buttons, 2);
             status = new Label { Dock = DockStyle.Fill, ForeColor = Color.DimGray, Visible = false };
             layout.Controls.Add(status, 0, 5); layout.SetColumnSpan(status, 2); Controls.Add(layout);
@@ -60,8 +62,23 @@ namespace ShotInk
         private int FrameDelay(int index) { return Math.Max(20, clip.EndTime(index) - clip.Frames[index].Time); }
         private void Pause() { playback.Stop(); play.Text = "播放选段"; }
         private void TrimChanged(int index) { Pause(); encoded = null; ShowFrame(index); }
+        private void DeleteSelected()
+        {
+            if (busy || clip.Frames.Count == 0) return;
+            Pause(); int count = range.Last - range.First + 1;
+            clip.DeleteRange(range.First, range.Last); encoded = null; cachedFirst = cachedLast = -1;
+            range.Reset(Math.Max(0, clip.Frames.Count - 1)); EnableEditing(true);
+            SetStatus("已删除 " + count + " 帧。" + (clip.Frames.Count == 0 ? "暂无可用帧。" : "起点和终点已复位。")); preview.Focus();
+        }
+        private void EnableEditing(bool enabled)
+        { range.Enabled = play.Enabled = copy.Enabled = save.Enabled = delete.Enabled = enabled && clip.Frames.Count > 0; }
         private void ShowFrame(int index)
         {
+            if (clip.Frames.Count == 0)
+            {
+                var oldImage = preview.Image; preview.Image = null; if (oldImage != null) oldImage.Dispose();
+                frameIndex = 0; position.Text = "暂无帧"; return;
+            }
             var image = clip.Frames[index].Decode(); var previous = preview.Image; preview.Image = image; if (previous != null) previous.Dispose(); frameIndex = index;
             position.Text = string.Format("第 {0} / {1} 帧 · 当前 {2:0.00}s · 选段 {3:0.00}s — {4:0.00}s · 共 {5} 帧", index + 1, clip.Frames.Count,
                 clip.Frames[index].Time / 1000.0, clip.Frames[range.First].Time / 1000.0, clip.EndTime(range.Last) / 1000.0, range.Last - range.First + 1);
@@ -73,7 +90,7 @@ namespace ShotInk
             if (keyData == Keys.Escape) { Close(); return true; }
             if (keyData == Keys.Left || keyData == Keys.Right)
             {
-                if (busy) return true;
+                if (busy || clip.Frames.Count == 0) return true;
                 Pause(); int delta = keyData == Keys.Left ? -1 : 1;
                 if (range.Focused) range.AdjustBoundary(delta);
                 else ShowFrame(Math.Max(range.First, Math.Min(range.Last, frameIndex + delta)));
@@ -91,8 +108,8 @@ namespace ShotInk
         }
         private async Task ExportAsync(bool copying)
         {
-            if (busy) return;
-            Pause(); busy = true; range.Enabled = play.Enabled = copy.Enabled = save.Enabled = false;
+            if (busy || clip.Frames.Count == 0) return;
+            Pause(); busy = true; EnableEditing(false);
             int first = range.First, last = range.Last; SetStatus("正在生成 GIF…");
             try
             {
@@ -111,7 +128,7 @@ namespace ShotInk
                 else SetStatus(GifExport.Save(this, encoded, settings) ? "GIF 已保存。" : "已取消保存。");
             }
             catch (Exception error) { if (!IsDisposed) SetStatus("未完成：" + error.Message); }
-            finally { if (!IsDisposed) { busy = false; range.Enabled = play.Enabled = copy.Enabled = save.Enabled = true; } }
+            finally { if (!IsDisposed) { busy = false; EnableEditing(true); } }
         }
         protected override void Dispose(bool disposing)
         { if (disposing && !disposed) { disposed = true; generation.Cancel(); generation.Dispose(); if (playback != null) playback.Dispose(); if (preview != null && preview.Image != null) { preview.Image.Dispose(); preview.Image = null; } } base.Dispose(disposing); }

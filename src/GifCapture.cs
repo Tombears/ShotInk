@@ -23,6 +23,14 @@ namespace ShotInk
         internal int Duration;
         internal bool LimitReached;
         internal int EndTime(int index) { return index + 1 < Frames.Count ? Frames[index + 1].Time : Duration; }
+        internal void DeleteRange(int first, int last)
+        {
+            if (first < 0 || last < first || last >= Frames.Count) throw new ArgumentOutOfRangeException("first");
+            int removedTime = EndTime(last) - Frames[first].Time;
+            Frames.RemoveRange(first, last - first + 1);
+            for (int index = first; index < Frames.Count; index++) Frames[index].Time -= removedTime;
+            Duration = Frames.Count == 0 ? 0 : Duration - removedTime;
+        }
     }
     internal sealed class GifCaptureSession : IDisposable
     {

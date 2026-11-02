@@ -33,6 +33,7 @@ namespace ShotInk
                 {
                     Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
                     Run("GIF editor trims and seeks one frame per arrow key", TestGifEditor);
+                    Run("GIF deletion joins frames with original delays and resets the timeline", TestGifDeletion);
                     Run("GIF sampling stops and cancels cleanly", TestGifSampling);
                     Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
                     Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
@@ -89,6 +90,7 @@ namespace ShotInk
                 Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
                 Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
                 Run("GIF editor trims and seeks one frame per arrow key", TestGifEditor);
+                Run("GIF deletion joins frames with original delays and resets the timeline", TestGifDeletion);
                 Run("GIF sampling stops and cancels cleanly", TestGifSampling);
                 Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
                 Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
@@ -758,6 +760,42 @@ namespace ShotInk
                 Assert(!Field<System.Windows.Forms.Timer>(editor, "playback").Enabled && Field<int>(editor, "frameIndex") == 2, "Frame seek did not pause playback.");
                 using (var image = new Bitmap(editor.Width, editor.Height)) { editor.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-gif-editor-options.png")); }
                 editor.Close();
+            }
+        }
+        private static void TestGifDeletion()
+        {
+            var clip = GifFixture(); clip.DeleteRange(1, 1);
+            Assert(clip.Frames.Count == 2 && clip.Frames[0].Time == 0 && clip.Frames[1].Time == 80 && clip.Duration == 250, "Deleting the middle interval retained a time gap or changed surviving frame delays.");
+            byte[] bytes = GifEncoder.Encode(clip, 0, 1);
+            using (var stream = new MemoryStream(bytes)) using (var image = Image.FromStream(stream))
+            {
+                Assert(image.GetFrameCount(FrameDimension.Time) == 2, "Deleted frames remained in the exported GIF.");
+                image.SelectActiveFrame(FrameDimension.Time, 0); using (var bitmap = new Bitmap(image)) Assert(bitmap.GetPixel(30, 20).R > 220, "Deletion changed the first surviving frame.");
+                image.SelectActiveFrame(FrameDimension.Time, 1); using (var bitmap = new Bitmap(image)) Assert(bitmap.GetPixel(30, 20).B > 220, "Deletion changed the last surviving frame.");
+                var delays = image.GetPropertyItem(0x5100).Value;
+                Assert(BitConverter.ToInt32(delays, 0) == 8 && BitConverter.ToInt32(delays, 4) == 17, "Export did not preserve surviving frame durations.");
+            }
+            var prefix = GifFixture(); prefix.DeleteRange(0, 0);
+            Assert(prefix.Frames.Count == 2 && prefix.Frames[0].Time == 0 && prefix.Frames[1].Time == 150 && prefix.Duration == 320, "Deleting initial frames did not rebase the timeline.");
+            var suffix = GifFixture(); suffix.DeleteRange(2, 2);
+            Assert(suffix.Frames.Count == 2 && suffix.Duration == 230 && suffix.EndTime(1) == 230, "Deleting final frames changed the previous frame duration.");
+            clip = GifFixture();
+            using (var editor = new GifEditorForm(clip, new AppSettings()))
+            {
+                editor.Show(); Application.DoEvents(); var range = Field<GifRangeSlider>(editor, "range"); var delete = Field<Button>(editor, "delete");
+                Assert(delete.Text == "删除选中" && delete.ForeColor.ToArgb() == Color.Firebrick.ToArgb(), "Delete selection did not have red text.");
+                range.SetRange(1, 1);
+                typeof(GifEditorForm).GetField("encoded", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(editor, bytes);
+                Field<Button>(editor, "play").PerformClick(); delete.PerformClick();
+                Assert(clip.Frames.Count == 2 && range.Maximum == 1 && range.First == 0 && range.Last == 1 && range.EditingStart, "Deletion did not reset both range handles and their maximum.");
+                Assert(!Field<System.Windows.Forms.Timer>(editor, "playback").Enabled && Field<int>(editor, "frameIndex") == 0 && Field<byte[]>(editor, "encoded") == null, "Deletion did not stop playback, reset preview and invalidate generated GIF data.");
+                GifKey(editor, Keys.Right); Assert(Field<int>(editor, "frameIndex") == 1, "Per-frame seeking broke after deletion.");
+                range.SetRange(1, 1); delete.PerformClick();
+                Assert(clip.Frames.Count == 1 && clip.Duration == 80 && range.Maximum == 0 && range.First == 0 && range.Last == 0 && Field<Button>(editor, "save").Enabled, "Repeated deletion did not preserve a valid single-frame clip.");
+                delete.PerformClick();
+                Assert(clip.Frames.Count == 0 && clip.Duration == 0 && Field<PictureBox>(editor, "preview").Image == null && !delete.Enabled && !Field<Button>(editor, "play").Enabled && !Field<Button>(editor, "copy").Enabled && !Field<Button>(editor, "save").Enabled && !range.Enabled, "Deleting all frames left invalid playback or export controls enabled.");
+                GifKey(editor, Keys.Left); GifKey(editor, Keys.Right); GifKey(editor, Keys.Control | Keys.C); GifKey(editor, Keys.Control | Keys.S);
+                Assert(Field<Label>(editor, "position").Text == "暂无帧", "Empty preview did not remain safe for keyboard input."); editor.Close();
             }
         }
         private static void TestGifSampling()
