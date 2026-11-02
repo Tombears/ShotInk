@@ -20,7 +20,8 @@ try {
         [IO.File]::WriteAllText((Join-Path $target 'ocr\ShotInk.OcrHost.exe'),'old OCR')
         [IO.File]::WriteAllText((Join-Path $target 'settings.ini'),'save-directory=E:\file\picture')
         [IO.File]::WriteAllText((Join-Path $target 'captures\history.png'),'user image')
-        $files=@(foreach($name in @('ShotInk.exe','ShotInk.build.sha256','update-portable.ps1','ocr/ShotInk.OcrHost.exe','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')){ @{Path=$name;Sha256=(Get-FileHash -LiteralPath (Join-Path $payload $name)).Hash} })
+        [IO.File]::WriteAllText((Join-Path $payload 'ShotInk.flavor'),'ocr')
+        $files=@(foreach($name in @('ShotInk.exe','ShotInk.build.sha256','ShotInk.flavor','update-portable.ps1','ocr/ShotInk.OcrHost.exe','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')){ @{Path=$name;Sha256=(Get-FileHash -LiteralPath (Join-Path $payload $name)).Hash} })
         $planPath=Join-Path $stage 'update-plan.json'
         @{Target=$target;Payload=$payload;Backup=(Join-Path $stage 'backup');ProcessId=[int]::MaxValue;Version=[Reflection.AssemblyName]::GetAssemblyName((Resolve-Path -LiteralPath $BinaryPath).Path).Version.ToString(3);Files=$files} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $planPath -Encoding UTF8
         . (Join-Path $projectRoot 'scripts\update-portable.ps1') -Plan $planPath

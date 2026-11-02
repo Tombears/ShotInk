@@ -4,7 +4,7 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 下载 [ShotInk-portable.zip](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip)，完整解压到一个文件夹后运行其中的 `ShotInk.exe`，保留同目录的 `ocr` 文件夹。后续版本统一提供 ZIP 包。
+前往 [Releases](https://github.com/Tombears/ShotInk/releases/latest) 下载 [完整 OCR 版](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable.zip) 或 [无 OCR 轻量版](https://github.com/Tombears/ShotInk/releases/latest/download/ShotInk-portable-lite.zip)，完整解压到一个文件夹后运行其中的 `ShotInk.exe`。完整版需保留同目录的 `ocr` 文件夹。两版均提供 ZIP 包。
 
 支持 Windows 10 / 11，需要 .NET Framework 4.8。
 
@@ -43,9 +43,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 ```
 
-构建目录包含 `dist\ShotInk.exe` 和 `dist\ocr\`，交付文件为 `ShotInk-portable.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。主程序保持 .NET Framework 4.8。
+默认同时构建两版：完整版位于 `dist\`，交付 `ShotInk-portable.zip`；轻量版位于 `dist-lite\`，交付 `ShotInk-portable-lite.zip`。Visual Studio 也可打开 `ShotInk.csproj`（需要 .NET Framework 4.8 targeting pack）。主程序保持 .NET Framework 4.8。
 
-OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](docs/ocr.md)。
+OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime 的 PP-OCRv6 small 模型，输出限定为中英文、数字和标点；关闭方向分类推理，复用模型会话并缓存上一张图片的结果。项目比较、实测和已知限制见 [OCR 技术说明](https://gitee.com/clear_wind_and_rain/ShotInk/blob/main/docs/ocr.md)。
 
 ## 普通截图操作
 
@@ -63,7 +63,7 @@ OCR 使用 [RapidOcrNet](https://github.com/BobLd/RapidOcrNet) + ONNX Runtime �
 
 程序启动后检查一次，之后每小时自动从 Gitee 检查更新。检测结果只在设置中显示，不自动弹窗或显示托盘气泡。从工作台、设置或托盘菜单点击「检查更新」会立即重新检测，并在设置中显示结果。发现更新后，点击「查看并更新」查看说明，再点击「下载更新」；校验完成后点击「确认更新并重启」，程序会备份并替换文件后重新启动，保留保存目录、快捷键、工具参数和截图历史。同版本修复包也能识别，已安装相同构建时不重复更新，不降级安装旧版本。
 
-更新前请结束并关闭截图、贴图和剪辑窗口；从设置窗口更新时会先保存当前设置。设置保存失败或安装目录没有写入权限时不会关闭程序。下载缓存优先放在 E 盘，更新目录保留安装备份；复制失败时尝试恢复原文件。设置中可关闭「每小时自动检查更新（Gitee）」，关闭后仍可手动检查。
+更新前请结束并关闭截图、贴图和剪辑窗口；从设置窗口更新时会先保存当前设置。设置保存失败或安装目录没有写入权限时不会关闭程序。下载缓存优先放在 E 盘，更新目录保留安装备份；复制失败时尝试恢复原文件。设置中可关闭「每小时自动检查更新」，关闭后仍可手动检查。
 
 首次使用本功能需完整解压新版便携包，保留 `ShotInk.build.sha256`、`update-portable.ps1` 和 WebView2 组件。更新检查及下载均使用 Gitee，无需提供账号或令牌。
 
@@ -71,9 +71,20 @@ Gitee 要求人机验证时，下载流程会弹出内嵌验证窗口，由你�
 
 验证窗口需要 Microsoft Edge WebView2 Runtime；未安装时会显示原因，可从[微软官网下载](https://developer.microsoft.com/microsoft-edge/webview2/)安装后重试。若 Gitee 不接受内嵌验证，可从 Gitee 发行页下载 ZIP，退出程序后完整解压覆盖原目录。
 
+## 两种便携版
+
+- ShotInk-portable.zip：完整 OCR 版，含本地文字识别引擎和模型。
+- ShotInk-portable-lite.zip：轻量版，编译移除文字识别功能和按钮，不包含 OCR 组件。
+
+两版通用功能共用代码并同步构建、测试和发布，各自只接收对应版本的更新包；请分别解压到独立目录。两个新便携包均不包含 docs 文件夹，历史版本附件保留。
+
 ## GIF 录制与剪辑
 
 框选区域后，点击长截图右侧的 GIF 播放方框图标开始录制。点击「停止录制」打开剪辑窗口，在同一条时间轴上拖动起点、终点双滑块选择要保留的区段。预览区按 ← / → 逐帧查看；选中起点或终点滑块后按 ← / →，每次调整一帧。时间轴聚焦时可用 Home / End 选择起点或终点手柄。支持播放所选区段、复制 GIF（Ctrl+C）与保存 GIF（Ctrl+S）；保存沿用图片默认目录和保存询问设置。复制保留动画文件，需目标应用支持 GIF 文件粘贴。
+
+GIF 帧计数上方的工具栏支持形状、线条、画笔、荧光笔、文字、马赛克、橡皮擦和撤销重做。右侧分段按钮「当前帧｜选中帧｜全部帧」默认高亮当前帧，按范围同步新绘制的效果，保持每帧自己的画面；完整版文字识别固定只处理当前帧。GIF 工具栏不显示长截图和录制入口。
+
+多帧效果采用后台有限并发预绘制，缓存上限 64 MiB；GIF 编码并行处理小批次帧，再按原帧顺序和时长组装。两版均使用相同实现。
 
 点击红色文字「删除选中」会删除当前起点至终点之间的全部帧（包含两端），接合剩余内容并保留其播放时长；起止手柄随后复位到剩余内容的首尾，可继续逐帧调整、删除、复制和保存。删除全部帧后显示空白预览，停止播放并禁用导出。
 

@@ -1,3 +1,4 @@
+#if !SHOTINK_LITE
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -233,3 +234,5 @@ namespace ShotInk
         internal void SetSelection(bool selected) { copy.Enabled = selected; }
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if !SHOTINK_LITE
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -195,3 +196,5 @@ namespace ShotInk
         public void Dispose() { if (disposed) return; disposed = true; cancellation.Cancel(); if (!busy) cancellation.Dispose(); }
     }
 }
+
+#endif

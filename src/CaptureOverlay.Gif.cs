@@ -13,6 +13,7 @@ namespace ShotInk
         private async void StartGifCapture() { await CaptureGifAsync(); }
         internal async Task CaptureGifAsync()
         {
+            EnsureCaptureUiContext();
             if (!ready || gifSession != null || scrollSession != null || longViewport != null) return;
             var region = new Rectangle(selection.X + screenBounds.X, selection.Y + screenBounds.Y, selection.Width, selection.Height);
             var session = new GifCaptureSession(delegate { return CaptureGifFrame(region); }); gifSession = session;
@@ -29,6 +30,7 @@ namespace ShotInk
                 Native.FocusAt(new Point(region.Left + region.Width / 2, region.Top + region.Height / 2)); Native.RaiseWithoutActivation(Handle);
                 await Task.Delay(80);
                 if (IsDisposed) return;
+                EnsureCaptureUiContext();
                 Native.FlushDesktop();
                 clock.Restart(); timer.Tick += delegate { if (!IsDisposed && !session.IsFinishing && object.ReferenceEquals(gifSession, session)) toolbar.SetRecordingText("停止 · " + clock.Elapsed.TotalSeconds.ToString("0.0") + "s"); }; timer.Start();
                 var clip = await session.RunAsync();

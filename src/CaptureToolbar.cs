@@ -23,7 +23,11 @@ namespace ShotInk
         private Bitmap surface;
         internal bool UserPlaced { get; private set; }
         private readonly Button finishScroll;
+#if !SHOTINK_LITE
         private readonly OcrSelectionActions textActions;
+#else
+        private readonly Control textActions;
+#endif
         private DrawTool currentTool = DrawTool.None;
         private bool textSelection;
         private readonly Dictionary<DrawTool, ToolStripItem> tools = new Dictionary<DrawTool, ToolStripItem>();
@@ -72,9 +76,11 @@ namespace ShotInk
             AddTool("mosaic", "马赛克", DrawTool.Mosaic);
             AddTool("text", "文字：单击输入，拖边框移动，拖角点缩放，顶部手柄旋转，双击 / F2 编辑", DrawTool.Text);
             AddTool("eraser", "橡皮擦：画笔 / 选框", DrawTool.Eraser);
+#if !SHOTINK_LITE
             recognize = Button("ocr", "文字识别：在图片上选择并复制文字", delegate { if (RecognitionClicked != null) RecognitionClicked(); });
             recognize.Name = "recognize-text";
             recognize.MouseEnter += delegate { if (RecognitionHovered != null) RecognitionHovered(); };
+#endif
             scroll = Button("scroll", "滚动长截图：使用当前选框，手动滚动后点击完成", delegate { if (ScrollClicked != null) ScrollClicked(); });
             scroll.Name = "scroll-capture";
             gif = Button("gif", "GIF 录制：使用当前选框，停止后裁剪区段", delegate { if (GifClicked != null) GifClicked(); });
@@ -101,11 +107,15 @@ namespace ShotInk
                 if (LayoutChanged != null) LayoutChanged();
             };
             Controls.Add(options);
+#if !SHOTINK_LITE
             textActions = new OcrSelectionActions { Location = new Point(1, 30), Width = width + 14, Visible = false };
             textActions.CopySelected += delegate { if (CopySelectedText != null) CopySelectedText(); };
             textActions.CopyAll += delegate { if (CopyAllText != null) CopyAllText(); };
             textActions.ExitSelection += delegate { SelectTool(DrawTool.None); };
             Controls.Add(textActions);
+#else
+            recognize = null; textActions = new Panel { Visible = false }; Controls.Add(textActions);
+#endif
             finishScroll = new ToolOptionButton { Name = "finish-scroll-capture", Text = "完成", Size = new Size(100, 30), Visible = false,
                 AccentColor = ToolAppearance.Accent("scroll"), Selected = true };
             finishScroll.Click += delegate { if (ScrollFinishClicked != null) ScrollFinishClicked(); }; Controls.Add(finishScroll);
@@ -123,6 +133,18 @@ namespace ShotInk
         internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
         internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; }
         internal void SetRecordingText(string text) { finishScroll.Text = text; }
+        internal void ConfigureForGif()
+        {
+            var keep = new HashSet<ToolStripItem>(tools.Values); if (recognize != null) keep.Add(recognize); keep.Add(undo); keep.Add(redo);
+            for (int index = strip.Items.Count - 1; index >= 0; index--)
+                if (!keep.Contains(strip.Items[index])) { var item = strip.Items[index]; strip.Items.RemoveAt(index); item.Dispose(); }
+            var separator = new ToolStripSeparator { AutoSize = false, Width = 5, Margin = Padding.Empty };
+            strip.Items.Insert(strip.Items.IndexOf(undo), separator);
+            int width = strip.Padding.Horizontal + 2; foreach (ToolStripItem item in strip.Items) width += item.Width;
+            dragGrip.Hide(); strip.Location = new Point(1, 1); strip.Width = width; Width = Math.Max(440, width + 2);
+            options.Width = textActions.Width = Width - 2; if (recognize != null) recognize.ToolTipText = "文字识别：仅处理当前帧";
+            tools[DrawTool.None].ToolTipText = "查看当前帧";
+        }
 
         private ToolStripButton Button(string icon, string hint, Action clicked)
         {
@@ -140,7 +162,7 @@ namespace ShotInk
         private Image Icon(string name) { var image = ToolbarIcons.Create(name); icons.Add(image); return image; }
         internal void SelectTool(DrawTool tool)
         {
-            currentTool = tool; textSelection = false; textActions.Hide(); recognize.Checked = false;
+            currentTool = tool; textSelection = false; textActions.Hide(); if (recognize != null) recognize.Checked = false;
             foreach (var pair in tools)
             {
                 pair.Value.BackColor = Color.Transparent;
@@ -156,9 +178,10 @@ namespace ShotInk
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetRecognitionBusy(bool busy)
-        { recognize.Enabled = !busy; recognize.ToolTipText = busy ? "正在识别文字…" : "文字识别：在图片上选择并复制文字"; }
+        { if (recognize != null) { recognize.Enabled = !busy; recognize.ToolTipText = busy ? "正在识别文字…" : "文字识别：在图片上选择并复制文字"; } }
         internal void SetTextSelection(bool enabled, bool hasSelection)
         {
+#if !SHOTINK_LITE
             textActions.SetSelection(hasSelection);
             if (enabled)
             {
@@ -168,11 +191,12 @@ namespace ShotInk
             }
             else if (textSelection)
             {
-                textSelection = false; recognize.Checked = false; textActions.Hide(); options.ShowTool(currentTool);
+                textSelection = false; if (recognize != null) recognize.Checked = false; textActions.Hide(); options.ShowTool(currentTool);
                 if (tools.ContainsKey(currentTool)) ((ToolStripButton)tools[currentTool]).Checked = true;
                 Height = currentTool == DrawTool.None ? 30 : options.Bottom + 1;
             }
             if (LayoutChanged != null) LayoutChanged();
+#endif
         }
         internal void UpdateHistory(bool canUndo, bool canRedo) { undo.Enabled = canUndo; redo.Enabled = canRedo; }
         private void Finish(CaptureAction action) { if (FinishClicked != null) FinishClicked(action); }

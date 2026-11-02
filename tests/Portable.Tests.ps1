@@ -1,15 +1,21 @@
+param([switch]$Lite,[switch]$FullOnly)
+$ErrorActionPreference = 'Stop'
+if(-not $Lite -and -not $FullOnly){& $PSCommandPath -FullOnly;& $PSCommandPath -Lite;return}
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
 $fixture = Join-Path $temporaryRoot ('ShotInk-portable-tests-' + [Guid]::NewGuid().ToString('N'))
-$archive = Join-Path $root 'ShotInk-portable.zip'
+$archive = Join-Path $root $(if($Lite){'ShotInk-portable-lite.zip'}else{'ShotInk-portable.zip'})
+$dist=Join-Path $root $(if($Lite){'dist-lite'}else{'dist'})
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {
     [IO.Compression.ZipFile]::ExtractToDirectory($archive, $fixture)
-    foreach ($file in @('ShotInk.exe', 'ocr\ShotInk.OcrHost.exe', 'ocr\coreclr.dll', 'ocr\onnxruntime.dll', 'ocr\libSkiaSharp.dll', 'ocr\models\v6\PP-OCRv6_rec_small.onnx', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll', 'update-portable.ps1')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $fixture $file))) { throw ('ZIP omitted required file: ' + $file) }
-    }
-    if ((Get-FileHash -LiteralPath (Join-Path $fixture 'ShotInk.exe')).Hash -ne (Get-FileHash -LiteralPath (Join-Path $root 'dist\ShotInk.exe')).Hash) { throw 'Packaged application differs from the tested build.' }
+    $required=@('ShotInk.exe','ShotInk.flavor','ShotInk.build.sha256','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')
+    if(-not $Lite){$required+=@('ocr\ShotInk.OcrHost.exe','ocr\coreclr.dll','ocr\onnxruntime.dll','ocr\libSkiaSharp.dll','ocr\models\v6\PP-OCRv6_rec_small.onnx')}
+    foreach($file in $required){if(-not(Test-Path -LiteralPath (Join-Path $fixture $file))){throw ('ZIP omitted '+$file)}}
+    if(Test-Path -LiteralPath (Join-Path $fixture 'docs')){throw 'Portable ZIP retained docs.'}
+    if($Lite -and (Test-Path -LiteralPath (Join-Path $fixture 'ocr'))){throw 'Lite ZIP retained OCR files.'}
+    if ((Get-FileHash -LiteralPath (Join-Path $fixture 'ShotInk.exe')).Hash -ne (Get-FileHash -LiteralPath (Join-Path $dist 'ShotInk.exe')).Hash) { throw 'Packaged application differs from the tested build.' }
     Add-Type -AssemblyName System.Drawing
     $applicationIcon = [Drawing.Icon]::ExtractAssociatedIcon((Join-Path $fixture 'ShotInk.exe'))
     try {
@@ -26,7 +32,9 @@ try {
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
     $probe = Join-Path $fixture 'ShotInk.PackageTests.exe'
-    & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @sources (Join-Path $PSScriptRoot 'Installed.Tests.cs')
+    $defines=@();if($Lite){$defines+='/define:SHOTINK_LITE'}
+    $testSource=Join-Path $PSScriptRoot $(if($Lite){'Lite.Package.Tests.cs'}else{'Installed.Tests.cs'})
+    & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @defines @sources $testSource
     if ($LASTEXITCODE -ne 0) { throw 'Packaged OCR probe compilation failed.' }
     & $probe (Join-Path $PSScriptRoot 'fixtures\ocr-mixed.png') $archive
     if ($LASTEXITCODE -ne 0) { throw 'Extracted ZIP cannot find or run its bundled OCR environment.' }

@@ -15,7 +15,20 @@ namespace ShotInk
     {
         internal byte[] Png;
         internal int Time;
-        internal Bitmap Decode() { using (var stream = new MemoryStream(Png)) using (var image = Image.FromStream(stream)) return new Bitmap(image); }
+        internal List<Mark> Annotations = new List<Mark>();
+        internal GifFrameCache Cache;
+        internal Bitmap DecodeOriginal() { using (var stream = new MemoryStream(Png)) using (var image = Image.FromStream(stream)) return new Bitmap(image); }
+        internal Bitmap Decode()
+        {
+            var snapshot = Annotations; var cached = Cache == null ? null : Cache.Read(this, snapshot);
+            return cached ?? Render(snapshot);
+        }
+        internal Bitmap Render(List<Mark> snapshot)
+        {
+            var image = DecodeOriginal(); if (snapshot.Count == 0) return image;
+            using (image) using (var renderer = new AnnotationRasterRenderer(image, snapshot.Contains)) return renderer.Render(snapshot);
+        }
+
     }
     internal sealed class GifClip
     {
@@ -69,6 +82,19 @@ namespace ShotInk
     }
     internal static class GifEncoder
     {
+        internal static readonly int Workers = Math.Max(1, Math.Min(4, Environment.ProcessorCount - 1));
+        private sealed class EncodedFrame { internal int Width, Height; internal byte[] Data; }
+        private static EncodedFrame EncodeFrame(GifFrame source, CancellationToken token)
+        {
+            GifRenderWorkers.Gate.Wait(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                using (var bitmap = source.Decode()) using (var stream = new MemoryStream())
+                { bitmap.Save(stream, ImageFormat.Gif); return new EncodedFrame { Width = bitmap.Width, Height = bitmap.Height, Data = stream.ToArray() }; }
+            }
+            finally { GifRenderWorkers.Gate.Release(); }
+        }
         // Use GDI+'s palette quantizer and LZW encoder for each frame, then assemble
         // full-size local-palette frames with explicit timing and an infinite loop.
         internal static byte[] Encode(GifClip clip, int first, int last, CancellationToken cancellation = default(CancellationToken))
@@ -77,20 +103,27 @@ namespace ShotInk
             using (var output = new MemoryStream()) using (var writer = new BinaryWriter(output))
             {
                 int width = 0, height = 0, writtenTime = 0;
+                EncodedFrame[] batch = null; int batchStart = first;
                 for (int index = first; index <= last; index++)
                 {
                 cancellation.ThrowIfCancellationRequested();
-                using (var bitmap = clip.Frames[index].Decode()) using (var frame = new MemoryStream())
+                if (batch == null || index >= batchStart + batch.Length)
+                {
+                    batchStart = index; batch = new EncodedFrame[Math.Min(Workers * 2, last - index + 1)];
+                    Parallel.For(0, batch.Length, new ParallelOptions { MaxDegreeOfParallelism = Workers, CancellationToken = cancellation },
+                        delegate(int at) { batch[at] = EncodeFrame(clip.Frames[batchStart + at], cancellation); });
+                }
+                var encoded = batch[index - batchStart];
                 {
                     if (index == first)
                     {
-                        width = bitmap.Width; height = bitmap.Height;
+                        width = encoded.Width; height = encoded.Height;
                         writer.Write(Encoding.ASCII.GetBytes("GIF89a")); writer.Write((ushort)width); writer.Write((ushort)height);
                         writer.Write((byte)0x70); writer.Write((byte)0); writer.Write((byte)0);
                         writer.Write(new byte[] { 0x21, 0xff, 11 }); writer.Write(Encoding.ASCII.GetBytes("NETSCAPE2.0")); writer.Write(new byte[] { 3, 1, 0, 0, 0 });
                     }
-                    if (bitmap.Width != width || bitmap.Height != height) throw new InvalidOperationException("GIF 帧尺寸发生变化。");
-                    bitmap.Save(frame, ImageFormat.Gif); var data = frame.ToArray();
+                    if (encoded.Width != width || encoded.Height != height) throw new InvalidOperationException("GIF 帧尺寸发生变化。");
+                    var data = encoded.Data;
                     int globalSize = (data[10] & 0x80) != 0 ? 3 * (1 << ((data[10] & 7) + 1)) : 0;
                     int offset = 13 + globalSize;
                     while (data[offset] == 0x21) { offset += 2; SkipBlocks(data, ref offset); }

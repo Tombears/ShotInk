@@ -18,6 +18,14 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--gif-scroll-tests")
+                {
+                    Run("GIF rendering leaves subsequent long capture responsive", delegate
+                    {
+                        Control.CheckForIllegalCrossThreadCalls = true;
+                        GifToolsTests.Run(); System.Threading.SynchronizationContext.SetSynchronizationContext(new System.Threading.SynchronizationContext()); TestIntegratedScroll();
+                    }); return 0;
+                }
                 if (args.Length == 1 && args[0] == "--update-tests")
                 { Run("Gitee updates validate Windows ZIP paths and reject traversal", TestUpdates); return 0; }
                 if (args.Length == 1 && args[0] == "--verification-tests")
@@ -34,6 +42,7 @@ namespace ShotInk
                     Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
                     Run("GIF editor trims and seeks one frame per arrow key", TestGifEditor);
                     Run("GIF deletion joins frames with original delays and resets the timeline", TestGifDeletion);
+                    Run("GIF frame tools preserve scopes, independent images, undo and current-frame OCR", GifToolsTests.Run);
                     Run("GIF sampling stops and cancels cleanly", TestGifSampling);
                     Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
                     Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
@@ -91,6 +100,7 @@ namespace ShotInk
                 Run("GIF encoding preserves trimmed frames, colors and timing", TestGifEncoding);
                 Run("GIF editor trims and seeks one frame per arrow key", TestGifEditor);
                 Run("GIF deletion joins frames with original delays and resets the timeline", TestGifDeletion);
+                Run("GIF frame tools preserve scopes, independent images, undo and current-frame OCR", GifToolsTests.Run);
                 Run("GIF sampling stops and cancels cleanly", TestGifSampling);
                 Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
                 Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
@@ -208,6 +218,7 @@ namespace ShotInk
                 {
                     AddUpdateEntry(zip, "ShotInk.exe", File.ReadAllBytes(System.Reflection.Assembly.GetExecutingAssembly().Location));
                     AddUpdateEntry(zip, "ShotInk.build.sha256", System.Text.Encoding.UTF8.GetBytes(revision));
+                    AddUpdateEntry(zip, "ShotInk.flavor", System.Text.Encoding.UTF8.GetBytes(BuildFeatures.Flavor));
                     AddUpdateEntry(zip, "update-portable.ps1", System.Text.Encoding.UTF8.GetBytes("test helper"));
                     AddUpdateEntry(zip, "ocr\\ShotInk.OcrHost.exe", new byte[] { 1, 2, 3 });
                     zip.CreateEntry("docs\\");
@@ -220,7 +231,7 @@ namespace ShotInk
                 Assert(info.IsNewer("1.0.0", revision) && !info.IsNewer("99.0.0", new string('B', 64)), "Update comparison allowed a downgrade or missed a new version.");
                 var prepared = UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "stage"), int.MaxValue, System.Threading.CancellationToken.None);
                 var plan = UpdateService.ReadJson<UpdatePlan>(File.ReadAllBytes(prepared.PlanPath));
-                Assert(plan.Files.Length == 7 && File.Exists(prepared.HelperPath) && UpdateService.InstalledRevision(plan.Payload) == revision, "Update staging lost components or revision metadata.");
+                Assert(plan.Files.Length == 8 && File.Exists(prepared.HelperPath) && UpdateService.InstalledRevision(plan.Payload) == revision, "Update staging lost components or revision metadata.");
                 foreach (string invalid in new[] { "../outside", "C:/outside", "/outside", "foo\\bar", "x/.. /outside", "aux.txt", "foo./bar" })
                 {
                     bool rejected = false; try { UpdateService.SafePath(root, invalid); } catch (InvalidDataException) { rejected = true; }
@@ -845,7 +856,8 @@ namespace ShotInk
                 overlay.Show(); Select(overlay); var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
                 var task = overlay.CaptureGifAsync(); WaitUntil(delegate { return frames >= 3; });
                 Assert(!Field<AnnotationCanvas>(overlay, "canvas").Visible && Option<Button>(toolbar, "finish-scroll-capture").Text.StartsWith("停止"), "Recording did not hide the frozen screenshot or show Stop.");
-                Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
+                Option<Button>(toolbar, "finish-scroll-capture").PerformClick();
+                Pump(task);
                 GifEditorForm editor = null; foreach (Form form in Application.OpenForms) if (form is GifEditorForm) editor = (GifEditorForm)form;
                 Assert(overlay.IsDisposed && editor != null && sampled == new Rectangle(100, 90, 700, 370), "Stopping GIF did not preserve the capture region or open trim editing.");
                 editor.Close();
@@ -1003,7 +1015,9 @@ namespace ShotInk
                 System.Threading.Volatile.Write(ref offset, 150);
                 WaitUntil(delegate { return Field<ScrollCaptureSession>(overlay, "scrollSession").Height == 520; });
                 Assert(!sessionBeforeLeave.AlignmentLost && !task.IsCompleted, "Capture did not recover after the hover change ended.");
-                Option<Button>(toolbar, "finish-scroll-capture").PerformClick(); Pump(task);
+                Option<Button>(toolbar, "finish-scroll-capture").PerformClick();
+                Console.WriteLine("Long finish: finishing="+sessionBeforeLeave.IsFinishing+" frames="+sessionBeforeLeave.Frames+" pending="+sessionBeforeLeave.PendingFrames+" task="+task.Status+" context="+(System.Threading.SynchronizationContext.Current == null ? "null" : System.Threading.SynchronizationContext.Current.GetType().Name));
+                Pump(task);
                 var canvas = Field<AnnotationCanvas>(overlay, "canvas"); var viewport = Field<Panel>(overlay, "longViewport");
                 Assert(sampled == new Rectangle(100, 90, 700, 370) && viewport.Bounds == selection && canvas.Size == selection.Size, "Long capture changed the selected scope or expanded its visible frame.");
                 Assert(strip.Visible && Field<ScrollCaptureSession>(overlay, "scrollSession") == null && canvas.Image.Height == 520, "Completion did not restore all tools and the stitched image.");

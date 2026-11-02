@@ -1,6 +1,6 @@
 function Get-ShotInkBuildSignature {
     param([Parameter(Mandatory = $true)][string]$ProjectRoot)
-    $inputs = @('build.ps1', 'run.ps1', 'ShotInk.csproj', 'app.manifest', 'README.md', 'LICENSE')
+    $inputs = @('build.ps1', 'run.ps1', 'ShotInk.csproj', 'app.manifest', 'README.md', 'README-lite.md', 'LICENSE')
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'scripts') -Filter '*.ps1' | ForEach-Object { 'scripts\' + $_.Name })
     $ocrRoot = Join-Path $ProjectRoot 'ocr-host'
     if (Test-Path -LiteralPath $ocrRoot) {

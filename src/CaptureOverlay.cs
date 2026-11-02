@@ -25,8 +25,12 @@ namespace ShotInk
         private Bitmap longDragPreview;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
+#if !SHOTINK_LITE
         private OcrSearchPanel textSearch;
+#endif
+#if !SHOTINK_LITE
         private TextRecognitionSession recognition;
+#endif
         private readonly AppSettings settings;
         internal event Action<Bitmap, CaptureAction> Completed;
         internal event Action Cancelled;
@@ -204,9 +208,11 @@ namespace ShotInk
             };
             canvas.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
             Controls.Add(canvas);
+#if !SHOTINK_LITE
             textSearch = new OcrSearchPanel(); textSearch.Bind(canvas);
             textSearch.VisibleChanged += delegate { PositionToolbar(); };
             Controls.Add(textSearch);
+#endif
             toolbar = new CaptureToolbar(settings);
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
             toolbar.SettingsChanged += delegate { SyncSettings(); };
@@ -220,17 +226,26 @@ namespace ShotInk
             toolbar.ScrollFinishClicked += delegate { if (gifSession != null) { toolbar.SetScrollFinishing(); gifSession.Finish(); } else FinishLongCapture(); };
             toolbar.GifClicked += StartGifCapture;
             toolbar.ToolbarMoved += delegate { PositionToolbar(); UpdateRecordingRegion(); };
+#if !SHOTINK_LITE
             toolbar.RecognitionClicked += async delegate { await recognition.RecognizeAsync(); };
             toolbar.RecognitionHovered += delegate { RapidTextRecognizer.Shared.WarmUpAsync(); };
             toolbar.CopySelectedText += delegate { canvas.CopyRecognizedText(false); };
             toolbar.CopyAllText += delegate { canvas.CopyRecognizedText(true); };
             canvas.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
+#endif
             canvas.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
             Controls.Add(toolbar);
             SyncSettings();
             canvas.Focus();
         }
 
+        private void EnsureCaptureUiContext()
+        {
+            if (InvokeRequired) throw new InvalidOperationException("请在截图窗口线程启动录制。");
+            var context = System.Threading.SynchronizationContext.Current;
+            if (context == null || context.GetType() == typeof(System.Threading.SynchronizationContext))
+                System.Threading.SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        }
         private void SyncSettings() { toolbar.ApplyTo(canvas); }
         private void PositionToolbar()
         {
@@ -241,12 +256,14 @@ namespace ShotInk
             work = Rectangle.Intersect(work, ClientRectangle);
             toolbar.Location = toolbar.UserPlaced ? CaptureToolbar.Clamp(toolbar.Location, work, toolbar.Size) : CaptureToolbar.Place(selection, work, toolbar.Size);
             toolbar.BringToFront();
+#if !SHOTINK_LITE
             if (textSearch != null && textSearch.Visible)
             {
                 textSearch.Location = new Point(Math.Max(work.Left + 4, Math.Min(selection.Right - textSearch.Width - 8, work.Right - textSearch.Width - 4)),
                     Math.Max(work.Top + 4, Math.Min(selection.Top + 8, work.Bottom - textSearch.Height - 4)));
                 textSearch.BringToFront();
             }
+#endif
         }
 
         private void UpdateSelectionChrome()
@@ -289,7 +306,9 @@ namespace ShotInk
             ClearLongDragPreview();
             if (scrollSession != null) { scrollSession.Dispose(); scrollSession = null; ResetCaptureRegion(); }
             ready = false;
+#if !SHOTINK_LITE
             if (recognition != null) { recognition.Dispose(); recognition = null; }
+#endif
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); canvas = null; }
             if (longViewport != null) { Controls.Remove(longViewport); longViewport.Dispose(); longViewport = null; }
             longLimitReached = false; longAlignmentLost = false;
@@ -324,7 +343,9 @@ namespace ShotInk
                 else if (e.KeyCode == Keys.Enter) { toolbar.SetScrollFinishing(); gifSession.Finish(); }
                 e.SuppressKeyPress = true; return;
             }
+#if !SHOTINK_LITE
             if (textSearch != null && textSearch.HandleKey(e)) return;
+#endif
             if (scrollSession != null)
             {
                 if (e.KeyCode == Keys.Enter) FinishLongCapture();
@@ -350,7 +371,11 @@ namespace ShotInk
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
         private void ClearLongDragPreview() { if (longDragPreview != null) { longDragPreview.Dispose(); longDragPreview = null; } }
-        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose(); if (recognition != null) recognition.Dispose(); desktop.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose();
+#if !SHOTINK_LITE
+            if (recognition != null) recognition.Dispose();
+#endif
+            desktop.Dispose(); } base.Dispose(disposing); }
 
         private sealed class ResizeGrip : Control
         {

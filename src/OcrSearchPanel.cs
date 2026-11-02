@@ -1,3 +1,4 @@
+#if !SHOTINK_LITE
 using System;
 using System.Drawing;
 using System.Windows.Forms;
@@ -76,3 +77,5 @@ namespace ShotInk
         }
     }
 }
+
+#endif

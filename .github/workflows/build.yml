@@ -2,7 +2,7 @@ name: Windows build
 on:
   push:
     branches: [main]
-    paths-ignore: ['updates/latest.json']
+    paths-ignore: ['updates/*.json']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -34,7 +34,9 @@ jobs:
         with:
           name: ShotInk-windows-portable
           if-no-files-found: error
-          path: ShotInk-portable.zip
+          path: |
+            ShotInk-portable.zip
+            ShotInk-portable-lite.zip
       - name: Upload tool previews
         if: always()
         uses: actions/upload-artifact@v4

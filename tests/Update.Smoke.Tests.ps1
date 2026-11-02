@@ -33,7 +33,8 @@ try {
     $oldHash=(Get-FileHash -LiteralPath (Join-Path $target 'ShotInk.exe')).Hash
     $oldProcess=Start-Process -FilePath (Join-Path $target 'ShotInk.exe') -WorkingDirectory $target -WindowStyle Hidden -PassThru
     foreach($name in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')){[IO.File]::WriteAllText((Join-Path $payload $name),'browser component')}
-    $files=@(foreach($name in @('ShotInk.exe','ShotInk.build.sha256','ocr/ShotInk.OcrHost.exe','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')) { @{Path=$name;Sha256=(Get-FileHash -LiteralPath (Join-Path $payload $name)).Hash} })
+    [IO.File]::WriteAllText((Join-Path $payload 'ShotInk.flavor'),'ocr')
+    $files=@(foreach($name in @('ShotInk.exe','ShotInk.build.sha256','ShotInk.flavor','ocr/ShotInk.OcrHost.exe','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')) { @{Path=$name;Sha256=(Get-FileHash -LiteralPath (Join-Path $payload $name)).Hash} })
     $plan=Join-Path $stage 'update-plan.json'
     @{Target=$target;Payload=$payload;Backup=(Join-Path $stage 'backup');ProcessId=$oldProcess.Id;Version='1.8.0';Files=$files} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $plan -Encoding UTF8
     $powershell=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'

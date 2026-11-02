@@ -14,6 +14,7 @@ namespace ShotInk
 
     internal sealed class Mark
     {
+        internal Guid Id = Guid.NewGuid();
         internal DrawTool Tool;
         internal Color Color;
         internal float Width;
@@ -29,7 +30,7 @@ namespace ShotInk
         internal float TextAngle;
         internal Mark Clone()
         {
-            var copy = new Mark { Tool = Tool, Color = Color, Width = Width, Text = Text, Freehand = Freehand,
+            var copy = new Mark { Id = Id, Tool = Tool, Color = Color, Width = Width, Text = Text, Freehand = Freehand,
                 MosaicSize = MosaicSize, MosaicEffect = MosaicEffect, BlurRadius = BlurRadius, BrushSize = BrushSize, FontSize = FontSize, TextStyle = TextStyle,
                 TextSize = TextSize, TextAngle = TextAngle };
             copy.Points.AddRange(Points); return copy;
@@ -74,11 +75,12 @@ namespace ShotInk
         private VScrollBar documentScroll;
         internal float DocumentOffsetY { get; private set; }
         private Mark active;
-        private OcrSelectionModel recognition;
         private bool selectingText;
+        internal int Revision { get; private set; }
+#if !SHOTINK_LITE
+        private OcrSelectionModel recognition;
         private bool draggedText;
         private PointF textAnchor;
-        internal int Revision { get; private set; }
         internal bool HasTextRecognition { get { return recognition != null; } }
         internal bool HasSelectedText { get { return recognition != null && recognition.HasSelection; } }
         internal string RecognizedText { get { return recognition == null ? "" : recognition.AllText; } }
@@ -109,6 +111,11 @@ namespace ShotInk
             else return false;
             e.SuppressKeyPress = true; return true;
         }
+#else
+        internal bool HasTextRecognition { get { return false; } }
+        private void ClearTextRecognition() { }
+        internal bool HandleRecognitionKey(KeyEventArgs e) { return false; }
+#endif
         private PointF hoverPoint;
         private bool hovering;
         private readonly Stack<List<Mark>> undo = new Stack<List<Mark>>();
@@ -160,12 +167,14 @@ namespace ShotInk
             if (PolylineMouseDown(e)) return;
             if (e.Button == MouseButtons.Left && Tool == DrawTool.Text) { TextMouseDown(e); return; }
             base.OnMouseDown(e);
+#if !SHOTINK_LITE
             if (e.Button == MouseButtons.Left && recognition != null)
             {
                 Focus();
                 if (e.Clicks > 1) { selectingText = false; Capture = false; recognition.SelectWord(ImagePoint(e.Location), true); NotifyTextSelection(); return; }
                 textAnchor = ImagePoint(e.Location); selectingText = true; draggedText = false; Capture = true; return;
             }
+#endif
             if (e.Button != MouseButtons.Left || Tool == DrawTool.None) return;
             var point = ImagePoint(e.Location);
             active = new Mark { Tool = Tool, Color = Ink, Width = Stroke, Freehand = BrushTool, MosaicSize = MosaicSize, MosaicEffect = MosaicEffect, BlurRadius = BlurRadius, BrushSize = CurrentBrushSize };
@@ -186,12 +195,14 @@ namespace ShotInk
             if (MosaicMouseMove(e)) return;
             if (Tool == DrawTool.Text) { TextMouseMove(e); return; }
             hoverPoint = ImagePoint(e.Location); hovering = true;
+#if !SHOTINK_LITE
             if (selectingText && recognition != null)
             {
                 if (Math.Abs(hoverPoint.X - textAnchor.X) + Math.Abs(hoverPoint.Y - textAnchor.Y) > 3 / Zoom) draggedText = true;
                 if (draggedText) { recognition.SelectRectangle(RectangleF.FromLTRB(Math.Min(textAnchor.X, hoverPoint.X), Math.Min(textAnchor.Y, hoverPoint.Y), Math.Max(textAnchor.X, hoverPoint.X), Math.Max(textAnchor.Y, hoverPoint.Y))); NotifyTextSelection(); }
                 return;
             }
+#endif
             if (active != null) MoveGesture(hoverPoint);
             if (active != null || BrushTool) Invalidate();
         }
@@ -210,12 +221,14 @@ namespace ShotInk
             if (FinishMosaicTransform(e)) return;
             if (IsPolyline(Tool)) { Capture = false; return; }
             if (Tool == DrawTool.Text && e.Button == MouseButtons.Left) { TextMouseUp(e); return; }
+#if !SHOTINK_LITE
             if (selectingText && recognition != null && e.Button == MouseButtons.Left)
             {
                 OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
                 if (!draggedText) recognition.SelectWord(ImagePoint(e.Location), false);
                 selectingText = false; Capture = false; NotifyTextSelection(); return;
             }
+#endif
             if (active == null || e.Button != MouseButtons.Left) return;
             MoveGesture(ImagePoint(e.Location));
             var mark = active; active = null; Capture = false;
@@ -228,7 +241,9 @@ namespace ShotInk
         {
             base.OnMouseDoubleClick(e);
             if (Tool == DrawTool.Text && e.Button == MouseButtons.Left && selectedText != null) BeginTextEdit(selectedText);
+#if !SHOTINK_LITE
             if (recognition != null && e.Button == MouseButtons.Left) { recognition.SelectWord(ImagePoint(e.Location), true); NotifyTextSelection(); }
+#endif
         }
 
         internal void AddMark(Mark mark)
@@ -288,7 +303,9 @@ namespace ShotInk
                     using (var outline = new Pen(Color.LightGray, 1 / Zoom))
                     { outline.DashStyle = DashStyle.Dash; var bounds = active.Bounds; e.Graphics.DrawRectangle(outline, bounds.X, bounds.Y, bounds.Width, bounds.Height); }
             }
+#if !SHOTINK_LITE
             if (recognition != null) recognition.Draw(e.Graphics);
+#endif
             DrawMosaicSelection(e.Graphics);
             if (hovering && BrushTool)
             {
@@ -299,98 +316,11 @@ namespace ShotInk
             }
         }
 
-        private static Region AppliedRegion(Mark mark)
-        {
-            if (!mark.Freehand) return new Region(mark.Bounds);
-            var region = new Region(); region.MakeEmpty();
-            try
-            {
-                float diameter = Math.Max(1, mark.BrushSize), radius = diameter / 2;
-                using (var path = new GraphicsPath())
-                {
-                    for (int i = 0; i < mark.Points.Count; i++)
-                    {
-                        var point = mark.Points[i];
-                        path.Reset(); path.AddEllipse(point.X - radius, point.Y - radius, diameter, diameter); region.Union(path);
-                        if (i == 0) continue;
-                        var previous = mark.Points[i - 1];
-                        float dx = point.X - previous.X, dy = point.Y - previous.Y;
-                        float length = (float)Math.Sqrt(dx * dx + dy * dy);
-                        if (length <= 0) continue;
-                        float nx = -dy * radius / length, ny = dx * radius / length;
-                        path.Reset();
-                        path.AddPolygon(new[] { new PointF(previous.X + nx, previous.Y + ny), new PointF(point.X + nx, point.Y + ny),
-                            new PointF(point.X - nx, point.Y - ny), new PointF(previous.X - nx, previous.Y - ny) });
-                        // Union the swept area so overlapping strokes never cancel coverage.
-                        region.Union(path);
-                    }
-                }
-                return region;
-            }
-            catch { region.Dispose(); throw; }
-        }
-
-        private void DrawAppliedMark(Graphics g, Mark mark)
-        {
-            var state = g.Save();
-            try
-            {
-                using (var region = AppliedRegion(mark))
-                {
-                    g.SetClip(region, CombineMode.Intersect);
-                    if (mark.Tool == DrawTool.Eraser)
-                    {
-                        // Restore the frozen screenshot only inside the brush or selection.
-                        g.CompositingMode = CompositingMode.SourceCopy;
-                        g.DrawImage(Image, new Rectangle(Point.Empty, Image.Size), 0, 0, Image.Width, Image.Height, GraphicsUnit.Pixel);
-                        return;
-                    }
-                    DrawMosaicPixels(g, mark);
-                }
-            }
-            finally { g.Restore(state); }
-        }
-
-        private void DrawMark(Graphics g, Mark mark)
-        {
-            if (mark.Points.Count == 0) return;
-            if (mark.Tool == DrawTool.Mosaic || mark.Tool == DrawTool.Eraser) { DrawAppliedMark(g, mark); return; }
-            var bounds = mark.Bounds;
-            using (var pen = new Pen(mark.Color, mark.Width))
-            {
-                pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
-                switch (mark.Tool)
-                {
-                    case DrawTool.Rectangle:
-                        if (bounds.Width > 0 && bounds.Height > 0) g.DrawRectangle(pen, bounds.X, bounds.Y, bounds.Width, bounds.Height);
-                        break;
-                    case DrawTool.Ellipse:
-                        if (bounds.Width > 0 && bounds.Height > 0) g.DrawEllipse(pen, bounds);
-                        break;
-                    case DrawTool.Line:
-                    case DrawTool.Polyline:
-                        if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
-                        break;
-                    case DrawTool.Arrow:
-                    case DrawTool.ArrowPolyline:
-                        if (mark.Points.Count > 1)
-                            using (var arrow = new AdjustableArrowCap(4, 5, true))
-                            using (var path = new GraphicsPath())
-                            { pen.CustomEndCap = arrow; path.AddLines(mark.Points.ToArray()); g.DrawPath(pen, path); }
-                        break;
-                    case DrawTool.Pen:
-                        if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
-                        break;
-                    case DrawTool.Highlight:
-                        pen.Color = Color.FromArgb(88, mark.Color); pen.Width = mark.Width * 6;
-                        if (mark.Points.Count > 1) g.DrawLines(pen, mark.Points.ToArray());
-                        break;
-                    case DrawTool.Text:
-                        TextGeometry.Draw(g, mark);
-                        break;
-                }
-            }
-        }
+        private AnnotationRasterRenderer raster;
+        private AnnotationRasterRenderer Raster
+        { get { if (raster == null) raster = new AnnotationRasterRenderer(Image, mark => Marks.Contains(mark) || mark == active); return raster; } }
+        private void DrawMark(Graphics graphics, Mark mark) { Raster.DrawMark(graphics, mark); }
+        private void ClearMosaicCache() { if (raster != null) { raster.Dispose(); raster = null; } }
 
         internal Bitmap Render()
         {
@@ -419,9 +349,15 @@ namespace ShotInk
         private readonly List<Button> toolButtons = new List<Button>();
         private readonly AnnotationOptions toolOptions;
         private readonly Panel toolArea;
+#if !SHOTINK_LITE
         private readonly OcrSelectionActions textActions;
+#endif
+#if !SHOTINK_LITE
         private readonly TextRecognitionSession recognition;
+#endif
+#if !SHOTINK_LITE
         private readonly OcrSearchPanel textSearch;
+#endif
         private readonly Action<Bitmap> pin;
         private readonly AppSettings settings;
         private bool dirty;
@@ -448,10 +384,12 @@ namespace ShotInk
                 button.Click += delegate { toolOptions.UseDefaultMode(selectedTool); SelectTool(selectedTool); };
                 toolButtons.Add(button); tools.Controls.Add(button);
             }
+#if !SHOTINK_LITE
             var recognize = Theme.Button("文字识别", false, 88);
             recognize.Click += async delegate { await recognition.RecognizeAsync(); };
             recognize.MouseEnter += delegate { RapidTextRecognizer.Shared.WarmUpAsync(); };
             tools.Controls.Add(recognize);
+#endif
             AddButton(tools, "撤销", false, 66, delegate { canvas.Undo(); });
             AddButton(tools, "重做", false, 66, delegate { canvas.Redo(); });
             AddButton(tools, "复制", false, 66, delegate { CopyImage(); });
@@ -465,16 +403,19 @@ namespace ShotInk
             canvas = new AnnotationCanvas(image) { Location = new Point(20, 20) };
             canvas.Changed += delegate { dirty = true; UpdateStatus("已编辑"); };
             viewport.Controls.Add(canvas);
+#if !SHOTINK_LITE
             textSearch = new OcrSearchPanel(); textSearch.Bind(canvas); Controls.Add(textSearch);
             viewport.Resize += delegate { PositionSearch(); };
             viewport.LocationChanged += delegate { PositionSearch(); };
             textSearch.VisibleChanged += delegate { PositionSearch(); };
+#endif
             status = Theme.Label("", 9, Theme.Muted); status.Dock = DockStyle.Bottom; status.Height = 34; status.Padding = new Padding(12, 8, 0, 0);
             toolOptions = new AnnotationOptions(this.settings) { Location = new Point(9, 106), Width = 440 };
             toolOptions.SettingsChanged += delegate { toolOptions.ApplyTo(canvas); };
             toolOptions.ToolChanged += SelectTool;
             toolArea = new Panel { Dock = DockStyle.Top, BackColor = Color.White };
             toolOptions.SizeChanged += delegate { if (toolOptions.Visible) toolArea.Height = 110 + toolOptions.Height; };
+#if !SHOTINK_LITE
             textActions = new OcrSelectionActions { Location = new Point(9, 106), Visible = false };
             textActions.CopySelected += delegate { canvas.CopyRecognizedText(false); };
             textActions.CopyAll += delegate { canvas.CopyRecognizedText(true); };
@@ -489,7 +430,11 @@ namespace ShotInk
                 if (canvas.HasTextRecognition) { toolOptions.Hide(); toolArea.Height = 110 + textActions.Height; }
                 else { toolOptions.ShowTool(canvas.Tool); toolArea.Height = 110 + toolOptions.Height; }
             };
-            toolArea.Controls.Add(tools); toolArea.Controls.Add(toolOptions); toolArea.Controls.Add(textActions);
+#endif
+            toolArea.Controls.Add(tools); toolArea.Controls.Add(toolOptions);
+#if !SHOTINK_LITE
+            toolArea.Controls.Add(textActions);
+#endif
             Controls.Add(viewport); Controls.Add(status); Controls.Add(toolArea);
             SelectTool(DrawTool.Rectangle);
             Shown += delegate { Fit(); UpdateStatus("截图已复制；编辑后可再次复制或保存"); };
@@ -504,11 +449,16 @@ namespace ShotInk
 
         private void AddButton(FlowLayoutPanel panel, string text, bool primary, int width, Action action)
         { var b = Theme.Button(text, primary, width); b.Click += delegate { action(); }; panel.Controls.Add(b); }
+#if !SHOTINK_LITE
         private void PositionSearch()
         { textSearch.Location = new Point(viewport.Left + Math.Max(8, viewport.ClientSize.Width - textSearch.Width - 8), viewport.Top + 8); textSearch.BringToFront(); }
+#endif
         private void SelectTool(DrawTool tool)
         {
-            canvas.Tool = tool; textActions.Hide();
+            canvas.Tool = tool;
+#if !SHOTINK_LITE
+            textActions.Hide();
+#endif
             toolOptions.ShowTool(tool); toolOptions.ApplyTo(canvas);
             toolArea.Height = 110 + toolOptions.Height;
             for (int i = 0; i < toolButtons.Count; i++)
@@ -541,7 +491,9 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+#if !SHOTINK_LITE
             if (textSearch.HandleKey(e)) return;
+#endif
             if (canvas.HandleGestureKey(e)) return;
             if (canvas.HandleTextKey(e)) return;
             if (canvas.HandleRecognitionKey(e)) return;
@@ -552,7 +504,11 @@ namespace ShotInk
             base.OnKeyDown(e);
         }
         protected override void Dispose(bool disposing)
-        { if (disposing && recognition != null) recognition.Dispose(); base.Dispose(disposing); }
+        {
+#if !SHOTINK_LITE
+            if (disposing && recognition != null) recognition.Dispose();
+#endif
+            base.Dispose(disposing); }
     }
 
 }

@@ -15,8 +15,12 @@ if ($env:GITHUB_REF -like 'refs/tags/*' -and $env:GITHUB_REF_NAME -ne $tag) { th
 $notes = Join-Path $projectRoot ('releases\' + $tag + '.md')
 if (-not (Test-Path -LiteralPath $notes)) { throw ('Missing release notes: ' + $notes) }
 $zip = Join-Path $AssetDirectory 'ShotInk-portable.zip'
+$liteZip=Join-Path $AssetDirectory 'ShotInk-portable-lite.zip'
+if(-not(Test-Path -LiteralPath $liteZip)){throw 'Missing lite portable ZIP.'}
+$assets=@($zip,$liteZip)
 if (-not (Test-Path -LiteralPath $zip)) { throw ('Missing release asset: ' + $zip) }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach($zip in $assets){
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ShotInk-package-version-' + [Guid]::NewGuid().ToString('N') + '.exe')
 $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zip).Path)
 try {
@@ -27,6 +31,8 @@ try {
 } finally {
     $archive.Dispose()
     if (Test-Path -LiteralPath $probe) { Remove-Item -LiteralPath $probe -Force }
+}
+
 }
 
 # An older build may finish after a newer commit. It must not replace that build.
@@ -55,7 +61,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Release notes update failed.' }
             throw 'Release notes updated. GitHub has made this release immutable; its existing assets cannot be replaced.'
         }
-        & gh release upload $tag $zip --repo $Repository --clobber
+        & gh release upload $tag @assets --repo $Repository --clobber
         if ($LASTEXITCODE -ne 0) { throw 'Release asset replacement failed.' }
         & gh release edit $tag --repo $Repository --title $version --notes-file $body --draft=false --latest
         if ($LASTEXITCODE -ne 0) { throw 'Release notes update failed.' }
@@ -68,7 +74,7 @@ try {
         Write-Host ('Replaced assets for ' + $tag + '; existing tag preserved.')
     } else {
         # Keep incomplete uploads out of the public release list.
-        & gh release create $tag $zip --repo $Repository --target $Commit --title $version --notes-file $body --draft
+        & gh release create $tag @assets --repo $Repository --target $Commit --title $version --notes-file $body --draft
         if ($LASTEXITCODE -ne 0) { throw 'New draft release creation failed.' }
         & gh release edit $tag --repo $Repository --draft=false --latest
         if ($LASTEXITCODE -ne 0) { throw 'New release publication failed.' }

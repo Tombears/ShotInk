@@ -13,6 +13,8 @@
     <LangVersion>5</LangVersion>
     <Prefer32Bit>false</Prefer32Bit>
     <Optimize>true</Optimize>
+    <DefineConstants Condition="'$(ShotInkLite)' == 'true'">$(DefineConstants);SHOTINK_LITE</DefineConstants>
+    <OutputPath Condition="'$(ShotInkLite)' == 'true'">dist-lite\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" /><Reference Include="System.Core" />

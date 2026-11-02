@@ -61,9 +61,9 @@ def request(path, token='', method='GET', body=None, content_type=None, binary=F
 def form(path, token, method, data):
     return request(path, token, method, urllib.parse.urlencode(data).encode(), 'application/x-www-form-urlencoded')
 
-def upload(path, token, data):
+def upload(path, token, data, name="ShotInk-portable.zip"):
     boundary = 'ShotInk' + uuid.uuid4().hex
-    prefix = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="ShotInk-portable.zip"\r\nContent-Type: application/zip\r\n\r\n').encode()
+    prefix = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + name + '"\r\nContent-Type: application/zip\r\n\r\n').encode()
     suffix = ('\r\n--' + boundary + '--\r\n').encode()
     # Keep a fixed Content-Length while limiting each TLS write on slow connections.
     def parts():
@@ -76,62 +76,77 @@ def upload(path, token, data):
         yield suffix
     return request(path, token, 'POST', parts(), 'multipart/form-data; boundary=' + boundary, content_length=len(prefix) + len(data) + len(suffix))
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--archive', required=True)
-    args = parser.parse_args()
-    archive = pathlib.Path(args.archive)
-    version = re.search(r'AssemblyInformationalVersion\("(\d+\.\d+\.\d+)"\)', (ROOT / 'src/AssemblyInfo.cs').read_text(encoding='utf-8')).group(1)
-    tag = 'v' + version
-    raw = archive.read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
-    with zipfile.ZipFile(archive) as package:
+def package_info(path, flavor, version, notes):
+    raw = pathlib.Path(path).read_bytes()
+    name = 'ShotInk-portable-lite.zip' if flavor == 'lite' else 'ShotInk-portable.zip'
+    with zipfile.ZipFile(path) as package:
+        names = [name.replace('\\', '/') for name in package.namelist()]
         revision = package.read('ShotInk.build.sha256').decode('utf-8-sig').strip()
         if not re.fullmatch('[a-fA-F0-9]{64}', revision):
             raise RuntimeError('Portable ZIP omitted its build revision.')
-        for name in ('ShotInk.exe', 'ocr/ShotInk.OcrHost.exe', 'update-portable.ps1', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll'):
-            if name not in package.namelist():
-                raise RuntimeError('Portable ZIP omitted ' + name)
+        if package.read('ShotInk.flavor').decode('utf-8-sig').strip() != flavor:
+            raise RuntimeError('Portable ZIP edition mismatch.')
+        required = ['ShotInk.exe', 'update-portable.ps1', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll']
+        if flavor == 'ocr': required.append('ocr/ShotInk.OcrHost.exe')
+        if any(item not in names for item in required): raise RuntimeError('Portable ZIP omitted required components.')
+        if any(item.lower().startswith('docs/') for item in names): raise RuntimeError('Portable ZIP retained docs.')
+        if flavor == 'lite' and any(item.lower().startswith('ocr/') for item in names): raise RuntimeError('Lite portable ZIP retained OCR.')
+    digest = hashlib.sha256(raw).hexdigest()
+    url = 'https://gitee.com/' + REPOSITORY + '/releases/download/v' + version + '/' + name
+    index = dict(version=version, revision=revision, sha256=digest, size=len(raw), url=url, notes=notes)
+    return dict(name=name, raw=raw, index=index, index_name='latest-lite.json' if flavor == 'lite' else 'latest.json')
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--archive', required=True)
+    parser.add_argument('--lite-archive', required=True)
+    args = parser.parse_args()
+    version = re.search(r'AssemblyInformationalVersion\("(\d+\.\d+\.\d+)"\)', (ROOT / 'src/AssemblyInfo.cs').read_text(encoding='utf-8')).group(1)
+    tag = 'v' + version
     notes = (ROOT / 'releases' / (tag + '.md')).read_text(encoding='utf-8')
+    packages = [package_info(args.archive, 'ocr', version, notes), package_info(args.lite_archive, 'lite', version, notes)]
     token = saved_token()
     release = request('/releases/tags/' + tag, token)
     metadata = {'tag_name': tag, 'name': version, 'body': notes, 'prerelease': 'false'}
     if release is None:
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-        release = form('/releases', token, 'POST', dict(metadata, tag_name=tag, target_commitish=commit))
+        release = form('/releases', token, 'POST', dict(metadata, target_commitish=commit))
     files_path = '/releases/' + str(release['id']) + '/attach_files'
     assets = request(files_path + '?per_page=100', token) or []
-    existing = next((asset for asset in assets if asset['name'] == 'ShotInk-portable.zip'), None)
-    url = 'https://gitee.com/' + REPOSITORY + '/releases/download/' + tag + '/ShotInk-portable.zip'
-    print('Checking the existing Gitee attachment.', file=sys.stderr, flush=True)
-    previous = request(url, binary=True) if existing else None
-    if existing and previous is None:
-        raise RuntimeError('Cannot back up the existing Gitee package; leaving it unchanged.')
-    if previous is None or hashlib.sha256(previous).hexdigest() != digest:
-        if existing:
-            request(files_path + '/' + str(existing['id']), token, 'DELETE')
-        try:
-            print('Uploading the verified portable ZIP to Gitee.', file=sys.stderr, flush=True)
-            upload(files_path, token, raw)
-            print('Verifying the anonymous Gitee download.', file=sys.stderr, flush=True)
-            check = request(url + '?verify=' + uuid.uuid4().hex, binary=True)
-            if check is None or hashlib.sha256(check).hexdigest() != digest:
-                raise RuntimeError('Anonymous Gitee download checksum mismatch.')
-        except Exception:
-            if previous is not None:
-                current = request(files_path + '?per_page=100', token) or []
-                for asset in current:
-                    if asset['name'] == 'ShotInk-portable.zip':
-                        request(files_path + '/' + str(asset['id']), token, 'DELETE')
-                upload(files_path, token, previous)
-            raise
-    form('/releases/' + str(release['id']), token, 'PATCH', metadata)
-    # The index becomes visible only after the exact ZIP is anonymously downloadable.
-    index = dict(version=version, revision=revision, sha256=digest, size=len(raw), url=url, notes=notes)
-    destination = ROOT / 'updates/latest.json'
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(index, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    print(json.dumps(dict(tag=tag, url=url, sha256=digest, verified=True, index=str(destination)), ensure_ascii=False))
+    backups, changed = {}, []
+    for package in packages:
+        existing = next((asset for asset in assets if asset['name'] == package['name']), None)
+        previous = request(package['index']['url'], binary=True) if existing else None
+        if existing and previous is None: raise RuntimeError('Cannot back up the existing Gitee package.')
+        backups[package['name']] = (existing, previous)
+    try:
+        for package in packages:
+            name, index = package['name'], package['index']
+            existing, previous = backups[name]
+            if previous is None or hashlib.sha256(previous).hexdigest() != index['sha256']:
+                changed.append(package)
+                if existing: request(files_path + '/' + str(existing['id']), token, 'DELETE')
+                print('Uploading ' + name, file=sys.stderr, flush=True)
+                upload(files_path, token, package['raw'], name)
+            print('Verifying anonymous download: ' + name, file=sys.stderr, flush=True)
+            check = request(index['url'] + '?verify=' + uuid.uuid4().hex, binary=True)
+            if check is None or hashlib.sha256(check).hexdigest() != index['sha256']:
+                raise RuntimeError('Anonymous Gitee download checksum mismatch: ' + name)
+        form('/releases/' + str(release['id']), token, 'PATCH', metadata)
+    except Exception:
+        for package in reversed(changed):
+            name = package['name']
+            current = request(files_path + '?per_page=100', token) or []
+            for asset in current:
+                if asset['name'] == name: request(files_path + '/' + str(asset['id']), token, 'DELETE')
+            previous = backups[name][1]
+            if previous is not None: upload(files_path, token, previous, name)
+        raise
+    for package in packages:
+        destination = ROOT / 'updates' / package['index_name']
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(package['index'], ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    print(json.dumps(dict(tag=tag, verified=True, packages=[dict(name=p['name'], **p['index']) for p in packages]), ensure_ascii=False))
 
 if __name__ == '__main__':
     try:

@@ -28,7 +28,9 @@ namespace ShotInk
                 {
                     MessageBox.Show(e.Exception.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 };
+#if !SHOTINK_LITE
                 Application.ApplicationExit += delegate { RapidTextRecognizer.Shared.Dispose(); };
+#endif
                 Application.Run(new MainForm(null, true, startInTray));
             }
         }

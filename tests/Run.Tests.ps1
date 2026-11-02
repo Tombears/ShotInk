@@ -16,7 +16,7 @@ try {
     New-Item -ItemType Directory -Path $fixture, (Join-Path $fixture 'src'), (Join-Path $fixture 'scripts'), (Join-Path $fixture 'dist\ocr') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot 'run.ps1') -Destination $fixture
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\build-inputs.ps1') -Destination (Join-Path $fixture 'scripts')
-    foreach ($file in @('ShotInk.csproj', 'app.manifest', 'README.md', 'LICENSE', 'src\Sample.cs')) {
+    foreach ($file in @('ShotInk.csproj', 'app.manifest', 'README.md', 'README-lite.md', 'LICENSE', 'src\Sample.cs')) {
         [IO.File]::WriteAllText((Join-Path $fixture $file), 'fixture')
     }
     $fakeBuild = @'

@@ -31,7 +31,7 @@ namespace ShotInk
                 throw new InvalidDataException("Gitee 更新信息无效。");
             Uri uri;
             if (!Uri.TryCreate(Url, UriKind.Absolute, out uri) || uri.Scheme != "https" || uri.Host != "gitee.com" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 ||
-                !uri.AbsolutePath.StartsWith("/clear_wind_and_rain/ShotInk/releases/download/", StringComparison.Ordinal) || !uri.AbsolutePath.EndsWith("/ShotInk-portable.zip", StringComparison.Ordinal))
+                !uri.AbsolutePath.StartsWith("/clear_wind_and_rain/ShotInk/releases/download/", StringComparison.Ordinal) || !uri.AbsolutePath.EndsWith("/" + BuildFeatures.Archive, StringComparison.Ordinal))
                 throw new InvalidDataException("更新下载地址不是 ShotInk 的 Gitee 便携包。");
         }
         private static bool Hash(string value) { return value != null && value.Length == 64 && value.All(Uri.IsHexDigit); }
@@ -54,6 +54,7 @@ namespace ShotInk
         [DataMember] internal string Backup;
         [DataMember] internal int ProcessId;
         [DataMember] internal string Version;
+        [DataMember] internal string Flavor;
         [DataMember] internal UpdateFile[] Files;
     }
     internal sealed class PreparedUpdate
@@ -64,7 +65,7 @@ namespace ShotInk
     internal static class UpdateService
     {
         internal const string ReleasePage = "https://gitee.com/clear_wind_and_rain/ShotInk/releases";
-        internal const string IndexUrl = "https://gitee.com/api/v5/repos/clear_wind_and_rain/ShotInk/contents/updates/latest.json?ref=main";
+        internal const string IndexUrl = "https://gitee.com/api/v5/repos/clear_wind_and_rain/ShotInk/contents/updates/" + BuildFeatures.Index + "?ref=main";
         internal static string CacheRoot { get { return Directory.Exists(@"E:\DevData") ? @"E:\DevData\ShotInk\updates" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShotInk-updates"); } }
         internal static T ReadJson<T>(byte[] bytes)
         { using (var stream = new MemoryStream(bytes)) return (T)new DataContractJsonSerializer(typeof(T)).ReadObject(stream); }
@@ -177,16 +178,20 @@ namespace ShotInk
                 if (name.EndsWith("/", StringComparison.Ordinal)) continue;
                 if (!names.Add(name) || names.Count > 6000 || (expanded += entry.Length) > 1536L * 1024 * 1024) throw new InvalidDataException("更新包内容异常。");
                 string lower = name.ToLowerInvariant();
+                if (!BuildFeatures.Ocr && lower.StartsWith("ocr/")) throw new InvalidDataException("轻量版更新包不能包含 OCR 组件。");
                 if (lower.Contains("settings.ini") || lower.StartsWith("captures/") || lower.StartsWith("updates/")) throw new InvalidDataException("更新包不能覆盖用户设置或历史。");
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 using (var input = entry.Open()) using (var output = new FileStream(destination, FileMode.CreateNew)) input.CopyTo(output);
                 files.Add(new UpdateFile { Path = name, Sha256 = Digest(destination) });
             }
-            foreach (string required in new[] { "ShotInk.exe", "ShotInk.build.sha256", "ocr/ShotInk.OcrHost.exe", "update-portable.ps1", "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll" })
+            var requiredFiles = new List<string> { "ShotInk.exe", "ShotInk.build.sha256", "ShotInk.flavor", "update-portable.ps1", "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll" };
+            if (BuildFeatures.Ocr) requiredFiles.Add("ocr/ShotInk.OcrHost.exe");
+            foreach (string required in requiredFiles)
                 if (!names.Contains(required)) throw new InvalidDataException("更新包缺少必要组件：" + required);
+            if (File.ReadAllText(Path.Combine(payload, "ShotInk.flavor")).Trim() != BuildFeatures.Flavor) throw new InvalidDataException("更新包类型与当前版本不一致。");
             if (!string.Equals(InstalledRevision(payload), info.Revision, StringComparison.OrdinalIgnoreCase) || System.Reflection.AssemblyName.GetAssemblyName(Path.Combine(payload, "ShotInk.exe")).Version.ToString(3) != info.Version)
                 throw new InvalidDataException("更新包版本与 Gitee 发布信息不一致。");
-            var plan = new UpdatePlan { Target = Path.GetFullPath(target), Payload = payload, Backup = Path.Combine(folder, "backup"), ProcessId = processId, Version = info.Version, Files = files.ToArray() };
+            var plan = new UpdatePlan { Target = Path.GetFullPath(target), Payload = payload, Backup = Path.Combine(folder, "backup"), ProcessId = processId, Version = info.Version, Flavor = BuildFeatures.Flavor, Files = files.ToArray() };
             string planPath = Path.Combine(folder, "update-plan.json"); File.WriteAllBytes(planPath, Json(plan));
             string helper = Path.Combine(folder, "update-portable.ps1"); File.Copy(Path.Combine(payload, "update-portable.ps1"), helper);
             return new PreparedUpdate { Folder = folder, PlanPath = planPath, HelperPath = helper, Info = info };

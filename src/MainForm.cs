@@ -55,7 +55,7 @@ namespace ShotInk
             settings.Changed += delegate { settingsDirty = true; settingsTimer.Stop(); settingsTimer.Start(); };
             historyRoot = Path.Combine(dataRoot, "captures");
             Directory.CreateDirectory(historyRoot);
-            Text = "ShotInk " + Application.ProductVersion + " · 截图与长截图";
+            Text = BuildFeatures.Title + " " + Application.ProductVersion + " · 截图与长截图";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9);
             Size = new Size(1080, 730);
@@ -263,7 +263,9 @@ namespace ShotInk
             {
                 if (settingsOpen) return;
                 int id = m.WParam.ToInt32();
+#if !SHOTINK_LITE
                 if (id == 2 && settings.PinShortcut == Keys.F3 && OcrSearchPanel.ForwardGlobalFindNext()) return;
+#endif
                 if (id == 1) BeginCapture(false);
                 if (id == 2 && !captureBusy) PinClipboard();
                 if (id == 3) BeginCapture(true);

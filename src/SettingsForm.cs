@@ -66,9 +66,9 @@ namespace ShotInk
             layout.Controls.Add(startup, 0, 7); layout.SetColumnSpan(startup, 3);
             var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
             layout.Controls.Add(startupHint, 0, 8); layout.SetColumnSpan(startupHint, 3);
-            checkUpdates = new CheckBox { Name = "check-updates", Text = "每小时自动检查更新（Gitee）", Checked = current.CheckUpdates, Dock = DockStyle.Fill };
+            checkUpdates = new CheckBox { Name = "check-updates", Text = "每小时自动检查更新", Checked = current.CheckUpdates, Dock = DockStyle.Fill };
             layout.Controls.Add(checkUpdates, 0, 9); layout.SetColumnSpan(checkUpdates, 3);
-            var version = new Label { Text = "当前版本 " + Application.ProductVersion, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            var version = new Label { Text = "当前版本 " + Application.ProductVersion + (BuildFeatures.Ocr ? " · 完整版" : " · 轻量版"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(version, 0, 10); layout.SetColumnSpan(version, 2);
             updateCheck = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = updates != null };
             updateCheck.Click += async delegate { if (updates != null) await updates.CheckAsync(); }; layout.Controls.Add(updateCheck, 2, 10);

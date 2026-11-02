@@ -15,15 +15,20 @@ namespace ShotInk
         private bool longAlignmentLost;
         internal Func<Rectangle, Bitmap> CaptureScrollFrame = Native.Capture;
         internal bool InterceptScrollWheel = true;
+#if !SHOTINK_LITE
         private void ResetRecognitionSession()
         {
             if (recognition != null) recognition.Dispose();
             recognition = new TextRecognitionSession(this, delegate { return canvas.Render(); }, delegate { return canvas.Revision; }, toolbar.SetRecognitionBusy,
                 delegate(OcrDocument document) { toolbar.SelectTool(DrawTool.None); canvas.SetTextRecognition(document); canvas.Focus(); });
         }
+#else
+        private void ResetRecognitionSession() { }
+#endif
         private async void StartLongCapture() { await CaptureLongAsync(); }
         internal async Task CaptureLongAsync()
         {
+            EnsureCaptureUiContext();
             if (!ready || scrollSession != null || gifSession != null || longViewport != null) return;
             if (selection.Width < 80 || selection.Height < 120)
             { MessageBox.Show(this, "长截图区域至少需要 80 × 120 像素。", "选区过小"); return; }
@@ -48,6 +53,7 @@ namespace ShotInk
                 Native.RaiseWithoutActivation(Handle);
                 await Task.Delay(60);
                 if (IsDisposed || !object.ReferenceEquals(scrollSession, session)) return;
+                EnsureCaptureUiContext();
                 Native.FlushDesktop();
                 scrollWheel = new ScrollWheelRouter(Handle, region, session, InterceptScrollWheel);
                 using (var result = await session.RunAsync())
@@ -100,7 +106,9 @@ namespace ShotInk
             next.UseDocumentViewport(selection.Size);
             next.Location = Point.Empty; canvas = next; longViewport.Controls.Add(next); Controls.Add(longViewport);
             next.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
+#if !SHOTINK_LITE
             next.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
+#endif
             next.MouseDown += delegate(object sender, MouseEventArgs e)
             {
                 if (e.Button == MouseButtons.Right) BeginRightCancel();
@@ -108,7 +116,9 @@ namespace ShotInk
                     BeginAdjust(-1, PointToClient(canvas.PointToScreen(e.Location)));
             };
             next.MouseDoubleClick += delegate { if (canvas.Tool == DrawTool.None && !canvas.HasTextRecognition) Finish(CaptureAction.Copy); };
+#if !SHOTINK_LITE
             textSearch.Bind(next);
+#endif
             Controls.Remove(previous); previous.Dispose(); ResetRecognitionSession();
             SyncSettings(); toolbar.SetLongPreview(true); toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo);
             UpdateSelectionChrome(); PositionToolbar(); canvas.Focus();

@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace ShotInk
 {
-    internal sealed partial class AnnotationCanvas
+    internal sealed partial class AnnotationRasterRenderer
     {
         private sealed class EffectPatch : IDisposable
         {
@@ -40,7 +40,7 @@ namespace ShotInk
                 if (patch != null) { mosaicCache.Remove(mark); patch.Dispose(); }
                 // Active brush bounds change frequently; release abandoned previews and undo states.
                 var stale = new List<Mark>();
-                foreach (var key in mosaicCache.Keys) if (!Marks.Contains(key) && key != active) stale.Add(key);
+                foreach (var key in mosaicCache.Keys) if (!retain(key) && key != mark) stale.Add(key);
                 foreach (var key in stale) { mosaicCache[key].Dispose(); mosaicCache.Remove(key); }
                 using (var source = Image.Clone(bounds, PixelFormat.Format24bppRgb))
                     patch = new EffectPatch { Bounds = bounds, Size = size, Effect = mark.MosaicEffect,

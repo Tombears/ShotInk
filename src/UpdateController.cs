@@ -35,7 +35,7 @@ namespace ShotInk
         internal async Task CheckAsync(Func<CancellationToken, Task<UpdateInfo>> verifiedCheck = null)
         {
             if (disposed || Checking) return;
-            Checking = true; Available = null; NeedsVerification = false; Status = "正在从 Gitee 检查更新…"; Notify();
+            Checking = true; Available = null; NeedsVerification = false; Status = "正在检查更新…"; Notify();
             try
             {
                 var info = await (verifiedCheck ?? check)(cancellation.Token);
@@ -43,8 +43,8 @@ namespace ShotInk
                 Available = info.IsNewer(installedVersion, installedRevision) ? info : null;
                 Status = Available == null ? "当前已是最新版本。" : info.Version == installedVersion ? "当前版本有修复更新。" : "发现新版本 " + info.Version;
             }
-            catch (VerificationRequiredException) { if (!disposed) { NeedsVerification = true; Status = "Gitee 需要人机验证，请点击“完成验证”。"; } }
-            catch (Exception error) { if (!disposed) Status = "检查失败：" + error.Message; }
+            catch (VerificationRequiredException) { if (!disposed) { NeedsVerification = true; Status = "需要人机验证，请点击“完成验证”。"; } }
+            catch (Exception error) { if (!disposed) Status = "检查失败：" + error.Message.Replace("Gitee", "更新服务"); }
             finally { Checking = false; if (!disposed) Notify(); }
         }
         private void Notify() { if (Changed != null) Changed(); }

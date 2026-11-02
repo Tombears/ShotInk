@@ -33,6 +33,7 @@ try {
     $package = [IO.Compression.ZipFile]::Open($zipFixture, [IO.Compression.ZipArchiveMode]::Create)
     try { [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($package, (Resolve-Path -LiteralPath $BinaryPath).Path, 'ShotInk.exe') | Out-Null }
     finally { $package.Dispose() }
+    Copy-Item -LiteralPath $zipFixture -Destination (Join-Path $fixture 'assets\ShotInk-portable-lite.zip')
     # Publication must work with the ZIP alone, without a loose EXE or installer.
     Remove-Item -LiteralPath (Join-Path $fixture 'assets\dist\ShotInk.exe') -Force
     $script = Join-Path $fixture 'scripts\release-github.ps1'
@@ -43,7 +44,8 @@ try {
     & $script -AssetDirectory $assetRoot -Repository owner/repo -Commit current
     Assert-Release ((Calls-For create).Count -eq 1 -and (Calls-For edit).Count -eq 1) 'A new version did not create and publish a draft.'
     Assert-Release ((Calls-For create)[0] -contains '--draft') 'New release was visible before its assets were ready.'
-    Assert-Release (((Calls-For create)[0] -join ' ') -like '*ShotInk-portable.zip*' -and ((Calls-For create)[0] -join ' ') -notlike '*ShotInk-Setup.exe*') 'New releases must publish only the portable ZIP.'
+    Assert-Release (((Calls-For create)[0] -join ' ') -like '*ShotInk-portable.zip*' -and ((Calls-For create)[0] -join ' ') -notlike '*ShotInk-Setup.exe*') 'New releases must publish only portable ZIPs.'
+    Assert-Release (((Calls-For create)[0] -join ' ') -like '*ShotInk-portable-lite.zip*') 'The release omitted the lite ZIP.'
     Assert-Release ($state.Notes.Trim() -eq 'Release notes') 'Internal publication details were appended to the user-facing release notes.'
 
     $state.Calls = @(); $state.Releases = @(

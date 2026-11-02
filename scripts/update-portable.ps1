@@ -38,7 +38,13 @@ function Install-PortableUpdate {
         $null=Resolve-UpdateFile $target $file.Path
         if((Get-UpdateHash $source) -ne $file.Sha256){throw 'Staged update checksum failed.'}
     }
-    foreach($required in @('ShotInk.exe','ShotInk.build.sha256','ocr/ShotInk.OcrHost.exe','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')){if(-not $seen.Contains($required)){throw 'Update omitted a required file.'}}
+    $flavor=if($update.Flavor){[string]$update.Flavor}else{'ocr'}
+    if($flavor -notin @('ocr','lite')){throw 'Invalid update flavor.'}
+    $requiredFiles=@('ShotInk.exe','ShotInk.build.sha256','ShotInk.flavor','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')
+    if($flavor -eq 'ocr'){$requiredFiles+='ocr/ShotInk.OcrHost.exe'}
+    foreach($required in $requiredFiles){if(-not $seen.Contains($required)){throw 'Update omitted a required file.'}}
+    if([IO.File]::ReadAllText((Join-Path $payload 'ShotInk.flavor')).Trim() -ne $flavor){throw 'Update flavor mismatch.'}
+    if($flavor -eq 'lite' -and @($files|Where-Object{$_.Path -like 'ocr/*'}).Count){throw 'Lite update contains OCR components.'}
     if([Reflection.AssemblyName]::GetAssemblyName((Join-Path $payload 'ShotInk.exe')).Version.ToString(3) -ne $update.Version){throw 'Update version mismatch.'}
     [IO.File]::WriteAllText((Join-Path $updateRoot 'update-ready.txt'),'ready')
     $process=Get-Process -Id $update.ProcessId -ErrorAction SilentlyContinue
