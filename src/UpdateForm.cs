@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Threading;
@@ -32,15 +31,14 @@ namespace ShotInk
             foreach (int height in new[] { 30, 40 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             foreach (int height in new[] { 26, 44, 38 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-            layout.Controls.Add(new Label { Text = "当前版本 " + Application.ProductVersion + " · 更新源 Gitee", Dock = DockStyle.Fill }, 0, 0);
+            layout.Controls.Add(new Label { Text = "当前版本 " + Application.ProductVersion, Dock = DockStyle.Fill }, 0, 0);
             status = new Label { Name = "update-status", Dock = DockStyle.Fill }; layout.Controls.Add(status, 0, 1);
             notes = new TextBox { Name = "update-notes", ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.White }; layout.Controls.Add(notes, 0, 2);
             progress = new ProgressBar { Dock = DockStyle.Fill, Visible = false }; layout.Controls.Add(progress, 0, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             check = new Button { Text = "检查更新", Width = 100, Height = 32 }; check.Click += async delegate { await CheckAsync(); };
             action = new Button { Text = "下载更新", Width = 170, Height = 32, Enabled = false }; action.Click += async delegate { await ActAsync(); };
-            var page = new Button { Text = "Gitee 发行页", Width = 110, Height = 32 }; page.Click += delegate { Process.Start(new ProcessStartInfo(UpdateService.ReleasePage) { UseShellExecute = true }); };
-            buttons.Controls.Add(check); buttons.Controls.Add(action); buttons.Controls.Add(page); layout.Controls.Add(buttons, 0, 4);
+            buttons.Controls.Add(check); buttons.Controls.Add(action); layout.Controls.Add(buttons, 0, 4);
             layout.Controls.Add(new Label { Text = "校验下载包后再确认更新并重启，保留保存目录、快捷键和截图历史。", ForeColor = Color.DimGray, Dock = DockStyle.Fill }, 0, 5);
             Controls.Add(layout);
             Shown += async delegate { if (info != null) ShowInfo(); await CheckAsync(); };
@@ -54,7 +52,7 @@ namespace ShotInk
         }
         private async Task CheckAsync()
         {
-            if (busy) return; busy = true; check.Enabled = action.Enabled = false; status.Text = "正在从 Gitee 检查更新…";
+            if (busy) return; busy = true; check.Enabled = action.Enabled = false; status.Text = "正在检查更新…";
             try
             {
                 bool verification = false;
@@ -81,7 +79,7 @@ namespace ShotInk
                 finally { if (!IsDisposed) { busy = false; action.Enabled = check.Enabled = true; } }
                 return;
             }
-            busy = true; check.Enabled = action.Enabled = false; progress.Visible = true; progress.Value = 0; status.Text = "正在从 Gitee 下载并校验更新包…";
+            busy = true; check.Enabled = action.Enabled = false; progress.Visible = true; progress.Value = 0; status.Text = "正在下载并校验更新包…";
             try
             {
                 var downloadProgress = new Progress<int>(delegate(int value) { if (!IsDisposed) progress.Value = value; });
@@ -90,7 +88,7 @@ namespace ShotInk
                 catch (VerificationRequiredException) { verification = true; }
                 if (verification)
                 {
-                    status.Text = "Gitee 需要人机验证，请在验证窗口完成操作…";
+                    status.Text = "需要人机验证，请在验证窗口完成操作…";
                     prepared = await UpdateService.DownloadWithBrowserAsync(info, AppDomain.CurrentDomain.BaseDirectory, this, cancellation.Token, downloadProgress);
                 }
                 if (!IsDisposed) { status.Text = "更新包已校验。请先关闭其他截图、贴图或剪辑窗口，再确认更新。"; action.Text = "确认更新并重启"; action.Enabled = true; }

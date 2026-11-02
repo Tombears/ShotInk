@@ -33,9 +33,9 @@ namespace ShotInk
             this.package = package; this.destination = destination; this.progress = progress;
             url = testUrl ?? (package == null ? UpdateService.IndexUrl : package.Url);
             allowed = testAllowed ?? Trusted; profile = testProfile ?? Path.Combine(UpdateService.CacheRoot, "browser");
-            Text = "Gitee 安全验证 · ShotInk"; MainForm.UseAppIcon(this); Font = ToolAppearance.Font;
+            Text = "更新安全验证 · ShotInk"; MainForm.UseAppIcon(this); Font = ToolAppearance.Font;
             ClientSize = new Size(880, 660); MinimumSize = new Size(660, 480); StartPosition = FormStartPosition.CenterParent;
-            status = new Label { Text = "请在下方完成 Gitee 验证，完成后将继续更新。", Dock = DockStyle.Top, Height = 42, Padding = new Padding(12) };
+            status = new Label { Text = "请在下方完成人机验证，完成后将继续更新。", Dock = DockStyle.Top, Height = 42, Padding = new Padding(12) };
             retry = new Button { Text = "已完成验证，继续", Dock = DockStyle.Bottom, Height = 38 };
             browser = new WebView2 { Dock = DockStyle.Fill };
             Controls.Add(browser); Controls.Add(status); Controls.Add(retry);
@@ -65,17 +65,17 @@ namespace ShotInk
                     core.NavigationStarting += delegate(object sender, CoreWebView2NavigationStartingEventArgs e)
                     {
                         Uri uri; if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out uri) || !allowed(uri))
-                        { e.Cancel = true; Fail(new InvalidDataException("验证页面跳转到了非 Gitee 地址。")); }
+                        { e.Cancel = true; Fail(new InvalidDataException("验证页面跳转到了不受信任的地址。")); }
                     };
                     core.DownloadStarting += DownloadStarting;
                     core.WebResourceResponseReceived += MetadataResponseReceived;
                     core.NavigationCompleted += NavigationCompleted;
-                    core.ProcessFailed += delegate { Fail(new IOException("Gitee 验证页面进程已退出，请重新下载。")); };
+                    core.ProcessFailed += delegate { Fail(new IOException("验证页面进程已退出，请重新下载。")); };
                     core.Navigate(url);
                     await completion.Task;
                 }
                 catch (WebView2RuntimeNotFoundException)
-                { throw new IOException("安全验证需要 Microsoft Edge WebView2 Runtime，请安装后重试，或从 Gitee 发行页手动下载更新包。"); }
+                { throw new IOException("安全验证需要 Microsoft Edge WebView2 Runtime，请安装后重试更新。"); }
                 finally
                 {
                     if (download != null && download.State == CoreWebView2DownloadState.InProgress) download.Cancel();
@@ -95,7 +95,7 @@ namespace ShotInk
                     if (disposed || completion.Task.IsCompleted) return;
                     string text = UpdateService.ReadJson<string>(Encoding.UTF8.GetBytes(body));
                     byte[] bytes = Encoding.UTF8.GetBytes(text ?? "");
-                    if (bytes.Length > 256 * 1024) throw new InvalidDataException("Gitee 更新信息超过允许大小。");
+                    if (bytes.Length > 256 * 1024) throw new InvalidDataException("更新信息超过允许大小。");
                     try { UpdateService.DecodeIndex(bytes); Metadata = bytes; completion.TrySetResult(true); return; }
                     catch (System.Runtime.Serialization.SerializationException) { }
                     catch (InvalidDataException) { }
@@ -121,7 +121,7 @@ namespace ShotInk
                 {
                     byte[] buffer = new byte[8192]; int count;
                     while ((count = await input.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                    { if (output.Length + count > 256 * 1024) throw new InvalidDataException("Gitee 更新信息超过允许大小。"); output.Write(buffer, 0, count); }
+                    { if (output.Length + count > 256 * 1024) throw new InvalidDataException("更新信息超过允许大小。"); output.Write(buffer, 0, count); }
                     if (disposed || completion.Task.IsCompleted) return;
                     byte[] bytes = output.ToArray(); UpdateService.DecodeIndex(bytes); Metadata = bytes; completion.TrySetResult(true);
                 }
@@ -144,14 +144,14 @@ namespace ShotInk
                 if (disposed || completion.Task.IsCompleted || download != null || !Uri.TryCreate(e.DownloadOperation.Uri, UriKind.Absolute, out uri) || !allowed(uri))
                 { e.Cancel = true; return; }
                 long maximum = package == null ? 256 * 1024 : package.Size;
-                if (e.DownloadOperation.TotalBytesToReceive.HasValue && e.DownloadOperation.TotalBytesToReceive.Value > (ulong)maximum) { e.Cancel = true; Fail(new InvalidDataException("Gitee 下载数据超过允许大小。")); return; }
+                if (e.DownloadOperation.TotalBytesToReceive.HasValue && e.DownloadOperation.TotalBytesToReceive.Value > (ulong)maximum) { e.Cancel = true; Fail(new InvalidDataException("更新下载数据超过允许大小。")); return; }
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 e.ResultFilePath = destination; e.Handled = true; download = e.DownloadOperation;
                 retry.Enabled = false; status.Text = "验证已通过，正在下载并校验更新数据…";
                 download.BytesReceivedChanged += delegate
                 {
                     if (disposed || completion.Task.IsCompleted) return;
-                    if (download.BytesReceived > maximum) { download.Cancel(); Fail(new InvalidDataException("Gitee 下载数据超过允许大小。")); return; }
+                    if (download.BytesReceived > maximum) { download.Cancel(); Fail(new InvalidDataException("更新下载数据超过允许大小。")); return; }
                     if (progress != null) progress.Report((int)Math.Min(100, download.BytesReceived * 100 / maximum));
                 };
                 download.StateChanged += DownloadStateChanged;
@@ -172,7 +172,7 @@ namespace ShotInk
                 catch (Exception error) { Fail(error); }
             }
             else if (download.State == CoreWebView2DownloadState.Interrupted)
-                Fail(new IOException("Gitee 下载中断：" + download.InterruptReason));
+                Fail(new IOException("更新下载中断：" + download.InterruptReason));
         }
         private void Fail(Exception error) { completion.TrySetException(error); }
         private void RestoreOwner()

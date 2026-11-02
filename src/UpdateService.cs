@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 namespace ShotInk
 {
     internal sealed class VerificationRequiredException : IOException
-    { internal VerificationRequiredException() : base("Gitee 需要人机验证，请在验证窗口完成操作。") { } }
+    { internal VerificationRequiredException() : base("更新需要人机验证，请在验证窗口完成操作。") { } }
     [DataContract]
     internal sealed class UpdateInfo
     {
@@ -28,11 +28,11 @@ namespace ShotInk
         {
             System.Version version;
             if (Version == null || !System.Text.RegularExpressions.Regex.IsMatch(Version, @"^\d+\.\d+\.\d+$") || !System.Version.TryParse(Version, out version) || version.Major < 1 || !Hash(Revision) || !Hash(Sha256) || Size < 1 || Size > 512L * 1024 * 1024)
-                throw new InvalidDataException("Gitee 更新信息无效。");
+                throw new InvalidDataException("更新信息无效。");
             Uri uri;
             if (!Uri.TryCreate(Url, UriKind.Absolute, out uri) || uri.Scheme != "https" || uri.Host != "gitee.com" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 ||
                 !uri.AbsolutePath.StartsWith("/clear_wind_and_rain/ShotInk/releases/download/", StringComparison.Ordinal) || !uri.AbsolutePath.EndsWith("/" + BuildFeatures.Archive, StringComparison.Ordinal))
-                throw new InvalidDataException("更新下载地址不是 ShotInk 的 Gitee 便携包。");
+                throw new InvalidDataException("更新下载地址不是受信任的 ShotInk 便携包。");
         }
         private static bool Hash(string value) { return value != null && value.Length == 64 && value.All(Uri.IsHexDigit); }
         internal bool IsNewer(string installedVersion, string installedRevision)
@@ -64,7 +64,6 @@ namespace ShotInk
     }
     internal static class UpdateService
     {
-        internal const string ReleasePage = "https://gitee.com/clear_wind_and_rain/ShotInk/releases";
         internal const string IndexUrl = "https://gitee.com/api/v5/repos/clear_wind_and_rain/ShotInk/contents/updates/" + BuildFeatures.Index + "?ref=main";
         internal static string CacheRoot { get { return Directory.Exists(@"E:\DevData") ? @"E:\DevData\ShotInk\updates" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShotInk-updates"); } }
         internal static T ReadJson<T>(byte[] bytes)
@@ -89,7 +88,7 @@ namespace ShotInk
         internal static UpdateInfo DecodeIndex(byte[] bytes)
         {
             var envelope = ReadJson<GiteeContent>(bytes);
-            if (envelope.Encoding != "base64" || envelope.Content == null) throw new InvalidDataException("Gitee 更新信息格式无效。");
+            if (envelope.Encoding != "base64" || envelope.Content == null) throw new InvalidDataException("更新信息格式无效。");
             var info = ReadJson<UpdateInfo>(Convert.FromBase64String(envelope.Content)); info.Validate(); return info;
         }
         internal static async Task<UpdateInfo> CheckWithBrowserAsync(System.Windows.Forms.Form owner, CancellationToken token)
@@ -190,7 +189,7 @@ namespace ShotInk
                 if (!names.Contains(required)) throw new InvalidDataException("更新包缺少必要组件：" + required);
             if (File.ReadAllText(Path.Combine(payload, "ShotInk.flavor")).Trim() != BuildFeatures.Flavor) throw new InvalidDataException("更新包类型与当前版本不一致。");
             if (!string.Equals(InstalledRevision(payload), info.Revision, StringComparison.OrdinalIgnoreCase) || System.Reflection.AssemblyName.GetAssemblyName(Path.Combine(payload, "ShotInk.exe")).Version.ToString(3) != info.Version)
-                throw new InvalidDataException("更新包版本与 Gitee 发布信息不一致。");
+                throw new InvalidDataException("更新包版本与发布信息不一致。");
             var plan = new UpdatePlan { Target = Path.GetFullPath(target), Payload = payload, Backup = Path.Combine(folder, "backup"), ProcessId = processId, Version = info.Version, Flavor = BuildFeatures.Flavor, Files = files.ToArray() };
             string planPath = Path.Combine(folder, "update-plan.json"); File.WriteAllBytes(planPath, Json(plan));
             string helper = Path.Combine(folder, "update-portable.ps1"); File.Copy(Path.Combine(payload, "update-portable.ps1"), helper);
