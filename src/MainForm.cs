@@ -148,12 +148,14 @@ namespace ShotInk
             catch (Exception ex) { if (notice != null) notice.Text = "设置保存失败：" + ex.Message; }
         }
         private void OpenSettings()
+        { OpenSettingsCore(false); }
+        private void OpenSettingsCore(bool checkVersion)
         {
             if (settingsOpen || captureBusy) return;
             if (startup != null) settings.StartWithWindows = startup.IsEnabled;
             settingsOpen = true;
             if (hotkeys != null) hotkeys.Clear();
-            try { using (var dialog = new SettingsForm(settings, ApplySettings, null, ShowUpdates)) dialog.ShowDialog(this); }
+            try { using (var dialog = new SettingsForm(settings, ApplySettings, null, updates, ShowUpdateDetails, checkVersion)) dialog.ShowDialog(this); }
             finally
             {
                 if (!IsDisposed && hotkeys != null)

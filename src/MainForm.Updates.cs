@@ -10,32 +10,22 @@ namespace ShotInk
 {
     internal sealed partial class MainForm
     {
-        private System.Windows.Forms.Timer updateTimer;
-        private CancellationTokenSource updateCancellation;
+        private UpdateController updates;
         private UpdateForm updateWindow;
-        private UpdateInfo availableUpdate;
         private void SetupUpdateCheck()
         {
-            updateCancellation = new CancellationTokenSource(); updateTimer = new System.Windows.Forms.Timer { Interval = 10000 };
-            updateTimer.Tick += async delegate
-            {
-                updateTimer.Stop(); if (!settings.CheckUpdates) return;
-                try
-                {
-                    var info = await UpdateService.CheckAsync(updateCancellation.Token);
-                    if (IsDisposed || !info.IsNewer(Application.ProductVersion, UpdateService.InstalledRevision(AppDomain.CurrentDomain.BaseDirectory))) return;
-                    availableUpdate = info;
-                    if (tray != null) tray.ShowBalloonTip(6000, "ShotInk 有更新", "发现 " + info.Version + " 更新，点击查看 Gitee 更新包。", ToolTipIcon.Info);
-                }
-                catch (Exception) { /* Startup checks stay quiet on network failures. */ }
-            };
-            if (tray != null) tray.BalloonTipClicked += delegate { if (availableUpdate != null) ShowUpdates(); };
-            updateTimer.Start();
+            updates = new UpdateController(delegate { return settings.CheckUpdates; }, Application.ProductVersion, UpdateService.InstalledRevision(AppDomain.CurrentDomain.BaseDirectory));
+            updates.Start();
         }
-        private void ShowUpdates()
+        private async void ShowUpdates()
+        {
+            if (settingsOpen) { if (updates != null) await updates.CheckAsync(); return; }
+            OpenSettingsCore(true);
+        }
+        private void ShowUpdateDetails()
         {
             if (updateWindow != null && !updateWindow.IsDisposed) { updateWindow.Activate(); return; }
-            using (var dialog = new UpdateForm(InstallUpdate, availableUpdate))
+            using (var dialog = new UpdateForm(InstallUpdate, updates == null ? null : updates.Available))
             {
                 updateWindow = dialog;
                 try { dialog.ShowDialog(Form.ActiveForm ?? this); }
@@ -85,8 +75,7 @@ namespace ShotInk
         }
         private void DisposeUpdates()
         {
-            if (updateTimer != null) updateTimer.Dispose();
-            if (updateCancellation != null) { updateCancellation.Cancel(); updateCancellation.Dispose(); }
+            if (updates != null) updates.Dispose();
         }
     }
 }

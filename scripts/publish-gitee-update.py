@@ -84,7 +84,7 @@ def main():
     notes = (ROOT / 'releases' / (tag + '.md')).read_text(encoding='utf-8')
     token = saved_token()
     release = request('/releases/tags/' + tag, token)
-    metadata = {'name': version, 'body': notes, 'prerelease': 'false'}
+    metadata = {'tag_name': tag, 'name': version, 'body': notes, 'prerelease': 'false'}
     if release is None:
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
         release = form('/releases', token, 'POST', dict(metadata, tag_name=tag, target_commitish=commit))

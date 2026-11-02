@@ -232,11 +232,39 @@ namespace ShotInk
                     Assert(rejected, "Update package could write user data or escape staging.");
                 }
                 info.Size = new FileInfo(zipPath).Length; info.Sha256 = digest;
-                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info))
+                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info,
+                    delegate { return System.Threading.Tasks.Task.FromResult(info); }))
                 {
                     form.Show(); Application.DoEvents(); Assert(Field<Button>(form, "action").Text == "下载更新" && Field<Label>(form, "status").Text.Contains("修复更新"), "Update UI did not offer a same-version patch.");
                     using (var image = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-update-options.png")); }
                     form.Close();
+                }
+                bool automatic = true; int requests = 0, details = 0;
+                using (var controller = new UpdateController(delegate { return automatic; }, "1.0.0", "",
+                    delegate { requests++; return System.Threading.Tasks.Task.FromResult(info); }))
+                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller, delegate { details++; }))
+                {
+                    var timer = Field<System.Windows.Forms.Timer>(controller, "timer");
+                    var tick = typeof(System.Windows.Forms.Timer).GetMethod("OnTick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                    controller.Start();
+                    Assert(timer.Enabled && timer.Interval == 10000, "Initial automatic check was not scheduled.");
+                    int windows = Application.OpenForms.Count;
+                    tick.Invoke(timer, new object[] { EventArgs.Empty });
+                    Assert(requests == 1 && timer.Enabled && timer.Interval == 3600000, "Automatic check did not reschedule hourly.");
+                    Assert(Application.OpenForms.Count == windows && details == 0, "Background update check opened a window.");
+                    options.Show(); Application.DoEvents();
+                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDetails").Enabled, "Settings did not display the detected update.");
+                    windows = Application.OpenForms.Count;
+                    automatic = false; tick.Invoke(timer, new object[] { EventArgs.Empty });
+                    Assert(requests == 1 && timer.Enabled, "Disabled automatic check still requested the server.");
+                    Field<Button>(options, "updateCheck").PerformClick(); Application.DoEvents();
+                    Assert(requests == 2 && Application.OpenForms.Count == windows && details == 0, "Manual check used cached data or opened an update window.");
+                    Field<Button>(options, "updateDetails").PerformClick();
+                    Assert(details == 1, "Explicit update-details click did not open the update flow.");
+                    using (var image = new Bitmap(options.Width, options.Height)) { options.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-settings-updates.png")); }
+                    options.Close();
+                    controller.CheckAsync().GetAwaiter().GetResult();
+                    Assert(requests == 3 && Application.OpenForms.Count == windows - 1, "Closed settings broke silent update checks.");
                 }
                 var settings = new AppSettings { CheckUpdates = false }; string settingsPath = Path.Combine(root, "settings.ini"); settings.Save(settingsPath);
                 Assert(!AppSettings.Load(settingsPath).CheckUpdates && !settings.Clone().CheckUpdates, "Update-check preference did not persist.");

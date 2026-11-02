@@ -33,17 +33,21 @@ namespace ShotInk
         private readonly Label[] shortcutStatus = new Label[3];
         private readonly Timer statusTimer;
         private readonly Func<Keys, bool> shortcutAvailable;
-        internal SettingsForm(AppSettings current, Func<AppSettings, string> apply, Func<Keys, bool> shortcutAvailable = null, Action showUpdates = null)
+        private readonly UpdateController updates;
+        private readonly Label updateStatus;
+        private readonly Button updateCheck, updateDetails;
+        internal SettingsForm(AppSettings current, Func<AppSettings, string> apply, Func<Keys, bool> shortcutAvailable = null, UpdateController updates = null, Action showUpdateDetails = null, bool checkVersion = false)
         {
+            this.updates = updates;
             this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
-            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 582); MinimumSize = new Size(640, 610);
+            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 616); MinimumSize = new Size(640, 644);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 13 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 14 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-            foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 32, 36, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 32, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
@@ -62,13 +66,17 @@ namespace ShotInk
             layout.Controls.Add(startup, 0, 7); layout.SetColumnSpan(startup, 3);
             var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
             layout.Controls.Add(startupHint, 0, 8); layout.SetColumnSpan(startupHint, 3);
-            checkUpdates = new CheckBox { Name = "check-updates", Text = "启动时检查更新（Gitee）", Checked = current.CheckUpdates, Dock = DockStyle.Fill };
+            checkUpdates = new CheckBox { Name = "check-updates", Text = "每小时自动检查更新（Gitee）", Checked = current.CheckUpdates, Dock = DockStyle.Fill };
             layout.Controls.Add(checkUpdates, 0, 9); layout.SetColumnSpan(checkUpdates, 3);
             var version = new Label { Text = "当前版本 " + Application.ProductVersion, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(version, 0, 10); layout.SetColumnSpan(version, 2);
-            var update = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = showUpdates != null };
-            update.Click += delegate { if (showUpdates != null) showUpdates(); }; layout.Controls.Add(update, 2, 10);
-            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" }; layout.Controls.Add(error, 0, 11); layout.SetColumnSpan(error, 3);
+            updateCheck = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = updates != null };
+            updateCheck.Click += async delegate { if (updates != null) await updates.CheckAsync(); }; layout.Controls.Add(updateCheck, 2, 10);
+            updateStatus = new Label { Name = "update-status", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+            layout.Controls.Add(updateStatus, 0, 11); layout.SetColumnSpan(updateStatus, 2);
+            updateDetails = new Button { Name = "view-update", Text = "查看并更新", Dock = DockStyle.Fill, Enabled = false };
+            updateDetails.Click += delegate { if (showUpdateDetails != null) showUpdateDetails(); }; layout.Controls.Add(updateDetails, 2, 11);
+            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" }; layout.Controls.Add(error, 0, 12); layout.SetColumnSpan(error, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             var save = new Button { Text = "保存", Width = 85, Height = 30 };
             save.Click += delegate
@@ -80,12 +88,23 @@ namespace ShotInk
             var reset = new Button { Text = "恢复默认快捷键", Width = 130, Height = 30 };
             reset.Click += delegate { var defaults = new AppSettings(); capture.ShortcutValue = defaults.CaptureShortcut; pin.ShortcutValue = defaults.PinShortcut; scroll.ShortcutValue = defaults.ScrollShortcut; };
             buttons.Controls.Add(save); buttons.Controls.Add(cancel); buttons.Controls.Add(reset);
-            layout.Controls.Add(buttons, 0, 12); layout.SetColumnSpan(buttons, 3);
+            layout.Controls.Add(buttons, 0, 13); layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout); AcceptButton = save; CancelButton = cancel;
             statusTimer = new Timer { Interval = 1000 };
             statusTimer.Tick += delegate { RefreshShortcutStatus(); };
             foreach (var box in new[] { capture, pin, scroll })
                 box.TextChanged += delegate { if (IsHandleCreated) RefreshShortcutStatus(); };
+            if (updates != null) updates.Changed += RefreshUpdateStatus;
+            RefreshUpdateStatus();
+            if (checkVersion) Shown += async delegate { if (updates != null) await updates.CheckAsync(); };
+        }
+        private void RefreshUpdateStatus()
+        {
+            if (IsDisposed) return;
+            updateStatus.Text = updates == null ? "尚未检查更新。" : updates.Status;
+            updateStatus.ForeColor = updates != null && updates.Available != null ? Color.ForestGreen : ToolAppearance.Muted;
+            updateDetails.Enabled = updates != null && updates.Available != null;
+            updateCheck.Enabled = updates != null && !updates.Checking;
         }
         protected override void OnShown(EventArgs e)
         { base.OnShown(e); RefreshShortcutStatus(); statusTimer.Start(); }
@@ -113,7 +132,7 @@ namespace ShotInk
             }
         }
         protected override void Dispose(bool disposing)
-        { if (disposing && statusTimer != null) { statusTimer.Stop(); statusTimer.Dispose(); } base.Dispose(disposing); }
+        { if (disposing) { if (statusTimer != null) { statusTimer.Stop(); statusTimer.Dispose(); } if (updates != null) updates.Changed -= RefreshUpdateStatus; } base.Dispose(disposing); }
         private ShortcutBox AddShortcut(TableLayoutPanel layout, string title, int row, Keys value)
         {
             layout.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
