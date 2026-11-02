@@ -13,7 +13,9 @@ $buildRoot = Join-Path $projectRoot 'build'
 $distRoot = Join-Path $projectRoot 'dist'
 New-Item -ItemType Directory -Path $buildRoot, $distRoot -Force | Out-Null
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
+& (Join-Path $projectRoot 'scripts\build-webview.ps1')
 $references = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', '/r:Accessibility.dll', '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll')
+$references += @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll') | ForEach-Object { '/r:' + (Join-Path $buildRoot $_) }
 $common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references
 $appPath = Join-Path $distRoot 'ShotInk.exe'
 & $compiler @common '/target:winexe' ('/out:' + $appPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/win32icon:' + (Join-Path $projectRoot 'assets\shotink.ico')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources
@@ -36,10 +38,14 @@ if ($Test -or $Preview) {
     if ($Test) {
         & (Join-Path $projectRoot 'tests\Run.Tests.ps1')
         & (Join-Path $projectRoot 'tests\Release.Tests.ps1') -BinaryPath $appPath
+        & (Join-Path $projectRoot 'tests\Update.Tests.ps1') -BinaryPath $appPath
+        & (Join-Path $projectRoot 'tests\Update.Smoke.Tests.ps1')
     }
 }
 $archive = Join-Path $projectRoot 'ShotInk-portable.zip'
 [IO.File]::WriteAllText((Join-Path $distRoot 'ShotInk.build.sha256'), $sourceSignature)
-Compress-Archive -LiteralPath $appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ocr'), $docsRoot, (Join-Path $distRoot 'ShotInk.build.sha256') -DestinationPath $archive -Force
+[IO.File]::WriteAllText((Join-Path $distRoot 'update-portable.ps1'), [IO.File]::ReadAllText((Join-Path $projectRoot 'scripts\update-portable.ps1')), (New-Object Text.UTF8Encoding($true)))
+$browserFiles = @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll', 'WebView2-LICENSE.txt') | ForEach-Object { Join-Path $distRoot $_ }
+Compress-Archive -LiteralPath (@($appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ocr'), $docsRoot, (Join-Path $distRoot 'ShotInk.build.sha256'), (Join-Path $distRoot 'update-portable.ps1')) + $browserFiles) -DestinationPath $archive -Force
 Write-Host ('Built: ' + $appPath)
 Write-Host ('Portable: ' + $archive)

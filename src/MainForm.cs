@@ -155,7 +155,7 @@ namespace ShotInk
             if (startup != null) settings.StartWithWindows = startup.IsEnabled;
             settingsOpen = true;
             if (hotkeys != null) hotkeys.Clear();
-            try { using (var dialog = new SettingsForm(settings, ApplySettings, updates: updates, checkVersion: checkVersion)) dialog.ShowDialog(this); }
+            try { using (var dialog = new SettingsForm(settings, ApplySettings, updates: updates, showUpdateDetails: ShowUpdateDetails, checkVersion: checkVersion)) dialog.ShowDialog(this); }
             finally
             {
                 if (!IsDisposed && hotkeys != null)

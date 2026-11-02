@@ -89,7 +89,7 @@ def main():
         revision = package.read('ShotInk.build.sha256').decode('utf-8-sig').strip()
         if not re.fullmatch('[a-fA-F0-9]{64}', revision):
             raise RuntimeError('Portable ZIP omitted its build revision.')
-        for name in ('ShotInk.exe', 'ocr/ShotInk.OcrHost.exe'):
+        for name in ('ShotInk.exe', 'ocr/ShotInk.OcrHost.exe', 'update-portable.ps1', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll'):
             if name not in package.namelist():
                 raise RuntimeError('Portable ZIP omitted ' + name)
     notes = (ROOT / 'releases' / (tag + '.md')).read_text(encoding='utf-8')

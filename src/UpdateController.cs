@@ -17,6 +17,7 @@ namespace ShotInk
         internal event Action Changed;
         internal string Status { get; private set; }
         internal bool Checking { get; private set; }
+        internal bool NeedsVerification { get; private set; }
         internal UpdateInfo Available { get; private set; }
         internal UpdateController(Func<bool> autoEnabled, string installedVersion, string installedRevision, Func<CancellationToken, Task<UpdateInfo>> check = null)
         {
@@ -31,17 +32,18 @@ namespace ShotInk
             };
         }
         internal void Start() { timer.Start(); }
-        internal async Task CheckAsync()
+        internal async Task CheckAsync(Func<CancellationToken, Task<UpdateInfo>> verifiedCheck = null)
         {
             if (disposed || Checking) return;
-            Checking = true; Available = null; Status = "正在从 Gitee 检查更新…"; Notify();
+            Checking = true; Available = null; NeedsVerification = false; Status = "正在从 Gitee 检查更新…"; Notify();
             try
             {
-                var info = await check(cancellation.Token);
+                var info = await (verifiedCheck ?? check)(cancellation.Token);
                 if (disposed) return;
                 Available = info.IsNewer(installedVersion, installedRevision) ? info : null;
                 Status = Available == null ? "当前已是最新版本。" : info.Version == installedVersion ? "当前版本有修复更新。" : "发现新版本 " + info.Version;
             }
+            catch (VerificationRequiredException) { if (!disposed) { NeedsVerification = true; Status = "Gitee 需要人机验证，请点击“完成验证”。"; } }
             catch (Exception error) { if (!disposed) Status = "检查失败：" + error.Message; }
             finally { Checking = false; if (!disposed) Notify(); }
         }

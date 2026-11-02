@@ -16,6 +16,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Prepare verification browser
+        shell: powershell
+        run: |
+          ./scripts/build-webview.ps1
+          ./scripts/ensure-webview-runtime.ps1
       - name: Build and test
         shell: powershell
         run: ./build.ps1 -Test

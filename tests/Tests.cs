@@ -18,12 +18,14 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--verification-tests")
+                { Run("Gitee verification retains browser cookies, resumes downloads and cancels safely", TestGiteeBrowser); return 0; }
                 if (args.Length == 2 && args[0] == "--update-live")
                 {
                     var info = UpdateService.CheckAsync(System.Threading.CancellationToken.None).GetAwaiter().GetResult();
-                    string opened = null;
-                    UpdateService.OpenDownload(info, delegate(System.Diagnostics.ProcessStartInfo link) { opened = link.FileName; });
-                    Console.WriteLine("PASS anonymous Gitee version check and browser download URL: " + info.Version + " " + opened); return 0;
+                    var prepared = UpdateService.DownloadAsync(info, Path.Combine(args[1], "install"), System.Threading.CancellationToken.None,
+                        new Progress<int>(delegate { }), args[1]).GetAwaiter().GetResult();
+                    Console.WriteLine("PASS anonymous Gitee check, ZIP hash and component validation: " + prepared.Info.Version); return 0;
                 }
                 if (args.Length == 1 && args[0] == "--gif-tests")
                 {
@@ -74,7 +76,8 @@ namespace ShotInk
                 Run("tools retain separate colors and widths across tool changes and new editors", TestIndependentToolSettings);
                 Run("settings preserve legacy history, shortcuts, tool styles and save preferences", TestSettings);
                 Run("settings survive profile selection, restart and damaged or locked configuration", TestSettingsRecovery);
-                Run("Gitee updates check hourly, refresh settings silently and open the browser only on request", TestUpdates);
+                Run("Gitee updates check hourly, refresh settings silently and validate update packages", TestUpdates);
+                Run("Gitee verification retains browser cookies, resumes downloads and cancels safely", TestGiteeBrowser);
                 Run("pinned images detect edges and resize proportionally while preserving original pixels", TestPinResize);
                 Run("settings refresh shortcut conflicts without saving or leaking probe registrations", TestShortcutStatus);
                 Run("released shortcut conflicts recover automatically without unregistering healthy bindings", TestHotkeyRecovery);
@@ -189,34 +192,61 @@ namespace ShotInk
                 }
             }
         }
+        private static void AddUpdateEntry(System.IO.Compression.ZipArchive zip, string name, byte[] bytes)
+        { using (var stream = zip.CreateEntry(name).Open()) stream.Write(bytes, 0, bytes.Length); }
         private static void TestUpdates()
         {
             string root = Path.Combine(Path.GetTempPath(), "ShotInk-update-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
             try
             {
-                string revision = new string('A', 64);
-                var info = new UpdateInfo { Version = Application.ProductVersion, Revision = revision, Sha256 = new string('B', 64), Size = 123,
+                string revision = new string('A', 64), zipPath = Path.Combine(root, "update.zip");
+                using (var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
+                {
+                    AddUpdateEntry(zip, "ShotInk.exe", File.ReadAllBytes(System.Reflection.Assembly.GetExecutingAssembly().Location));
+                    AddUpdateEntry(zip, "ShotInk.build.sha256", System.Text.Encoding.UTF8.GetBytes(revision));
+                    AddUpdateEntry(zip, "update-portable.ps1", System.Text.Encoding.UTF8.GetBytes("test helper"));
+                    AddUpdateEntry(zip, "ocr/ShotInk.OcrHost.exe", new byte[] { 1, 2, 3 });
+                    foreach (string name in new[] { "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll" }) AddUpdateEntry(zip, name, new byte[] { 1, 2, 3 });
+                }
+                var info = new UpdateInfo { Version = Application.ProductVersion, Revision = revision, Sha256 = UpdateService.Digest(zipPath), Size = new FileInfo(zipPath).Length,
                     Url = "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v" + Application.ProductVersion + "/ShotInk-portable.zip", Notes = "更新说明" };
                 info.Validate();
                 Assert(!info.IsNewer(Application.ProductVersion, revision.ToLowerInvariant()) && info.IsNewer(Application.ProductVersion, new string('B', 64)), "Same-version build detection repeated an installed build or missed a patch.");
                 Assert(info.IsNewer("1.0.0", revision) && !info.IsNewer("99.0.0", new string('B', 64)), "Update comparison allowed a downgrade or missed a new version.");
-                string validUrl = info.Url; bool unsafeUrl = false, launched = false;
-                foreach (string invalid in new[] { "https://github.com/other/release/ShotInk-portable.zip", "file:///C:/Windows/notepad.exe", "https://gitee.com.evil.test/ShotInk-portable.zip", "http://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v1.8.0/ShotInk-portable.zip" })
+                var prepared = UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "stage"), int.MaxValue, System.Threading.CancellationToken.None);
+                var plan = UpdateService.ReadJson<UpdatePlan>(File.ReadAllBytes(prepared.PlanPath));
+                Assert(plan.Files.Length == 7 && File.Exists(prepared.HelperPath) && UpdateService.InstalledRevision(plan.Payload) == revision, "Update staging lost components or revision metadata.");
+                foreach (string invalid in new[] { "../outside", "C:/outside", "/outside", "foo\\bar", "x/.. /outside", "aux.txt", "foo./bar" })
                 {
-                    info.Url = invalid; unsafeUrl = false;
-                    try { UpdateService.OpenDownload(info, delegate { launched = true; }); } catch (InvalidDataException) { unsafeUrl = true; }
-                    Assert(unsafeUrl && !launched, "Browser update accepted an untrusted download URL.");
+                    bool rejected = false; try { UpdateService.SafePath(root, invalid); } catch (InvalidDataException) { rejected = true; }
+                    Assert(rejected, "Unsafe update path accepted: " + invalid);
                 }
-                info.Url = validUrl;
-                bool automatic = true, browserFailure = false; int requests = 0, downloads = 0;
+                string validUrl = info.Url; info.Url = "https://github.com/other/release/ShotInk-portable.zip";
+                bool unsafeUrl = false; try { info.Validate(); } catch (InvalidDataException) { unsafeUrl = true; }
+                Assert(unsafeUrl, "Updater accepted a non-Gitee publisher URL."); info.Url = validUrl;
+                string digest = info.Sha256; info.Sha256 = new string('0', 64);
+                bool badHash = false; try { UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "bad-hash"), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { badHash = true; }
+                Assert(badHash, "Corrupted package hash was accepted."); info.Sha256 = digest;
+                foreach (string invalidEntry in new[] { "../escape.txt", "settings.ini", "captures/history.png", "ocr/../ShotInk.exe" })
+                {
+                    string malicious = Path.Combine(root, Guid.NewGuid().ToString("N") + ".zip");
+                    using (var zip = System.IO.Compression.ZipFile.Open(malicious, System.IO.Compression.ZipArchiveMode.Create)) AddUpdateEntry(zip, invalidEntry, new byte[] { 1 });
+                    info.Size = new FileInfo(malicious).Length; info.Sha256 = UpdateService.Digest(malicious);
+                    bool rejected = false; try { UpdateService.Prepare(malicious, info, Path.Combine(root, "install"), Path.Combine(root, Guid.NewGuid().ToString("N")), int.MaxValue, System.Threading.CancellationToken.None); } catch (InvalidDataException) { rejected = true; }
+                    Assert(rejected, "Update package could write user data or escape staging.");
+                }
+                info.Size = new FileInfo(zipPath).Length; info.Sha256 = digest;
+                using (var form = new UpdateForm(delegate { return System.Threading.Tasks.Task.FromResult<string>("test"); }, info,
+                    delegate { return System.Threading.Tasks.Task.FromResult(info); }))
+                {
+                    form.Show(); Application.DoEvents(); Assert(Field<Button>(form, "action").Text == "下载更新" && Field<Label>(form, "status").Text.Contains("修复更新"), "Update UI did not offer a same-version patch.");
+                    using (var image = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-update-options.png")); }
+                    form.Close();
+                }
+                bool automatic = true; int requests = 0, details = 0;
                 using (var controller = new UpdateController(delegate { return automatic; }, "1.0.0", "",
                     delegate { requests++; return System.Threading.Tasks.Task.FromResult(info); }))
-                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller,
-                    delegate(System.Diagnostics.ProcessStartInfo link)
-                    {
-                        if (browserFailure) throw new System.ComponentModel.Win32Exception("Browser unavailable");
-                        Assert(link.UseShellExecute && link.FileName == validUrl && string.IsNullOrEmpty(link.Arguments), "Update did not delegate the exact Gitee link to the default browser."); downloads++;
-                    }))
+                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller, delegate { details++; }))
                 {
                     var timer = Field<System.Windows.Forms.Timer>(controller, "timer");
                     var tick = typeof(System.Windows.Forms.Timer).GetMethod("OnTick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
@@ -225,33 +255,152 @@ namespace ShotInk
                     int windows = Application.OpenForms.Count;
                     tick.Invoke(timer, new object[] { EventArgs.Empty });
                     Assert(requests == 1 && timer.Enabled && timer.Interval == 3600000, "Automatic check did not reschedule hourly.");
-                    Assert(Application.OpenForms.Count == windows && downloads == 0, "Background update check opened a window or browser.");
+                    Assert(Application.OpenForms.Count == windows && details == 0, "Background update check opened a window.");
                     options.Show(); Application.DoEvents();
-                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDownload").Enabled, "Settings did not display the detected update.");
+                    Assert(Field<Label>(options, "updateStatus").Text.Contains(info.Version) && Field<Button>(options, "updateDetails").Enabled, "Settings did not display the detected update.");
                     windows = Application.OpenForms.Count;
                     automatic = false; tick.Invoke(timer, new object[] { EventArgs.Empty });
                     Assert(requests == 1 && timer.Enabled, "Disabled automatic check still requested the server.");
                     Field<Button>(options, "updateCheck").PerformClick(); Application.DoEvents();
-                    Assert(requests == 2 && Application.OpenForms.Count == windows && downloads == 0, "Manual check used cached data or opened a window or browser.");
-                    Field<Button>(options, "updateDownload").PerformClick();
-                    Assert(downloads == 1 && Application.OpenForms.Count == windows, "Explicit download click did not open the browser directly.");
+                    Assert(requests == 2 && Application.OpenForms.Count == windows && details == 0, "Manual check used cached data or opened an update window.");
+                    Field<Button>(options, "updateDetails").PerformClick();
+                    Assert(details == 1, "Explicit update-details click did not open the update flow.");
                     using (var image = new Bitmap(options.Width, options.Height)) { options.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-settings-updates.png")); }
-                    browserFailure = true; Field<Button>(options, "updateDownload").PerformClick();
-                    Assert(Field<Label>(options, "updateStatus").Text.Contains("无法打开下载链接") && Application.OpenForms.Count == windows, "Browser failure was not displayed inside settings.");
-                    options.Close(); controller.CheckAsync().GetAwaiter().GetResult();
+                    options.Close();
+                    controller.CheckAsync().GetAwaiter().GetResult();
                     Assert(requests == 3 && Application.OpenForms.Count == windows - 1, "Closed settings broke silent update checks.");
                 }
-                using (var controller = new UpdateController(delegate { return true; }, info.Version, info.Revision, delegate { return System.Threading.Tasks.Task.FromResult(info); }))
-                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller, checkVersion: true))
+                using (var controller = new UpdateController(delegate { return true; }, "1.0.0", "", delegate { throw new VerificationRequiredException(); }))
+                using (var options = new SettingsForm(new AppSettings(), delegate { return null; }, delegate { return true; }, controller,
+                    delegate { controller.CheckAsync(delegate { return System.Threading.Tasks.Task.FromResult(info); }).GetAwaiter().GetResult(); }))
                 {
+                    int windows = Application.OpenForms.Count; controller.CheckAsync().GetAwaiter().GetResult();
+                    Assert(controller.NeedsVerification && Application.OpenForms.Count == windows, "Blocked background checks did not remain silent.");
                     options.Show(); Application.DoEvents();
-                    Assert(Field<Label>(options, "updateStatus").Text.Contains("最新版本") && !Field<Button>(options, "updateDownload").Enabled, "An installed build still offered a download.");
-                    options.Close();
+                    Assert(Field<Button>(options, "updateDetails").Enabled && Field<Button>(options, "updateDetails").Text == "完成验证", "Settings did not expose an explicit verification action.");
+                    Field<Button>(options, "updateDetails").PerformClick();
+                    Assert(!controller.NeedsVerification && controller.Available != null, "Verified metadata did not restore the available update."); options.Close();
                 }
                 var settings = new AppSettings { CheckUpdates = false }; string settingsPath = Path.Combine(root, "settings.ini"); settings.Save(settingsPath);
                 Assert(!AppSettings.Load(settingsPath).CheckUpdates && !settings.Clone().CheckUpdates, "Update-check preference did not persist.");
             }
             finally { Directory.Delete(root, true); }
+        }
+        private static void BrowserWait(Func<bool> condition, System.Threading.Tasks.Task task)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(45);
+            while (!condition() && DateTime.UtcNow < deadline)
+            {
+                if (task.IsFaulted || task.IsCanceled) task.GetAwaiter().GetResult();
+                Application.DoEvents(); System.Threading.Thread.Sleep(5);
+            }
+            Assert(condition(), "Embedded browser operation timed out.");
+        }
+        private static void TestGiteeBrowser()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "ShotInk-browser-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+            byte[] payload = System.Text.Encoding.UTF8.GetBytes("mock portable ZIP payload");
+            var info = new UpdateInfo { Version = Application.ProductVersion, Revision = new string('A', 64), Sha256 = new string('B', 64), Size = payload.Length,
+                Url = "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v" + Application.ProductVersion + "/ShotInk-portable.zip" };
+            var envelope = System.Text.Encoding.UTF8.GetBytes("{\"encoding\":\"base64\",\"content\":\"" + Convert.ToBase64String(UpdateService.Json(info)) + "\"}");
+            Assert(GiteeBrowserForm.Trusted(new Uri(info.Url)) && GiteeBrowserForm.Trusted(new Uri("https://foruda.gitee.com/file")) &&
+                !GiteeBrowserForm.Trusted(new Uri("https://gitee.com.evil.test/file")) && !GiteeBrowserForm.Trusted(new Uri("http://gitee.com/file")), "Verification navigation trust boundary was incorrect.");
+            try
+            {
+                using (var server = new MockGiteeServer(payload, envelope))
+                using (var owner = new Form { Text = "Isolated update browser test" })
+                {
+                    owner.Show(); Application.DoEvents(); string profile = Path.Combine(root, "profile");
+                    Func<Uri, bool> allowed = delegate(Uri uri) { return uri.Scheme == "http" && uri.IsLoopback && uri.Port == server.Port; };
+                    string destination = Path.Combine(root, "download.zip");
+                    using (var browser = new GiteeBrowserForm(info, destination, testUrl: server.Url + "download", testAllowed: allowed, testProfile: profile))
+                    {
+                        var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
+                        BrowserWait(delegate { return browser.VerificationShown; }, run);
+                        Assert(browser.Visible && !owner.Enabled && !File.Exists(destination), "Verification did not show before downloading or failed to suspend its owner.");
+                        var click = browser.Browser.CoreWebView2.ExecuteScriptAsync("document.getElementById('verify').click()");
+                        BrowserWait(delegate { return run.IsCompleted; }, run); run.GetAwaiter().GetResult();
+                        Assert(owner.Enabled && File.ReadAllBytes(destination).Length == payload.Length && server.VerifiedDownloads == 1, "Download did not retain the verified browser session or restore its owner.");
+                    }
+                    using (var browser = new GiteeBrowserForm(null, Path.Combine(root, "index.json"), testUrl: server.Url + "index", testAllowed: allowed, testProfile: profile))
+                    {
+                        var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
+                        BrowserWait(delegate { return run.IsCompleted; }, run); run.GetAwaiter().GetResult();
+                        Assert(!browser.VerificationShown && UpdateService.DecodeIndex(browser.Metadata).Version == info.Version, "Verified metadata did not reuse the browser session silently.");
+                    }
+                    string blocked = Path.Combine(root, "blocked"); File.WriteAllText(blocked, "not a directory");
+                    using (var browser = new GiteeBrowserForm(info, Path.Combine(blocked, "download.zip"), testUrl: server.Url + "download", testAllowed: allowed, testProfile: profile))
+                    {
+                        var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
+                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true));
+                        Assert(run.IsFaulted && owner.Enabled && File.ReadAllText(blocked) == "not a directory", "A download write failure escaped the browser task or changed existing files.");
+                        try { run.GetAwaiter().GetResult(); } catch (IOException) { }
+                    }
+                    using (var cancellation = new System.Threading.CancellationTokenSource())
+                    using (var browser = new GiteeBrowserForm(info, Path.Combine(root, "cancel.zip"), testUrl: server.Url + "cancel", testAllowed: allowed, testProfile: profile))
+                    {
+                        var run = browser.RunAsync(owner, cancellation.Token);
+                        BrowserWait(delegate { return browser.VerificationShown; }, run); cancellation.Cancel();
+                        BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true));
+                        Assert(run.IsCanceled && owner.Enabled && !File.Exists(Path.Combine(root, "cancel.zip")), "Cancelling verification did not leave the application and files intact.");
+                    }
+                    owner.Close();
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); }
+                catch (IOException) { Console.WriteLine("Browser profile retained in isolated test cache until its process exits."); }
+                catch (UnauthorizedAccessException) { Console.WriteLine("Browser profile retained in isolated test cache until its process exits."); }
+            }
+        }
+        private sealed class MockGiteeServer : IDisposable
+        {
+            private readonly System.Net.Sockets.TcpListener server;
+            private readonly System.Threading.Tasks.Task worker;
+            private readonly byte[] payload, metadata;
+            private volatile bool stopped;
+            internal int VerifiedDownloads;
+            internal int Port { get { return ((System.Net.IPEndPoint)server.LocalEndpoint).Port; } }
+            internal string Url { get { return "http://localhost:" + Port + "/"; } }
+            internal MockGiteeServer(byte[] payload, byte[] metadata)
+            {
+                this.payload = payload; this.metadata = metadata;
+                server = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); server.Start();
+                worker = System.Threading.Tasks.Task.Run((Action)Serve);
+            }
+            private void Serve()
+            {
+                while (!stopped)
+                {
+                    try
+                    {
+                        using (var client = server.AcceptTcpClient())
+                        using (var stream = client.GetStream())
+                        {
+                            client.ReceiveTimeout = client.SendTimeout = 5000;
+                            var reader = new StreamReader(stream, System.Text.Encoding.ASCII, false, 4096, true);
+                            string first = reader.ReadLine(), line; bool verified = false;
+                            if (first == null) continue;
+                            while (!string.IsNullOrEmpty(line = reader.ReadLine())) if (line.StartsWith("Cookie:", StringComparison.OrdinalIgnoreCase) && line.Contains("verified=yes")) verified = true;
+                            bool index = first.Contains(" /index "), cancel = first.Contains(" /cancel ");
+                            byte[] bytes; string type, disposition = "";
+                            if (!verified || cancel)
+                            {
+                                bytes = System.Text.Encoding.UTF8.GetBytes("<!doctype html><html><body><h2>Local verification fixture</h2><button id='verify' onclick=\"document.cookie='verified=yes; path=/; max-age=3600';location.reload()\">Verify test session</button></body></html>"); type = "text/html";
+                            }
+                            else if (index) { bytes = metadata; type = "application/json"; }
+                            else { bytes = payload; type = "application/zip"; disposition = "Content-Disposition: attachment; filename=ShotInk-portable.zip\r\n"; VerifiedDownloads++; }
+                            byte[] header = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + bytes.Length + "\r\n" + disposition + "Connection: close\r\n\r\n");
+                            stream.Write(header, 0, header.Length); stream.Write(bytes, 0, bytes.Length); stream.Flush();
+                        }
+                    }
+                    catch (IOException) { }
+                    catch (System.Net.Sockets.SocketException) { if (stopped) return; }
+                    catch (ObjectDisposedException) { return; }
+                }
+            }
+            public void Dispose() { stopped = true; server.Stop(); worker.Wait(6000); }
         }
         private static void PinDrag(PinForm pin, Point localStart, Point delta)
         {
