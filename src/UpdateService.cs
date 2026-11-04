@@ -163,18 +163,44 @@ namespace ShotInk
         {
             info.Validate(); string folder = Path.Combine(cacheRoot ?? CacheRoot, Guid.NewGuid().ToString("N")); Directory.CreateDirectory(folder);
             string archive = Path.Combine(folder, "ShotInk-portable.zip");
-            using (var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
-                await FetchAsync(info.Url, output, info.Size, token, progress).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token).ConfigureAwait(false);
+            try
+            {
+                using (var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
+                    await FetchAsync(info.Url, output, info.Size, token, progress).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token).ConfigureAwait(false);
+            }
+            catch { CleanupPackage(folder); throw; }
         }
         internal static async Task<PreparedUpdate> DownloadWithBrowserAsync(UpdateInfo info, string target, System.Windows.Forms.Form owner, CancellationToken token, IProgress<int> progress, string cacheRoot = null)
         {
             info.Validate(); string folder = Path.Combine(cacheRoot ?? CacheRoot, Guid.NewGuid().ToString("N"));
             string archive = Path.Combine(folder, "ShotInk-portable.zip");
-            using (var browser = new GiteeBrowserForm(info, archive, progress)) await browser.RunAsync(owner, token);
-            token.ThrowIfCancellationRequested();
-            return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token);
+            try
+            {
+                using (var browser = new GiteeBrowserForm(info, archive, progress)) await browser.RunAsync(owner, token);
+                token.ThrowIfCancellationRequested();
+                return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token);
+            }
+            catch { CleanupPackage(folder); throw; }
+        }
+        internal static void CleanupPackage(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) return;
+            try
+            {
+                string root = Path.GetFullPath(folder);
+                File.Delete(SafePath(root, "ShotInk-portable.zip"));
+                string payload = SafePath(root, "payload");
+                if (Directory.Exists(payload)) Directory.Delete(payload, true);
+            }
+            catch (IOException error) { RecordCleanupFailure(folder, error); }
+            catch (UnauthorizedAccessException error) { RecordCleanupFailure(folder, error); }
+        }
+        private static void RecordCleanupFailure(string folder, Exception error)
+        {
+            try { File.WriteAllText(Path.Combine(folder, "update-cleanup-error.txt"), error.Message); }
+            catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         internal static string SafePath(string root, string relative)
         {
@@ -218,6 +244,7 @@ namespace ShotInk
             var plan = new UpdatePlan { Target = Path.GetFullPath(target), Payload = payload, Backup = Path.Combine(folder, "backup"), ProcessId = processId, Version = info.Version, Flavor = BuildFeatures.Flavor, Files = files.ToArray() };
             string planPath = Path.Combine(folder, "update-plan.json"); File.WriteAllBytes(planPath, Json(plan));
             string helper = Path.Combine(folder, "update-portable.ps1"); File.Copy(Path.Combine(payload, "update-portable.ps1"), helper);
+            if (string.Equals(Path.GetFullPath(archive), Path.GetFullPath(Path.Combine(folder, "ShotInk-portable.zip")), StringComparison.OrdinalIgnoreCase)) File.Delete(archive);
             return new PreparedUpdate { Folder = folder, PlanPath = planPath, HelperPath = helper, Info = info };
         }
     }

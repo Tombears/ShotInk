@@ -26,6 +26,7 @@ try {
         @{Target=$target;Payload=$payload;Backup=(Join-Path $stage 'backup');ProcessId=[int]::MaxValue;Version=[Reflection.AssemblyName]::GetAssemblyName((Resolve-Path -LiteralPath $BinaryPath).Path).Version.ToString(3);Files=$files} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $planPath -Encoding UTF8
         . (Join-Path $projectRoot 'scripts\update-portable.ps1') -Plan $planPath
         $state.Starts=0;$state.FailOnce=$fail;$state.Failed=$false;$state.Target=$target
+        [IO.File]::WriteAllText((Join-Path $stage 'ShotInk-portable.zip'),'downloaded package')
         $failed=$false
         try { Install-PortableUpdate } catch { $failed=$true; if(-not $fail){throw} }
         Assert-Update ($failed -eq $fail) 'Install failure behavior was incorrect.'
@@ -40,6 +41,10 @@ try {
         }
         Assert-Update ([IO.File]::ReadAllText((Join-Path $target 'settings.ini')) -eq 'save-directory=E:\file\picture') 'Update overwrote user settings.'
         Assert-Update ([IO.File]::ReadAllText((Join-Path $target 'captures\history.png')) -eq 'user image') 'Update overwrote image history.'
+        [IO.File]::WriteAllText((Join-Path $stage 'update-error.txt'),'keep diagnostic')
+        Remove-UpdatePackage
+        Assert-Update (-not(Test-Path -LiteralPath (Join-Path $stage 'ShotInk-portable.zip')) -and -not(Test-Path -LiteralPath $payload)) 'Completed or failed installation retained package files.'
+        Assert-Update ((Test-Path -LiteralPath (Join-Path $stage 'backup/ShotInk.exe')) -and (Test-Path -LiteralPath (Join-Path $stage 'update-error.txt'))) 'Cleanup removed rollback backup or diagnostic log.'
         $rejected=$false;try { Resolve-UpdateFile $target '../escape' | Out-Null } catch {$rejected=$true}
         Assert-Update $rejected 'Helper accepted a traversal path.'
     }

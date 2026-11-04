@@ -82,15 +82,32 @@ function Install-PortableUpdate {
     }
     Start-Process -FilePath (Join-Path $target 'ShotInk.exe') -WorkingDirectory $target -WindowStyle Hidden
 }
+function Remove-UpdatePackage {
+    # Only the known package and payload belong to cleanup; backups and logs stay available.
+    $stage=[IO.Path]::GetFullPath($updateRoot).TrimEnd('\')
+    $archive=Resolve-UpdateFile $stage 'ShotInk-portable.zip'
+    $payload=Resolve-UpdateFile $stage 'payload'
+    if(Test-Path -LiteralPath $archive -PathType Leaf){Remove-Item -LiteralPath $archive -Force}
+    if(Test-Path -LiteralPath $payload -PathType Container){
+        if([IO.Path]::GetFullPath($payload) -ne (Join-Path $stage 'payload')){throw 'Invalid cleanup directory.'}
+        Remove-Item -LiteralPath $payload -Recurse -Force
+    }
+}
 # Tests dot-source the functions without installing or restarting a real application.
 if($MyInvocation.InvocationName -ne '.') {
     try { Install-PortableUpdate }
     catch {
         $message=$_.Exception.Message
         Set-Content -LiteralPath (Join-Path $updateRoot 'update-error.txt') -Value $message -Encoding UTF8
+        try { Remove-UpdatePackage }
+        catch { Set-Content -LiteralPath (Join-Path $updateRoot 'update-cleanup-error.txt') -Value $_.Exception.Message -Encoding UTF8 }
         Add-Type -AssemblyName System.Windows.Forms
         [Windows.Forms.MessageBox]::Show($message+"`n`n更新日志："+$updateRoot,'ShotInk 更新未完成') | Out-Null
         if($script:CanRestart -and (Test-Path -LiteralPath (Join-Path $update.Target 'ShotInk.exe'))) { Start-Process -FilePath (Join-Path $update.Target 'ShotInk.exe') -WorkingDirectory $update.Target -WindowStyle Hidden }
         exit 1
+    }
+    finally {
+        try { Remove-UpdatePackage }
+        catch { Set-Content -LiteralPath (Join-Path $updateRoot 'update-cleanup-error.txt') -Value $_.Exception.Message -Encoding UTF8 }
     }
 }

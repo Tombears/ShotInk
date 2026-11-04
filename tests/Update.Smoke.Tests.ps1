@@ -39,6 +39,7 @@ try {
     @{Target=$target;Payload=$payload;Backup=(Join-Path $stage 'backup');ProcessId=$oldProcess.Id;Version='1.8.0';Files=$files} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $plan -Encoding UTF8
     $powershell=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $arguments='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $payload 'update-portable.ps1')+'" -Plan "'+$plan+'"'
+    [IO.File]::WriteAllText((Join-Path $stage 'ShotInk-portable.zip'),'downloaded package')
     $helper=Start-Process -FilePath $powershell -ArgumentList $arguments -WorkingDirectory $stage -WindowStyle Hidden -PassThru
     Wait-UpdateFile (Join-Path $stage 'update-ready.txt')
     if((Get-FileHash -LiteralPath (Join-Path $target 'ShotInk.exe')).Hash -ne $oldHash){throw 'Helper replaced the executable before the old process exited.'}
@@ -47,6 +48,7 @@ try {
     if(-not $helper.WaitForExit(10000) -or $helper.ExitCode -ne 0){throw 'Update helper did not complete successfully.'}
     if([IO.File]::ReadAllText((Join-Path $target 'settings.ini')) -ne 'save-directory=E:\file\picture' -or [IO.File]::ReadAllText((Join-Path $target 'captures\keep.png')) -ne 'user capture'){throw 'Real-process update changed user data.'}
     if((Get-FileHash -LiteralPath (Join-Path $stage 'backup\ShotInk.exe')).Hash -ne $oldHash){throw 'Original executable backup was lost.'}
+    if((Test-Path -LiteralPath (Join-Path $stage 'ShotInk-portable.zip')) -or (Test-Path -LiteralPath $payload)){throw 'Real update retained ZIP or payload after successful restart.'}
     Write-Host 'PASS: real Windows PowerShell handshake, wait-for-exit, replacement, restart and preserved user files'
 }finally {
     foreach($owned in @($helper,$oldProcess)){if($owned){try{if(-not $owned.HasExited){$owned.Kill();$owned.WaitForExit(5000) | Out-Null}}finally{$owned.Dispose()}}}

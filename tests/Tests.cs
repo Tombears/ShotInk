@@ -233,6 +233,11 @@ namespace ShotInk
                 Assert(!info.IsNewer(Application.ProductVersion, revision.ToLowerInvariant()) && info.IsNewer(Application.ProductVersion, new string('B', 64)), "Same-version build detection repeated an installed build or missed a patch.");
                 Assert(info.IsNewer("1.0.0", revision) && !info.IsNewer("99.0.0", new string('B', 64)), "Update comparison allowed a downgrade or missed a new version.");
                 var prepared = UpdateService.Prepare(zipPath, info, Path.Combine(root, "install"), Path.Combine(root, "stage"), int.MaxValue, System.Threading.CancellationToken.None);
+                string downloadedStage = Path.Combine(root, "downloaded-stage"); Directory.CreateDirectory(downloadedStage);
+                string downloadedZip = Path.Combine(downloadedStage, "ShotInk-portable.zip"); File.Copy(zipPath, downloadedZip);
+                var stagedDownload = UpdateService.Prepare(downloadedZip, info, Path.Combine(root, "install"), downloadedStage, int.MaxValue, System.Threading.CancellationToken.None);
+                Assert(!File.Exists(downloadedZip) && Directory.Exists(Path.Combine(stagedDownload.Folder, "payload")), "Verified download retained its ZIP or lost payload before installation.");
+                UpdateService.CleanupPackage(stagedDownload.Folder);
                 var plan = UpdateService.ReadJson<UpdatePlan>(File.ReadAllBytes(prepared.PlanPath));
                 Assert(plan.Files.Length == 8 && File.Exists(prepared.HelperPath) && UpdateService.InstalledRevision(plan.Payload) == revision, "Update staging lost components or revision metadata.");
                 foreach (string invalid in new[] { "../outside", "C:/outside", "/outside", "foo\\bar", "x/.. /outside", "aux.txt", "foo./bar" })

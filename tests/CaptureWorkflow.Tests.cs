@@ -20,6 +20,77 @@ namespace ShotInk
             var watch = System.Diagnostics.Stopwatch.StartNew();
             while (!done()) { if (watch.ElapsedMilliseconds > 8000) throw new Exception("Capture timed out"); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
         }
+        private static void UpdatePriority(string root)
+        {
+            using (var home = new MainForm(Path.Combine(root, "update-priority"), false))
+            {
+                home.Show(); Application.DoEvents();
+                var pin = new PinForm(new Bitmap(40, 30)); pin.Show();
+                var editor = new EditorForm(new Bitmap(40, 30), delegate(Bitmap image) { image.Dispose(); }, new AppSettings()); editor.Show();
+                var clip = new GifClip { Duration = 100 };
+                using (var image = new Bitmap(40, 30)) using (var bytes = new MemoryStream())
+                { image.Save(bytes, ImageFormat.Png); clip.Frames.Add(new GifFrame { Time = 0, Png = bytes.ToArray() }); }
+                var gif = new GifEditorForm(clip, new AppSettings()); gif.Show();
+                Call(home, "BeginCapture", false);
+                Wait(delegate { return Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay && f.Visible); });
+                var overlay = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
+                home.GetType().GetField("updateInstalling", Private).SetValue(home, true);
+                var closing = home.CloseWindowsForUpdateAsync(System.Threading.CancellationToken.None);
+                Wait(delegate { return closing.IsCompleted; });
+                Check(closing.GetAwaiter().GetResult() == null && pin.IsDisposed && editor.IsDisposed && gif.IsDisposed && overlay.IsDisposed,
+                    "Confirmed update did not close screenshot, pin and editor windows");
+                Check(!Field<bool>(home, "captureBusy"), "Closing the screenshot left capture busy");
+                Call(home, "BeginCapture", false); Call(home, "PinClipboard");
+                Check(!Field<bool>(home, "captureBusy") && !Application.OpenForms.Cast<Form>().Any(f => f is PinForm || f is CaptureOverlay),
+                    "Capture or pin reopened during update preparation");
+                home.GetType().GetField("updateInstalling", Private).SetValue(home, false);
+                Call(home, "BeginCapture", false);
+                home.GetType().GetField("updateInstalling", Private).SetValue(home, true);
+                closing = home.CloseWindowsForUpdateAsync(System.Threading.CancellationToken.None);
+                Wait(delegate { return closing.IsCompleted; });
+                Check(closing.GetAwaiter().GetResult() == null && !Field<bool>(home, "captureBusy") && !Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay),
+                    "Pending capture appeared after update confirmation");
+                home.GetType().GetField("updateInstalling", Private).SetValue(home, false);
+                using (var cancelled = new EditorForm(new Bitmap(40, 30), delegate(Bitmap image) { image.Dispose(); }, new AppSettings()))
+                using (var keepPin = new PinForm(new Bitmap(40, 30)))
+                {
+                    cancelled.Show(); keepPin.Show();
+                    FormClosingEventHandler cancel = delegate(object sender, FormClosingEventArgs e) { e.Cancel = true; };
+                    cancelled.FormClosing += cancel;
+                    var install = (System.Threading.Tasks.Task<string>)home.GetType().GetMethod("InstallUpdate", Private).Invoke(home,
+                        new object[] { new PreparedUpdate(), System.Threading.CancellationToken.None });
+                    Wait(delegate { return install.IsCompleted; });
+                    Check(install.GetAwaiter().GetResult().Contains("已取消更新") && !Field<bool>(home, "updateInstalling") && !keepPin.IsDisposed,
+                        "Cancelling editor close did not report cancellation and restore normal operation");
+                    cancelled.FormClosing -= cancel; cancelled.Close(); keepPin.Close();
+                }
+                home.Close();
+            }
+            using (var dialog = new UpdateForm(delegate { throw new IOException("fixture install failure"); }, new UpdateInfo { Version = "99.0.0", Revision = new string('F', 64) }))
+            {
+                dialog.Show();
+                Check(!Field<Label>(dialog, "notes").CanSelect, "Update details still accept focus or text selection");
+                dialog.GetType().GetField("prepared", Private).SetValue(dialog, new PreparedUpdate());
+                var action = (System.Threading.Tasks.Task)dialog.GetType().GetMethod("ActAsync", Private).Invoke(dialog, null);
+                Wait(delegate { return action.IsCompleted; }); action.GetAwaiter().GetResult();
+                Check(Field<Label>(dialog, "status").Text.Contains("fixture install failure") && Field<Button>(dialog, "action").Enabled,
+                    "Install failure was invisible or left confirmation disabled");
+                dialog.Close();
+            }
+            var stage = Path.Combine(root, "cleanup");
+            Directory.CreateDirectory(Path.Combine(stage, "payload")); Directory.CreateDirectory(Path.Combine(stage, "backup"));
+            File.WriteAllText(Path.Combine(stage, "ShotInk-portable.zip"), "package");
+            File.WriteAllText(Path.Combine(stage, "payload", "ShotInk.exe"), "staged");
+            File.WriteAllText(Path.Combine(stage, "backup", "ShotInk.exe"), "backup");
+            File.WriteAllText(Path.Combine(stage, "update-error.txt"), "diagnostic");
+            UpdateService.CleanupPackage(stage);
+            Check(!File.Exists(Path.Combine(stage, "ShotInk-portable.zip")) && !Directory.Exists(Path.Combine(stage, "payload")) &&
+                File.Exists(Path.Combine(stage, "backup", "ShotInk.exe")) && File.Exists(Path.Combine(stage, "update-error.txt")), "Cleanup deleted backups/logs or retained install files");
+            UpdateService.CleanupPackage(stage);
+            Console.WriteLine("PASS: package cleanup removes ZIP/payload and retains backups/logs; details cannot be selected");
+            Console.WriteLine("PASS: update confirmation closes windows, cancels pending captures, blocks new captures and recovers after cancellation/failure");
+        }
+
         internal static void Run()
         {
             var previousClipboard = Clipboard.GetDataObject();
@@ -42,11 +113,11 @@ namespace ShotInk
                 {
                     overlay.EnableWindowSelection(new[] { window }); overlay.Show();
                     Mouse(overlay, "OnMouseDown", 50, 50);
-                    System.Threading.Thread.Sleep(370); Application.DoEvents();
+                    System.Threading.Thread.Sleep(370);
                     Mouse(overlay, "OnMouseUp", 50, 50);
                     Check(!Field<bool>(overlay, "ready"), "Long press without dragging selected the window");
                     Mouse(overlay, "OnMouseDown", 50, 50); Mouse(overlay, "OnMouseMove", 130, 110);
-                    System.Threading.Thread.Sleep(370); Application.DoEvents();
+                    typeof(Timer).GetMethod("OnTick", Private).Invoke(Field<Timer>(overlay, "selectionHold"), new object[] { EventArgs.Empty });
                     Check(Field<Rectangle>(overlay, "selection") == new Rectangle(50, 50, 80, 60), "Hold timer erased a manually dragged region");
                     Mouse(overlay, "OnMouseUp", 130, 110);
                     Check(Field<Rectangle>(overlay, "selection") == new Rectangle(50, 50, 80, 60), "Drag selected the detected window instead of custom bounds");
@@ -69,6 +140,10 @@ namespace ShotInk
                     Call(home, "BeginQuickCapture", true); Wait(delegate { return !Field<bool>(home, "captureBusy"); });
                     using (var image = Clipboard.GetImage()) Check(image != null && image.Size == region.Size, "Quick copy omitted clipboard image or changed dimensions: " + (image == null ? "null" : image.Size.ToString()) + " expected " + region.Size + " notice " + Field<Label>(home, "notice").Text);
                     Check(!Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay || f is EditorForm), "Quick copy left an editor open");
+                    var feedback = Field<CaptureFeedback>(home, "captureFeedback");
+                    Check(feedback != null && feedback.Visible, "Quick copy omitted success feedback");
+                    Check(Native.GetForegroundWindow() != feedback.Handle && !feedback.ContainsFocus, "Success feedback stole focus: foreground=" + Native.GetForegroundWindow() + " toast=" + feedback.Handle + " focused=" + feedback.ContainsFocus);
+                    Wait(delegate { return feedback.IsDisposed; });
                     Call(home, "BeginQuickCapture", false); Wait(delegate { return Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay && f.Visible); });
                     var editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
                     Check(Field<bool>(editor, "ready") && Field<Rectangle>(editor, "selection").Size == region.Size, "Quick edit did not open the previous selection");
@@ -92,6 +167,7 @@ namespace ShotInk
                     var expected = target.RectangleToScreen(target.ClientRectangle); expected.Offset(-SystemInformation.VirtualScreen.X, -SystemInformation.VirtualScreen.Y);
                     Check(windows.Any(r => r.Contains(expected)), "Native window detection missed the visible target"); target.Close();
                 }
+                UpdatePriority(root);
                 Console.WriteLine("PASS: shared window selection, long press, drag, region persistence, quick copy/edit, full screen and history pin fallback");
             }
             finally { if (previousClipboard != null) Clipboard.SetDataObject(previousClipboard, true, 5, 100); else Clipboard.Clear(); Directory.Delete(root, true); }

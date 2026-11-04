@@ -12,6 +12,7 @@ namespace ShotInk
     {
         private UpdateController updates;
         private UpdateForm updateWindow;
+        private bool updateInstalling;
         private void SetupUpdateCheck()
         {
             updates = new UpdateController(Application.ProductVersion, UpdateService.InstalledRevision(AppDomain.CurrentDomain.BaseDirectory));
@@ -37,9 +38,10 @@ namespace ShotInk
         }
         private async Task<string> InstallUpdate(PreparedUpdate prepared, CancellationToken token)
         {
-            if (captureBusy || Application.OpenForms.Cast<Form>().Any(form => form is CaptureOverlay || form is EditorForm || form is GifEditorForm || form is PinForm))
-                return "请先完成并关闭截图、贴图或剪辑窗口，再安装更新。";
+            if (updateInstalling) return "正在准备更新，请稍候。";
             if (!settings.CanSave) return settings.LoadWarning;
+            updateInstalling = true;
+            bool handedOff = false;
             Process helper = null;
             try
             {
@@ -48,6 +50,8 @@ namespace ShotInk
                 PersistSettings(); if (settingsDirty) return "设置尚未保存，请先处理设置保存错误。";
                 string probe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".shotink-update-" + Guid.NewGuid().ToString("N"));
                 using (File.Create(probe)) { } File.Delete(probe);
+                string closeError = await CloseWindowsForUpdateAsync(token);
+                if (closeError != null) return closeError;
                 string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
                 string ready = Path.Combine(prepared.Folder, "update-ready.txt"), failure = Path.Combine(prepared.Folder, "update-error.txt");
                 File.Delete(ready); File.Delete(failure);
@@ -66,6 +70,7 @@ namespace ShotInk
                         await Task.Delay(100, token);
                     }
                     token.ThrowIfCancellationRequested();
+                    handedOff = true;
                     BeginInvoke(new Action(delegate { quitting = true; Application.Exit(); })); return null;
                 }
             }
@@ -74,7 +79,38 @@ namespace ShotInk
                 if (helper != null) try { if (!helper.HasExited) helper.Kill(); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
                 return error is OperationCanceledException ? "已取消更新。" : "无法开始更新：" + error.Message;
             }
-            finally { if (helper != null) helper.Dispose(); }
+            finally
+            {
+                if (helper != null) helper.Dispose();
+                if (!handedOff) { updateInstalling = false; if (prepared != null) UpdateService.CleanupPackage(prepared.Folder); }
+            }
+        }
+        internal async Task<string> CloseWindowsForUpdateAsync(CancellationToken token)
+        {
+            if (captureFeedback != null) { captureFeedback.Close(); captureFeedback = null; }
+            // Ask editors to save first; a cancelled save must leave the app usable.
+            foreach (var form in Application.OpenForms.Cast<Form>().Where(form => form is EditorForm || form is GifEditorForm).ToArray())
+            {
+                token.ThrowIfCancellationRequested();
+                form.Close();
+                if (!form.IsDisposed) return "已取消更新：编辑窗口尚未关闭，请保存或放弃修改后再确认更新。";
+            }
+            foreach (var form in Application.OpenForms.Cast<Form>().Where(form => form is CaptureOverlay || form is PinForm).ToArray())
+            {
+                token.ThrowIfCancellationRequested();
+                form.Close();
+                if (!form.IsDisposed) return "更新未开始：截图或贴图窗口未能关闭，请重试。";
+            }
+            // A screenshot may still be waiting for the desktop to settle before showing its overlay.
+            var clock = Stopwatch.StartNew();
+            while (captureBusy)
+            {
+                token.ThrowIfCancellationRequested();
+                if (clock.Elapsed.TotalSeconds > 5) return "更新未开始：正在结束截图，请稍后重试。";
+                await Task.Delay(25, token);
+            }
+            token.ThrowIfCancellationRequested();
+            return null;
         }
         private void DisposeUpdates()
         {

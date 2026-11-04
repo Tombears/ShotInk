@@ -26,6 +26,7 @@ namespace ShotInk
         private NotifyIcon tray;
         private Icon appIcon;
         private bool captureBusy;
+        private CaptureFeedback captureFeedback;
         private bool settingsOpen;
         private bool quitting;
         private HotkeyBindings hotkeys;
@@ -151,7 +152,7 @@ namespace ShotInk
         { OpenSettingsCore(false); }
         private void OpenSettingsCore(bool checkVersion)
         {
-            if (settingsOpen || captureBusy) return;
+            if (settingsOpen || captureBusy || updateInstalling) return;
             if (startup != null) settings.StartWithWindows = startup.IsEnabled;
             settingsOpen = true;
             if (hotkeys != null) hotkeys.Clear();
@@ -296,10 +297,11 @@ namespace ShotInk
         private void BeginFullScreenCapture() { BeginCaptureCore(false, Rectangle.Empty, false, true); }
         private async void BeginCaptureCore(bool scroll, Rectangle region, bool directCopy, bool fullScreen)
         {
-            if (captureBusy || settingsOpen) return;
+            if (captureBusy || settingsOpen || updateInstalling) return;
             var context = System.Threading.SynchronizationContext.Current;
             if (context == null || context.GetType() == typeof(System.Threading.SynchronizationContext))
                 System.Threading.SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            if (captureFeedback != null) { captureFeedback.Close(); captureFeedback = null; }
             captureBusy = true;
             var restore = new List<Form>();
             foreach (Form form in Application.OpenForms)
@@ -310,11 +312,18 @@ namespace ShotInk
             {
                 await Task.Delay(200);
                 if (IsDisposed) return;
+                if (updateInstalling) { captureBusy = false; restoreWindows(); return; }
                 if (fullScreen) region = SystemInformation.VirtualScreen;
                 if (directCopy)
                 {
                     var image = Native.Capture(region);
-                    try { AcceptCapture(image, false); } finally { captureBusy = false; restoreWindows(); }
+                    bool copied;
+                    try { copied = AcceptCapture(image, false); } finally { captureBusy = false; restoreWindows(); }
+                    if (copied)
+                    {
+                        notice.Text = "截图已复制。";
+                        captureFeedback = new CaptureFeedback(); captureFeedback.Show();
+                    }
                     return;
                 }
                 var bounds = SystemInformation.VirtualScreen;
@@ -333,13 +342,14 @@ namespace ShotInk
             catch (Exception ex) { captureBusy = false; restoreWindows(); MessageBox.Show(ex.Message, "无法截图"); }
         }
 
-        private void AcceptCapture(Bitmap image, bool openEditor = true, bool pinImage = false, bool copyImage = true)
+        private bool AcceptCapture(Bitmap image, bool openEditor = true, bool pinImage = false, bool copyImage = true)
         {
+            bool copied = false;
             try
             {
                 if (copyImage)
                 {
-                    try { Clipboard.SetDataObject(image, true, 5, 100); }
+                    try { Clipboard.SetDataObject(image, true, 5, 100); copied = true; }
                     catch (System.Runtime.InteropServices.ExternalException) { notice.Text = "剪贴板暂时不可用，已打开编辑器供重新复制。"; openEditor = true; }
                 }
                 if (autoSave.Checked)
@@ -356,6 +366,7 @@ namespace ShotInk
                 if (openEditor) { var editor = new EditorForm(image, PinImage, settings); editor.Show(); }
                 else if (pinImage) PinImage(image);
                 else image.Dispose();
+                return copied;
             }
             catch { image.Dispose(); throw; }
         }
@@ -409,7 +420,7 @@ namespace ShotInk
         }
         private void PinClipboard()
         {
-            if (settingsOpen) return;
+            if (settingsOpen || updateInstalling) return;
             try
             {
                 using (var source = Clipboard.ContainsImage() ? Clipboard.GetImage() : null)
@@ -428,7 +439,7 @@ namespace ShotInk
             catch (IOException ex) { MessageBox.Show(ex.Message, "无法读取历史图片"); }
             catch (ArgumentException ex) { MessageBox.Show(ex.Message, "无法读取历史图片"); }
         }
-        private void PinImage(Bitmap image) { new PinForm(image).Show(); }
+        private void PinImage(Bitmap image) { if (updateInstalling) { image.Dispose(); return; } new PinForm(image).Show(); }
         protected override void SetVisibleCore(bool value)
         {
             if (value && startInTray)
@@ -460,6 +471,7 @@ namespace ShotInk
                 settingsTimer.Stop(); PersistSettings(); settingsTimer.Dispose();
                 hotkeyTimer.Stop(); hotkeyTimer.Dispose();
                 DisposeUpdates();
+                if (captureFeedback != null) { captureFeedback.Dispose(); captureFeedback = null; }
                 if (tray != null) { tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
                 if (thumbnails != null) thumbnails.Dispose();
                 if (appIcon != null) appIcon.Dispose();

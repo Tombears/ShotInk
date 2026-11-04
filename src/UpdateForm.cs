@@ -10,7 +10,7 @@ namespace ShotInk
     internal sealed class UpdateForm : Form
     {
         private readonly Label status;
-        private readonly TextBox notes;
+        private readonly Label notes;
         private readonly ProgressBar progress;
         private readonly Button action, check;
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
@@ -19,7 +19,7 @@ namespace ShotInk
         private readonly Func<CancellationToken, Task<UpdateInfo>> verifiedCheck;
         private UpdateInfo info;
         private PreparedUpdate prepared;
-        private bool busy, disposed;
+        private bool busy, disposed, handedOff;
         internal UpdateForm(Func<PreparedUpdate, CancellationToken, Task<string>> install, UpdateInfo known = null, Func<CancellationToken, Task<UpdateInfo>> checkForUpdates = null, Func<CancellationToken, Task<UpdateInfo>> verifiedCheck = null)
         {
             this.checkForUpdates = checkForUpdates ?? UpdateService.CheckAsync;
@@ -33,7 +33,10 @@ namespace ShotInk
             foreach (int height in new[] { 26, 44, 38 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             layout.Controls.Add(new Label { Text = "当前版本 " + Application.ProductVersion, Dock = DockStyle.Fill }, 0, 0);
             status = new Label { Name = "update-status", Dock = DockStyle.Fill }; layout.Controls.Add(status, 0, 1);
-            notes = new TextBox { Name = "update-notes", ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = Color.White }; layout.Controls.Add(notes, 0, 2);
+            var notesPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White, TabStop = false };
+            notes = new Label { Name = "update-notes", AutoSize = true, UseMnemonic = false, TabStop = false, Padding = new Padding(4) };
+            notesPanel.Controls.Add(notes); layout.Controls.Add(notesPanel, 0, 2);
+            notesPanel.SizeChanged += delegate { notes.MaximumSize = new Size(Math.Max(80, notesPanel.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4), 0); };
             progress = new ProgressBar { Dock = DockStyle.Fill, Visible = false }; layout.Controls.Add(progress, 0, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             check = new Button { Text = "检查更新", Width = 100, Height = 32 }; check.Click += async delegate { await CheckAsync(); };
@@ -59,7 +62,7 @@ namespace ShotInk
                 try { info = await checkForUpdates(cancellation.Token); }
                 catch (VerificationRequiredException) { verification = true; }
                 if (verification) { status.Text = "请在验证窗口完成人机验证…"; info = await verifiedCheck(cancellation.Token); }
-                if (!IsDisposed) { prepared = null; ShowInfo(); }
+                if (!IsDisposed) { if (prepared != null) UpdateService.CleanupPackage(prepared.Folder); prepared = null; ShowInfo(); }
             }
             catch (Exception error) { if (!IsDisposed) status.Text = "检查失败：" + error.Message; }
             finally { if (!IsDisposed) { busy = false; check.Enabled = true; } }
@@ -69,12 +72,18 @@ namespace ShotInk
             if (busy || info == null) return;
             if (prepared != null)
             {
-                busy = true; action.Enabled = check.Enabled = false; status.Text = "正在准备更新并重启…";
+                busy = true; action.Enabled = check.Enabled = false; status.ForeColor = Color.Black; status.Text = "正在结束截图、关闭贴图及编辑窗口并准备重启…";
                 try
                 {
                     string error = await install(prepared, cancellation.Token);
                     if (IsDisposed) return;
-                    if (error != null) status.Text = error; else Close();
+                    if (error != null) { UpdateService.CleanupPackage(prepared.Folder); prepared = null; action.Text = "下载更新"; status.ForeColor = Color.Firebrick; status.Text = error; } else { handedOff = true; Close(); }
+                }
+                catch (Exception error)
+                {
+                    if (prepared != null) UpdateService.CleanupPackage(prepared.Folder);
+                    prepared = null;
+                    if (!IsDisposed) { action.Text = "下载更新"; status.ForeColor = Color.Firebrick; status.Text = "无法开始更新：" + error.Message; }
                 }
                 finally { if (!IsDisposed) { busy = false; action.Enabled = check.Enabled = true; } }
                 return;
@@ -91,12 +100,13 @@ namespace ShotInk
                     status.Text = "需要人机验证，请在验证窗口完成操作…";
                     prepared = await UpdateService.DownloadWithBrowserAsync(info, AppDomain.CurrentDomain.BaseDirectory, this, cancellation.Token, downloadProgress);
                 }
-                if (!IsDisposed) { status.Text = "更新包已校验。请先关闭其他截图、贴图或剪辑窗口，再确认更新。"; action.Text = "确认更新并重启"; action.Enabled = true; }
+                if (IsDisposed) { if (prepared != null) UpdateService.CleanupPackage(prepared.Folder); prepared = null; return; }
+                if (!IsDisposed) { status.Text = "更新包已校验。确认后将自动结束截图、关闭贴图及编辑窗口并重启。"; action.Text = "确认更新并重启"; action.Enabled = true; }
             }
             catch (Exception error) { if (!IsDisposed) { status.Text = "下载失败：" + error.Message; action.Enabled = true; } }
             finally { if (!IsDisposed) { busy = false; check.Enabled = true; } }
         }
         protected override void Dispose(bool disposing)
-        { if (disposing && !disposed) { disposed = true; cancellation.Cancel(); cancellation.Dispose(); } base.Dispose(disposing); }
+        { if (disposing && !disposed) { disposed = true; cancellation.Cancel(); cancellation.Dispose(); if (!handedOff && prepared != null) UpdateService.CleanupPackage(prepared.Folder); } base.Dispose(disposing); }
     }
 }
