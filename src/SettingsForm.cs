@@ -24,12 +24,12 @@ namespace ShotInk
         private readonly AppSettings original;
         private readonly ShortcutBox capture;
         private readonly ShortcutBox pin;
-        private readonly ShortcutBox scroll;
+        private readonly ShortcutBox scroll, quickCopy, quickEdit, fullScreen;
         private readonly TextBox folder;
         private readonly CheckBox ask;
         private readonly CheckBox startup;
         private readonly Label error;
-        private readonly Label[] shortcutStatus = new Label[3];
+        private readonly Label[] shortcutStatus = new Label[6];
         private readonly Timer statusTimer;
         private readonly Func<Keys, bool> shortcutAvailable;
         private readonly UpdateController updates;
@@ -41,39 +41,42 @@ namespace ShotInk
             this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
-            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(650, 584); MinimumSize = new Size(640, 612);
+            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(680, 698); MinimumSize = new Size(690, 726);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 14 };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-            foreach (int height in new[] { 38, 38, 38, 35, 42, 34, 35, 34, 36, 0, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 17 };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            foreach (int height in new[] { 38, 38, 38, 38, 38, 38, 35, 42, 34, 35, 34, 36, 0, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
+            quickCopy = AddShortcut(layout, "快速截图并复制", 3, current.QuickCopyShortcut);
+            quickEdit = AddShortcut(layout, "快速截图并编辑", 4, current.QuickEditShortcut);
+            fullScreen = AddShortcut(layout, "全屏截图", 5, current.FullScreenShortcut);
             var hint = new Label { Text = "点击输入框后按快捷键；Backspace 清除。占用状态每秒刷新。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft };
-            layout.Controls.Add(hint, 0, 3); layout.SetColumnSpan(hint, 3);
-            layout.Controls.Add(new Label { Text = "默认保存文件夹", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 4);
-            folder = new TextBox { Name = "save-directory", Dock = DockStyle.Fill, Text = current.SaveDirectory, Margin = new Padding(3, 8, 3, 3) }; layout.Controls.Add(folder, 1, 4);
+            layout.Controls.Add(hint, 0, 6); layout.SetColumnSpan(hint, 3);
+            layout.Controls.Add(new Label { Text = "默认保存文件夹", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 7);
+            folder = new TextBox { Name = "save-directory", Dock = DockStyle.Fill, Text = current.SaveDirectory, Margin = new Padding(3, 8, 3, 3) }; layout.Controls.Add(folder, 1, 7);
             var browse = new Button { Text = "浏览…", Dock = DockStyle.Fill, Margin = new Padding(6, 5, 0, 5) };
             browse.Click += delegate { using (var dialog = new FolderBrowserDialog { Description = "选择图片默认保存文件夹", SelectedPath = folder.Text }) if (dialog.ShowDialog(this) == DialogResult.OK) folder.Text = dialog.SelectedPath; };
-            layout.Controls.Add(browse, 2, 4);
+            layout.Controls.Add(browse, 2, 7);
             ask = new CheckBox { Name = "ask-save-location", Text = "每次保存时询问保存位置", Checked = current.AskSaveLocation, Dock = DockStyle.Fill };
-            layout.Controls.Add(ask, 0, 5); layout.SetColumnSpan(ask, 3);
+            layout.Controls.Add(ask, 0, 8); layout.SetColumnSpan(ask, 3);
             var description = new Label { Text = "取消勾选后，保存按钮和 Ctrl+S 直接保存到上方文件夹。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
-            layout.Controls.Add(description, 0, 6); layout.SetColumnSpan(description, 3);
+            layout.Controls.Add(description, 0, 9); layout.SetColumnSpan(description, 3);
             startup = new CheckBox { Name = "start-with-windows", Text = "开机启动", Checked = current.StartWithWindows, Dock = DockStyle.Fill };
-            layout.Controls.Add(startup, 0, 7); layout.SetColumnSpan(startup, 3);
+            layout.Controls.Add(startup, 0, 10); layout.SetColumnSpan(startup, 3);
             var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
-            layout.Controls.Add(startupHint, 0, 8); layout.SetColumnSpan(startupHint, 3);
+            layout.Controls.Add(startupHint, 0, 11); layout.SetColumnSpan(startupHint, 3);
             var version = new Label { Text = "当前版本 " + Application.ProductVersion + (BuildFeatures.Ocr ? " · 完整版" : " · 轻量版"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            layout.Controls.Add(version, 0, 10); layout.SetColumnSpan(version, 2);
+            layout.Controls.Add(version, 0, 13); layout.SetColumnSpan(version, 2);
             updateCheck = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = updates != null };
-            updateCheck.Click += async delegate { if (updates != null) await updates.CheckAsync(); }; layout.Controls.Add(updateCheck, 2, 10);
+            updateCheck.Click += async delegate { if (updates != null) await updates.CheckAsync(); }; layout.Controls.Add(updateCheck, 2, 13);
             updateStatus = new Label { Name = "update-status", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
-            layout.Controls.Add(updateStatus, 0, 11); layout.SetColumnSpan(updateStatus, 2);
+            layout.Controls.Add(updateStatus, 0, 14); layout.SetColumnSpan(updateStatus, 2);
             updateDetails = new Button { Name = "view-update", Text = "查看并更新", Dock = DockStyle.Fill, Enabled = false };
-            updateDetails.Click += delegate { if (showUpdateDetails != null) showUpdateDetails(); }; layout.Controls.Add(updateDetails, 2, 11);
-            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" }; layout.Controls.Add(error, 0, 12); layout.SetColumnSpan(error, 3);
+            updateDetails.Click += delegate { if (showUpdateDetails != null) showUpdateDetails(); }; layout.Controls.Add(updateDetails, 2, 14);
+            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" }; layout.Controls.Add(error, 0, 15); layout.SetColumnSpan(error, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             var save = new Button { Text = "保存", Width = 85, Height = 30 };
             save.Click += delegate
@@ -83,13 +86,13 @@ namespace ShotInk
             };
             var cancel = new Button { Text = "取消", Width = 85, Height = 30, DialogResult = DialogResult.Cancel };
             var reset = new Button { Text = "恢复默认快捷键", Width = 130, Height = 30 };
-            reset.Click += delegate { var defaults = new AppSettings(); capture.ShortcutValue = defaults.CaptureShortcut; pin.ShortcutValue = defaults.PinShortcut; scroll.ShortcutValue = defaults.ScrollShortcut; };
+            reset.Click += delegate { var defaults = new AppSettings(); capture.ShortcutValue = defaults.CaptureShortcut; pin.ShortcutValue = defaults.PinShortcut; scroll.ShortcutValue = defaults.ScrollShortcut; quickCopy.ShortcutValue = defaults.QuickCopyShortcut; quickEdit.ShortcutValue = defaults.QuickEditShortcut; fullScreen.ShortcutValue = defaults.FullScreenShortcut; };
             buttons.Controls.Add(save); buttons.Controls.Add(cancel); buttons.Controls.Add(reset);
-            layout.Controls.Add(buttons, 0, 13); layout.SetColumnSpan(buttons, 3);
+            layout.Controls.Add(buttons, 0, 16); layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout); AcceptButton = save; CancelButton = cancel;
             statusTimer = new Timer { Interval = 1000 };
             statusTimer.Tick += delegate { RefreshShortcutStatus(); };
-            foreach (var box in new[] { capture, pin, scroll })
+            foreach (var box in new[] { capture, pin, scroll, quickCopy, quickEdit, fullScreen })
                 box.TextChanged += delegate { if (IsHandleCreated) RefreshShortcutStatus(); };
             if (updates != null) updates.Changed += RefreshUpdateStatus;
             RefreshUpdateStatus();
@@ -108,7 +111,7 @@ namespace ShotInk
         { base.OnShown(e); RefreshShortcutStatus(); statusTimer.Start(); }
         internal void RefreshShortcutStatus()
         {
-            var keys = new[] { capture.ShortcutValue, pin.ShortcutValue, scroll.ShortcutValue };
+            var keys = new[] { capture.ShortcutValue, pin.ShortcutValue, scroll.ShortcutValue, quickCopy.ShortcutValue, quickEdit.ShortcutValue, fullScreen.ShortcutValue };
             for (int i = 0; i < keys.Length; i++)
             {
                 string state; Color color = Theme.Muted;
@@ -142,6 +145,7 @@ namespace ShotInk
         internal AppSettings ReadSettings()
         {
             var candidate = original.Clone(); candidate.CaptureShortcut = capture.ShortcutValue; candidate.PinShortcut = pin.ShortcutValue; candidate.ScrollShortcut = scroll.ShortcutValue;
+            candidate.QuickCopyShortcut = quickCopy.ShortcutValue; candidate.QuickEditShortcut = quickEdit.ShortcutValue; candidate.FullScreenShortcut = fullScreen.ShortcutValue;
             candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.Validate(); return candidate;
         }
     }

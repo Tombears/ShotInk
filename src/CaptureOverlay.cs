@@ -19,6 +19,12 @@ namespace ShotInk
         private Rectangle dragOriginal;
         private int dragMode = -2; // -2: new selection, -1: move, 0..7: resize handles.
         private bool dragging;
+        private Rectangle[] windowBounds = new Rectangle[0];
+        private Rectangle pressedWindow;
+        private long selectionPressTime;
+        private bool manualSelection;
+        private readonly Timer selectionHold = new Timer { Interval = 350 };
+        private const string RegionHint = "单击窗口进入编辑 · 长按或拖动框选 · Esc / 右键取消";
         private bool ready;
         private bool completed;
         private bool rightCancelPending;
@@ -56,6 +62,12 @@ namespace ShotInk
             sizeHint = new Label { AutoSize = true, ForeColor = Color.White, BackColor = Color.FromArgb(25, 28, 33),
                 Font = new Font("Consolas", 10), Padding = new Padding(4, 2, 4, 2), Visible = false };
             Controls.Add(sizeHint);
+            Disposed += delegate { selectionHold.Dispose(); };
+            selectionHold.Tick += delegate
+            {
+                selectionHold.Stop();
+                if (dragging && !ready && dragMode == -2 && !manualSelection) { manualSelection = true; selection = Rectangle.Empty; Invalidate(); }
+            };
             pointer = new Point(Cursor.Position.X - bounds.X, Cursor.Position.Y - bounds.Y);
             for (int i = 0; i < grips.Length; i++)
             {
@@ -101,7 +113,7 @@ namespace ShotInk
             {
                 using (var pen = new Pen(Color.FromArgb(180, Color.White)))
                 { pen.DashStyle = DashStyle.Dot; g.DrawLine(pen, pointer.X, 0, pointer.X, Height); g.DrawLine(pen, 0, pointer.Y, Width, pointer.Y); }
-                DrawHint(g, scrolling ? "长截图 · 拖选滚动内容区域，避开固定导航栏 · Esc 取消" : "拖选截图区域 · 松开后显示工具栏 · Esc / 右键取消", new Point(pointer.X + 18, pointer.Y + 24));
+                DrawHint(g, scrolling ? "长截图 · 拖选滚动内容区域，避开固定导航栏 · Esc 取消" : RegionHint, new Point(pointer.X + 18, pointer.Y + 24));
             }
         }
 
@@ -122,7 +134,10 @@ namespace ShotInk
             if (scrollSession != null || gifSession != null) return;
             if (ready && selection.Contains(e.Location)) { BeginAdjust(-1, e.Location); return; }
             ClearSelection();
-            anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; Capture = true;
+            pressedWindow = WindowSelectionAt(e.Location);
+            selectionPressTime = System.Diagnostics.Stopwatch.GetTimestamp(); manualSelection = scrolling;
+            selectionHold.Start();
+            anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; selection = manualSelection ? Rectangle.Empty : pressedWindow; Capture = true;
             // Remove the hover crosshair and hint before drawing the first selection frame.
             Invalidate(); Update();
         }
@@ -159,7 +174,11 @@ namespace ShotInk
             if (dragging)
             {
                 if (dragMode == -2)
+                {
+                    if (Math.Abs(e.X - anchor.X) >= SystemInformation.DragSize.Width / 2 || Math.Abs(e.Y - anchor.Y) >= SystemInformation.DragSize.Height / 2) manualSelection = true;
+                    if (!manualSelection) return;
                     selection = Rectangle.FromLTRB(Math.Max(0, Math.Min(anchor.X, e.X)), Math.Max(0, Math.Min(anchor.Y, e.Y)), Math.Min(Width, Math.Max(anchor.X, e.X)), Math.Min(Height, Math.Max(anchor.Y, e.Y)));
+                }
                 else
                 {
                     var delta = new Point(e.X - anchor.X, e.Y - anchor.Y);
@@ -167,7 +186,12 @@ namespace ShotInk
                 }
                 if (selection != previousSelection) InvalidateDrag(previousSelection);
             }
-            else if (!ready && previousPointer != pointer) InvalidatePointer(previousPointer);
+            else if (!ready && previousPointer != pointer)
+            {
+                selection = scrolling ? Rectangle.Empty : WindowSelectionAt(pointer);
+                if (previousSelection != selection) Invalidate();
+                InvalidatePointer(previousPointer);
+            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -176,6 +200,8 @@ namespace ShotInk
             if (rightCancelPending && e.Button == MouseButtons.Right)
             { rightCancelPending = false; Close(); return; }
             if (!dragging || e.Button != MouseButtons.Left) return;
+            selectionHold.Stop();
+            if (!ready && dragMode == -2 && System.Diagnostics.Stopwatch.GetTimestamp() - selectionPressTime >= System.Diagnostics.Stopwatch.Frequency * 350 / 1000) manualSelection = true;
             // Process the final pointer position even when Windows coalesces mouse-move events.
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
             dragging = false; Capture = false;
@@ -192,9 +218,33 @@ namespace ShotInk
                 }
                 canvas.Show();
             }
+            RememberSelection();
             UpdateSelectionChrome();
             toolbar.Show(); PositionToolbar(); Invalidate(true);
             if (scrolling && longViewport == null) StartLongCapture();
+        }
+
+        internal void EnableWindowSelection(Rectangle[] windows)
+        {
+            windowBounds = windows ?? new Rectangle[0];
+            selection = scrolling ? Rectangle.Empty : WindowSelectionAt(pointer);
+        }
+        private Rectangle WindowSelectionAt(Point point)
+        {
+            foreach (var bounds in windowBounds) if (bounds.Contains(point)) return bounds;
+            return Rectangle.Empty;
+        }
+        internal void SelectRegion(Rectangle globalRegion)
+        {
+            var local = globalRegion; local.Offset(-screenBounds.X, -screenBounds.Y);
+            if (local.Width < 8 || local.Height < 8 || !ClientRectangle.Contains(local)) throw new ArgumentException("截图区域已不在当前屏幕内，请重新框选。");
+            selection = local; PrepareEditor(); UpdateSelectionChrome(); toolbar.Show(); PositionToolbar(); Invalidate();
+        }
+        private void RememberSelection()
+        {
+            if (scrolling || longViewport != null) return;
+            var region = selection; region.Offset(screenBounds.Location);
+            if (settings.LastCaptureRegion != region) { settings.LastCaptureRegion = region; settings.NotifyChanged(); }
         }
 
         private void PrepareEditor()
@@ -288,6 +338,7 @@ namespace ShotInk
             base.OnMouseCaptureChanged(e);
             if (dragging && !Capture)
             {
+                selectionHold.Stop();
                 dragging = false;
                 if (ready)
                 {
@@ -330,6 +381,7 @@ namespace ShotInk
                 }
                 catch (Exception ex) { image.Dispose(); MessageBox.Show(this, ex.Message, "无法保存图片"); return; }
             }
+            RememberSelection();
             completed = true;
             Hide(); Close();
             if (Completed != null) Completed(image, action); else image.Dispose();

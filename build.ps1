@@ -38,8 +38,8 @@ if (-not $Lite) { & (Join-Path $projectRoot 'scripts\build-ocr.ps1') }
 if ($Test -or $Preview) {
     $testPath = Join-Path $buildRoot 'ShotInk.Tests.exe'
     $testSource = Join-Path $projectRoot $(if($Lite){'tests\Lite.Tests.cs'}else{'tests\Tests.cs'})
-    $sharedTests = Join-Path $projectRoot 'tests\GifTools.Tests.cs'
-    & $compiler @common '/target:exe' '/main:ShotInk.Tests' ('/out:' + $testPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources $testSource $sharedTests
+    $sharedTests = @('tests\GifTools.Tests.cs', 'tests\CaptureWorkflow.Tests.cs') | ForEach-Object { Join-Path $projectRoot $_ }
+    & $compiler @common '/target:exe' '/main:ShotInk.Tests' ('/out:' + $testPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources $testSource @sharedTests
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
     $testArgs = @()
     if ($Preview) { $testArgs += @('--preview', $buildRoot) }

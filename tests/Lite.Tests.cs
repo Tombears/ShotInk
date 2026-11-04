@@ -30,6 +30,7 @@ namespace ShotInk
                     var strip = (ToolStrip)typeof(CaptureToolbar).GetField("strip", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(toolbar);
                     foreach (ToolStripItem item in strip.Items) if (item.Name == "recognize-text") throw new Exception("Lite toolbar still contains OCR.");
                 }
+                CaptureWorkflowTests.Run();
                 GifToolsTests.Run();
                 Console.WriteLine("PASS: lite build omits OCR logic and controls; shared GIF tools, scopes, undo and export work"); return 0;
             }

@@ -67,6 +67,32 @@ namespace ShotInk
         internal static bool ExcludeFromCapture(IntPtr window, bool excluded)
         { try { return SetWindowDisplayAffinity(window, excluded ? 0x11U : 0U); } catch (EntryPointNotFoundException) { return false; } }
 
+        private delegate bool EnumWindowProc(IntPtr window, IntPtr parameter);
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback, IntPtr parameter);
+        [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
+        [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out WindowRect rect, int size);
+        [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")] private static extern int GetCloaked(IntPtr window, int attribute, out int value, int size);
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WindowRect { internal int Left, Top, Right, Bottom; }
+        internal static Rectangle[] CaptureWindowBounds(Rectangle desktopBounds)
+        {
+            var windows = new System.Collections.Generic.List<Rectangle>();
+            EnumWindows(delegate(IntPtr window, IntPtr parameter)
+            {
+                if (!IsWindowVisible(window) || IsIconic(window)) return true;
+                int cloaked;
+                if (GetCloaked(window, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
+                WindowRect rect;
+                if (DwmGetWindowAttribute(window, 9, out rect, Marshal.SizeOf(typeof(WindowRect))) != 0 && !GetWindowRect(window, out rect)) return true;
+                var bounds = Rectangle.Intersect(desktopBounds, Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom));
+                if (bounds.Width >= 8 && bounds.Height >= 8) { bounds.Offset(-desktopBounds.X, -desktopBounds.Y); windows.Add(bounds); }
+                return true;
+            }, IntPtr.Zero);
+            return windows.ToArray();
+        }
+
         internal static void EnableDpiAwareness()
         {
             try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; }

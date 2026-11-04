@@ -63,6 +63,8 @@ namespace ShotInk
                     Run("hover and initial box drawing repaint without old crosshairs, hints or borders", TestLiveInitialSelection);
                     return 0;
                 }
+                if (args.Length == 1 && args[0] == "--capture-tests") { CaptureWorkflowTests.Run(); return 0; }
+                CaptureWorkflowTests.Run();
                 Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
                 Run("scroll reversals revisit existing rows without duplicating or losing new tail pixels", TestScrollReversals);
@@ -1139,7 +1141,7 @@ namespace ShotInk
                             {
                                 Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.F1);
                                 Assert(Option<ShortcutBox>(dialog, "hotkey-0").ShortcutValue == Keys.F1, "The existing capture shortcut could not be recorded.");
-                                for (int id = 1; id <= 3; id++) SendMessage(home.Handle, Native.HotKeyMessage, new IntPtr(id), IntPtr.Zero);
+                                for (int id = 1; id <= 6; id++) SendMessage(home.Handle, Native.HotKeyMessage, new IntPtr(id), IntPtr.Zero);
                                 typeof(MainForm).GetMethod("BeginCapture", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, new object[] { false });
                                 Assert(!Field<bool>(home, "captureBusy") && dialog.Visible, "Entering a shortcut or using a capture entry started a screenshot inside settings.");
                                 Key(Option<ShortcutBox>(dialog, "hotkey-0"), Keys.F6);
@@ -1148,7 +1150,7 @@ namespace ShotInk
                             finally { dialog.Close(); }
                         }));
                         typeof(MainForm).GetMethod("OpenSettings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, null);
-                        Assert(!Field<bool>(home, "settingsOpen") && live.Count == 3 && live[1] == (save ? Keys.F6 : Keys.F1), "Closing settings failed to restore the saved or cancelled shortcuts.");
+                        Assert(!Field<bool>(home, "settingsOpen") && live.Count == new AppSettings().Shortcuts.Length && live[1] == (save ? Keys.F6 : Keys.F1), "Closing settings failed to restore the saved or cancelled shortcuts.");
                     }
                     home.Close();
                 }
@@ -1187,7 +1189,7 @@ namespace ShotInk
             }, delegate(int id) { live.Remove(id); });
             var defaults = new AppSettings(); Assert(bindings.RegisterInitial(defaults.Shortcuts) == "", "Initial shortcuts failed.");
             string error; Assert(!bindings.TryApply(new[] { Keys.F5, reserved, Keys.F6 }, out error) && error.Contains("F12"), "Conflict was not reported.");
-            Assert(live.Count == 3 && live[1] == Keys.F1 && live[2] == Keys.F3 && live[3] == defaults.ScrollShortcut, "Conflict discarded the previous shortcuts.");
+            Assert(live.Count == new AppSettings().Shortcuts.Length && live[1] == Keys.F1 && live[2] == Keys.F3 && live[3] == defaults.ScrollShortcut, "Conflict discarded the previous shortcuts.");
             Assert(bindings.TryApply(new[] { Keys.F3, Keys.F1, Keys.None }, out error) && live.Count == 2 && live[1] == Keys.F3 && live[2] == Keys.F1, "Swapping or clearing shortcuts failed.");
             Assert(!bindings.TryApply(new[] { Keys.F7, Keys.F8, Keys.F9 }, delegate { throw new IOException("disk unavailable"); }, out error) &&
                 live.Count == 2 && live[1] == Keys.F3 && live[2] == Keys.F1, "Failed settings persistence left the new shortcuts active.");
@@ -1241,9 +1243,9 @@ namespace ShotInk
                     string conflicts = bindings.RegisterInitial(keys);
                     typeof(MainForm).GetField("hotkeys", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(home, bindings);
                     typeof(MainForm).GetMethod("UpdateHotkeyNotice", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(home, new object[] { conflicts });
-                    Assert(live.Count == 2 && conflicts.Contains("F1"), "Initial conflict was not retained.");
+                    Assert(live.Count == keys.Length - 1 && conflicts.Contains("F1"), "Initial conflict was not retained.");
                     blocked = false;
-                    WaitUntil(delegate { return live.Count == 3; });
+                    WaitUntil(delegate { return live.Count == keys.Length; });
                     Assert(unregisters == 0 && Field<Label>(home, "notice").Text.Contains("已自动恢复"), "Automatic recovery reset a healthy key or left stale status.");
                     Assert(bindings.RetryMissing(keys) == "" && unregisters == 0, "Recovery registered an active key twice.");
                     home.Close();

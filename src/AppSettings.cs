@@ -28,6 +28,10 @@ namespace ShotInk
         internal bool AskSaveLocation = true;
         internal bool StartWithWindows;
         internal string SaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        internal Keys QuickCopyShortcut = Keys.Control | Keys.Alt | Keys.Q;
+        internal Keys QuickEditShortcut = Keys.Control | Keys.Alt | Keys.E;
+        internal Keys FullScreenShortcut = Keys.Control | Keys.Alt | Keys.A;
+        internal Rectangle LastCaptureRegion;
         internal Keys CaptureShortcut = Keys.F1;
         internal Keys PinShortcut = Keys.F3;
         internal Keys ScrollShortcut = Keys.Control | Keys.Alt | Keys.L;
@@ -42,7 +46,7 @@ namespace ShotInk
             if (!tools.TryGetValue(tool, out value)) { value = new ToolPreferences(); tools.Add(tool, value); }
             return value;
         }
-        internal Keys[] Shortcuts { get { return new[] { CaptureShortcut, PinShortcut, ScrollShortcut }; } }
+        internal Keys[] Shortcuts { get { return new[] { CaptureShortcut, PinShortcut, ScrollShortcut, QuickCopyShortcut, QuickEditShortcut, FullScreenShortcut }; } }
         internal void NotifyChanged() { if (Changed != null) Changed(); }
         internal AppSettings Clone() { var copy = new AppSettings(); copy.CopyFrom(this); return copy; }
         internal void CopyFrom(AppSettings other)
@@ -50,6 +54,8 @@ namespace ShotInk
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
             StartWithWindows = other.StartWithWindows;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
+            QuickCopyShortcut = other.QuickCopyShortcut; QuickEditShortcut = other.QuickEditShortcut; FullScreenShortcut = other.FullScreenShortcut;
+            LastCaptureRegion = other.LastCaptureRegion;
             LoadWarning = other.LoadWarning; loadFailed = other.loadFailed; recoveredFromBackup = other.recoveredFromBackup;
             tools.Clear(); foreach (var item in other.tools) tools.Add(item.Key, item.Value.Clone());
         }
@@ -80,7 +86,7 @@ namespace ShotInk
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
-                var knownKeys = new[] { "save", "history-limit", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll" };
+                var knownKeys = new[] { "save", "history-limit", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region" };
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value;
@@ -96,8 +102,22 @@ namespace ShotInk
                 settings.CaptureShortcut = ReadShortcut(values, "hotkey-capture", settings.CaptureShortcut);
                 settings.PinShortcut = ReadShortcut(values, "hotkey-pin", settings.PinShortcut);
                 settings.ScrollShortcut = ReadShortcut(values, "hotkey-scroll", settings.ScrollShortcut);
+                settings.QuickCopyShortcut = ReadShortcut(values, "hotkey-quick-copy", settings.QuickCopyShortcut);
+                settings.QuickEditShortcut = ReadShortcut(values, "hotkey-quick-edit", settings.QuickEditShortcut);
+                settings.FullScreenShortcut = ReadShortcut(values, "hotkey-fullscreen", settings.FullScreenShortcut);
+                // New defaults must not displace existing user bindings during an upgrade.
+                var occupied = new HashSet<Keys>(new[] { settings.CaptureShortcut, settings.PinShortcut, settings.ScrollShortcut });
+                if (settings.QuickCopyShortcut != Keys.None && !occupied.Add(settings.QuickCopyShortcut)) settings.QuickCopyShortcut = Keys.None;
+                if (settings.QuickEditShortcut != Keys.None && !occupied.Add(settings.QuickEditShortcut)) settings.QuickEditShortcut = Keys.None;
+                if (settings.FullScreenShortcut != Keys.None && !occupied.Add(settings.FullScreenShortcut)) settings.FullScreenShortcut = Keys.None;
+                if (values.TryGetValue("last-capture-region", out value))
+                {
+                    var parts = value.Split(','); int x, y, w, h;
+                    if (parts.Length == 4 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y) && int.TryParse(parts[2], out w) && int.TryParse(parts[3], out h) && w >= 8 && h >= 8 && (long)x + w <= int.MaxValue && (long)y + h <= int.MaxValue)
+                        settings.LastCaptureRegion = new Rectangle(x, y, w, h);
+                }
                 if (settings.Shortcuts.Where(key => key != Keys.None).Distinct().Count() != settings.Shortcuts.Count(key => key != Keys.None))
-                { settings.CaptureShortcut = Keys.F1; settings.PinShortcut = Keys.F3; settings.ScrollShortcut = Keys.Control | Keys.Alt | Keys.L; }
+                { settings.CaptureShortcut = Keys.F1; settings.PinShortcut = Keys.F3; settings.ScrollShortcut = Keys.Control | Keys.Alt | Keys.L; settings.QuickCopyShortcut = Keys.None; settings.QuickEditShortcut = Keys.None; settings.FullScreenShortcut = Keys.None; }
                 foreach (DrawTool tool in Enum.GetValues(typeof(DrawTool)))
                 {
                     var style = settings.Tool(tool); string prefix = "tool." + tool + ".";
@@ -142,7 +162,9 @@ namespace ShotInk
             Validate(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
-                "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut };
+                "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut,
+                "hotkey-quick-copy=" + (int)QuickCopyShortcut, "hotkey-quick-edit=" + (int)QuickEditShortcut, "hotkey-fullscreen=" + (int)FullScreenShortcut,
+                "last-capture-region=" + string.Join(",", new[] { LastCaptureRegion.X, LastCaptureRegion.Y, LastCaptureRegion.Width, LastCaptureRegion.Height }) };
             foreach (var item in tools.OrderBy(item => (int)item.Key))
             {
                 string prefix = "tool." + item.Key + "."; var style = item.Value;

@@ -69,9 +69,9 @@ namespace ShotInk
             var edition = Theme.Label("S H O T I N K   /   W I N D O W S", 8, Color.FromArgb(149, 163, 194)); edition.Location = new Point(27, 75); sidebar.Controls.Add(edition);
             var nav = Theme.Label("●   截图工作台", 11, Color.FromArgb(170, 181, 255)); nav.Location = new Point(25, 145); sidebar.Controls.Add(nav);
             var sub = Theme.Label("捕捉 · 标注 · 贴图", 9, Color.FromArgb(149, 163, 194)); sub.Location = new Point(25, 180); sidebar.Controls.Add(sub);
-            shortcuts = Theme.Label("", 9, Color.FromArgb(185, 197, 219));
-            shortcuts.MaximumSize = new Size(152, 0);
-            shortcuts.Location = new Point(25, 292); sidebar.Controls.Add(shortcuts);
+            shortcuts = Theme.Label("", 8, Color.FromArgb(185, 197, 219));
+            shortcuts.MaximumSize = new Size(170, 0);
+            shortcuts.Location = new Point(20, 240); sidebar.Controls.Add(shortcuts);
             var preferences = Theme.Button("设置", false, 145); preferences.Location = new Point(25, 460);
             preferences.Click += delegate { OpenSettings(); }; sidebar.Controls.Add(preferences);
             var updates = Theme.Button("检查更新", false, 145); updates.Location = new Point(25, 500); updates.Click += delegate { ShowUpdates(); }; sidebar.Controls.Add(updates);
@@ -188,7 +188,7 @@ namespace ShotInk
         }
         private void RefreshShortcutLabels()
         {
-            shortcuts.Text = "全局快捷键\n\n" + Shortcut.Display(settings.CaptureShortcut) + "  区域截图\n" + Shortcut.Display(settings.PinShortcut) + "  剪贴板贴图\n" + Shortcut.Display(settings.ScrollShortcut) + "  长截图";
+            shortcuts.Text = "全局快捷键\n\n" + Shortcut.Display(settings.CaptureShortcut) + "  区域截图\n" + Shortcut.Display(settings.PinShortcut) + "  剪贴板贴图\n" + Shortcut.Display(settings.ScrollShortcut) + "  长截图\n" + Shortcut.Display(settings.QuickCopyShortcut) + "  快速复制\n" + Shortcut.Display(settings.QuickEditShortcut) + "  快速编辑\n" + Shortcut.Display(settings.FullScreenShortcut) + "  全屏截图";
             if (actionCards.Count == 2)
             {
                 actionCards[0].Text = "截图\n" + Shortcut.Display(settings.CaptureShortcut) + " · 标注 / 滚动长截图";
@@ -200,6 +200,9 @@ namespace ShotInk
                 items[1].Text = "区域截图  " + Shortcut.Display(settings.CaptureShortcut);
                 items[2].Text = "滚动长截图  " + Shortcut.Display(settings.ScrollShortcut);
                 items[3].Text = "剪贴板贴图  " + Shortcut.Display(settings.PinShortcut);
+                items[4].Text = "快速截图并复制  " + Shortcut.Display(settings.QuickCopyShortcut);
+                items[5].Text = "快速截图并编辑  " + Shortcut.Display(settings.QuickEditShortcut);
+                items[6].Text = "全屏截图  " + Shortcut.Display(settings.FullScreenShortcut);
                 tray.Text = "ShotInk · 截图 / 长截图 / 贴图";
             }
         }
@@ -220,6 +223,9 @@ namespace ShotInk
             menu.Items.Add("区域截图  F1", null, delegate { BeginCapture(false); });
             menu.Items.Add("滚动长截图  Ctrl+Alt+L", null, delegate { BeginCapture(true); });
             menu.Items.Add("剪贴板贴图  F3", null, delegate { PinClipboard(); });
+            menu.Items.Add("快速截图并复制", null, delegate { BeginQuickCapture(true); });
+            menu.Items.Add("快速截图并编辑", null, delegate { BeginQuickCapture(false); });
+            menu.Items.Add("全屏截图", null, delegate { BeginFullScreenCapture(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("设置", null, delegate { ShowHome(); OpenSettings(); });
             menu.Items.Add("检查更新", null, delegate { ShowUpdates(); });
@@ -269,13 +275,31 @@ namespace ShotInk
                 if (id == 1) BeginCapture(false);
                 if (id == 2 && !captureBusy) PinClipboard();
                 if (id == 3) BeginCapture(true);
+                if (id == 4) BeginQuickCapture(true);
+                if (id == 5) BeginQuickCapture(false);
+                if (id == 6) BeginFullScreenCapture();
             }
             base.WndProc(ref m);
         }
 
-        private async void BeginCapture(bool scroll)
+        private void BeginCapture(bool scroll) { BeginCaptureCore(scroll, Rectangle.Empty, false, false); }
+        private void BeginQuickCapture(bool copy)
+        {
+            var region = settings.LastCaptureRegion;
+            if (region.Width < 8 || region.Height < 8 || !SystemInformation.VirtualScreen.Contains(region))
+            {
+                notice.Text = "尚无可复用的截图区域，或屏幕布局已改变，请先框选一次。";
+                BeginCapture(false); return;
+            }
+            BeginCaptureCore(false, region, copy, false);
+        }
+        private void BeginFullScreenCapture() { BeginCaptureCore(false, Rectangle.Empty, false, true); }
+        private async void BeginCaptureCore(bool scroll, Rectangle region, bool directCopy, bool fullScreen)
         {
             if (captureBusy || settingsOpen) return;
+            var context = System.Threading.SynchronizationContext.Current;
+            if (context == null || context.GetType() == typeof(System.Threading.SynchronizationContext))
+                System.Threading.SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
             captureBusy = true;
             var restore = new List<Form>();
             foreach (Form form in Application.OpenForms)
@@ -286,7 +310,18 @@ namespace ShotInk
             {
                 await Task.Delay(200);
                 if (IsDisposed) return;
-                var overlay = new CaptureOverlay(scroll, settings);
+                if (fullScreen) region = SystemInformation.VirtualScreen;
+                if (directCopy)
+                {
+                    var image = Native.Capture(region);
+                    try { AcceptCapture(image, false); } finally { captureBusy = false; restoreWindows(); }
+                    return;
+                }
+                var bounds = SystemInformation.VirtualScreen;
+                var windows = Native.CaptureWindowBounds(bounds);
+                var overlay = new CaptureOverlay(scroll, Native.Capture(bounds), bounds, settings);
+                overlay.EnableWindowSelection(windows);
+                if (!region.IsEmpty) overlay.SelectRegion(region);
                 overlay.Cancelled += delegate { captureBusy = false; restoreWindows(); };
                 overlay.Completed += delegate(Bitmap image, CaptureAction action)
                 {
@@ -377,10 +412,21 @@ namespace ShotInk
             if (settingsOpen) return;
             try
             {
-                if (!Clipboard.ContainsImage()) { MessageBox.Show("剪贴板中没有图片。先截图或复制一张图片，再使用贴图快捷键。", "剪贴板贴图"); return; }
-                using (var source = Clipboard.GetImage()) if (source != null) PinImage(new Bitmap(source));
+                using (var source = Clipboard.ContainsImage() ? Clipboard.GetImage() : null)
+                {
+                    if (source != null) { PinImage(new Bitmap(source)); return; }
+                }
+                LoadHistory();
+                if (history.Items.Count > 0)
+                {
+                    using (var source = Image.FromFile((string)history.Items[0].Tag)) PinImage(new Bitmap(source));
+                    return;
+                }
+                MessageBox.Show("剪贴板和截图历史中都没有图片，请先截图或复制图片。", "剪贴板贴图");
             }
             catch (System.Runtime.InteropServices.ExternalException) { MessageBox.Show("剪贴板正在被其他程序使用，请稍后重试。", "无法读取剪贴板"); }
+            catch (IOException ex) { MessageBox.Show(ex.Message, "无法读取历史图片"); }
+            catch (ArgumentException ex) { MessageBox.Show(ex.Message, "无法读取历史图片"); }
         }
         private void PinImage(Bitmap image) { new PinForm(image).Show(); }
         protected override void SetVisibleCore(bool value)
