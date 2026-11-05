@@ -39,6 +39,7 @@ namespace ShotInk
             {
                 toolbar.SelectTool(DrawTool.None); toolbar.SetScrollCapture(true); canvas.Hide(); sizeHint.Hide();
                 foreach (var grip in grips) grip.Hide();
+                foreach (var edge in edgeTargets) edge.Hide();
                 PositionToolbar();
                 bool excluded = Native.ExcludeFromCapture(Handle, true);
                 captureChromeExcluded = excluded;

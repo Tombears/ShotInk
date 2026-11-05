@@ -2075,7 +2075,7 @@ namespace ShotInk
                 Assert(canvas.Tool == DrawTool.Mosaic && canvas.MosaicMode == ApplyMode.Brush && options.Visible, "Mosaic required a second click to activate the brush.");
                 ToolPreview(overlay, "mosaic");
                 var sliders = options.Controls.Find("mosaic-size", true);
-                Assert(sliders.Length == 1 && Option<OvalSlider>(options, "mosaic-size").Parent.Top < Option<OvalSlider>(options, "mosaic-brush-size").Parent.Top, "Mosaic sliders are missing or out of order.");
+                Assert(sliders.Length == 1 && Option<OvalSlider>(options, "mosaic-size").Parent.Left < Option<OvalSlider>(options, "mosaic-brush-size").Parent.Left, "Mosaic sliders are missing or out of order.");
                 Option<OvalSlider>(options, "mosaic-size").Value = 22;
                 Option<OvalSlider>(options, "mosaic-brush-size").Value = 50;
                 Assert(canvas.MosaicSize == 22 && canvas.MosaicBrushSize == 50, "Mosaic sliders did not update separate settings.");

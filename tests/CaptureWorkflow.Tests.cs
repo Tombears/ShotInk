@@ -91,8 +91,91 @@ namespace ShotInk
             Console.WriteLine("PASS: update confirmation closes windows, cancels pending captures, blocks new captures and recovers after cancellation/failure");
         }
 
+        private static void CompactToolbar()
+        {
+            using (var desktop = new Bitmap(900, 650))
+            using (var g = Graphics.FromImage(desktop))
+            {
+                g.Clear(Color.SteelBlue);
+                using (var overlay = new CaptureOverlay(false, (Bitmap)desktop.Clone(), new Rectangle(0, 0, 900, 650)))
+                {
+                    overlay.Show(); overlay.SelectRegion(new Rectangle(40, 40, 700, 450));
+                    var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                    var options = Field<AnnotationOptions>(toolbar, "options");
+                    foreach (var tool in new[] { DrawTool.Rectangle, DrawTool.Arrow, DrawTool.Pen, DrawTool.Highlight, DrawTool.Text, DrawTool.Mosaic, DrawTool.Eraser })
+                    {
+                        toolbar.SelectTool(tool); options.PerformLayout();
+                        Check(options.Height == 34, "Options grew into multiple rows: " + tool);
+                        foreach (Control row in options.Controls)
+                        {
+                            Check(row.Top == options.Padding.Top && row.Right <= options.ClientSize.Width - options.Padding.Right, "Options are wrapped or clipped: " + tool);
+                            foreach (Control child in row.Controls)
+                                if (child is Button) Check(child.Text.Length == 0, "Option retains visible text");
+                        }
+                    }
+                    toolbar.SelectTool(DrawTool.Pen);
+                    toolbar.Location = new Point(70, 180);
+                    Application.DoEvents();
+                    var old = toolbar.Bounds;
+                    toolbar.Location = new Point(90, 520); overlay.Update(); Native.FlushDesktop();
+                    using (var actual = Native.Capture(overlay.RectangleToScreen(old)))
+                    {
+                        for (int y = 4; y < old.Height - 4; y += 7)
+                            for (int x = 4; x < old.Width - 4; x += 11)
+                                Check(actual.GetPixel(x, y).ToArgb() == Color.SteelBlue.ToArgb(), "Toolbar left stale pixels over canvas");
+                    }
+                    overlay.Close();
+                }
+            }
+            Console.WriteLine("PASS: single row icon options and toolbar repaint");
+        }
+
+        private static void KeyboardSelection()
+        {
+            using (var image = new Bitmap(900, 650))
+            using (var overlay = new CaptureOverlay(false, (Bitmap)image.Clone(), new Rectangle(0, 0, 900, 650)))
+            {
+                overlay.Show(); overlay.SelectRegion(new Rectangle(40, 40, 700, 450));
+                Field<AnnotationCanvas>(overlay, "canvas").Focus();
+                Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.Right));
+                Check(Field<Rectangle>(overlay, "selection") == new Rectangle(41, 40, 700, 450), "Arrow failed to move selection by one pixel");
+                for (int i = 0; i < 4; i++)
+                {
+                    int handle = i * 2 + 1;
+                    var before = Field<Rectangle>(overlay, "selection");
+                    var point = SelectionGeometry.Handles(before)[handle];
+                    Call(overlay, "BeginAdjust", handle, point);
+                    typeof(Timer).GetMethod("OnTick", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(Field<Timer>(overlay, "edgeHold"), new object[] { EventArgs.Empty });
+                    Check(Field<int>(overlay, "keyboardEdge") == handle, "Long hold did not select the edge");
+                    var key = i == 0 ? Keys.Up : i == 1 ? Keys.Right : i == 2 ? Keys.Down : Keys.Left;
+                    for (int n = 0; n < 5; n++) Call(overlay, "OnKeyDown", new KeyEventArgs(key));
+                    var expanded = Field<Rectangle>(overlay, "selection");
+                    Check(expanded == SelectionGeometry.Resize(before, handle, new Point(i == 1 ? 5 : i == 3 ? -5 : 0, i == 0 ? -5 : i == 2 ? 5 : 0), overlay.ClientRectangle), "Repeated keys changed the wrong edge");
+                    var opposite = i == 0 ? Keys.Down : i == 1 ? Keys.Left : i == 2 ? Keys.Up : Keys.Right;
+                    Call(overlay, "OnKeyDown", new KeyEventArgs(opposite));
+                    var shrunk = Field<Rectangle>(overlay, "selection");
+                    Check((i % 2 == 0 ? shrunk.Height : shrunk.Width) == (i % 2 == 0 ? expanded.Height : expanded.Width) - 1, "Opposite arrow did not shrink edge");
+                    Mouse(overlay, "OnMouseUp", point.X, point.Y);
+                    Check(Field<int>(overlay, "keyboardEdge") == -1 && Field<Rectangle>(overlay, "selection") == shrunk, "Mouse release retained edge mode or changed bounds");
+                    Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.Right));
+                    Check(Field<Rectangle>(overlay, "selection") == SelectionGeometry.Move(shrunk, new Point(1, 0), overlay.ClientRectangle), "Release did not restore whole-selection movement");
+                }
+                overlay.SelectRegion(new Rectangle(0, 0, 8, 8)); Field<AnnotationCanvas>(overlay, "canvas").Focus();
+                Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.Up));
+                Check(Field<Rectangle>(overlay, "selection") == new Rectangle(0, 0, 8, 8), "Keyboard movement escaped desktop");
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); toolbar.SelectTool(DrawTool.Text);
+                toolbar.Controls.Find("text-font-size", true)[0].Focus();
+                Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.Right));
+                Check(Field<Rectangle>(overlay, "selection") == new Rectangle(0, 0, 8, 8), "Numeric input arrows moved capture selection");
+                overlay.Close();
+            }
+            Console.WriteLine("PASS: pixel nudging, held edge expansion/shrinking/repeat, release reset and keyboard input isolation");
+        }
+
         internal static void Run()
         {
+            CompactToolbar();
+            KeyboardSelection();
             var previousClipboard = Clipboard.GetDataObject();
             var root = Path.Combine(Path.GetTempPath(), "ShotInk-capture-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);

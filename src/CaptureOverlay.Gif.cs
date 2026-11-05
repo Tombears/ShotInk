@@ -22,7 +22,7 @@ namespace ShotInk
             try
             {
                 toolbar.SelectTool(DrawTool.None); toolbar.SetScrollCapture(true); toolbar.SetRecordingText("停止录制");
-                canvas.Hide(); sizeHint.Hide(); foreach (var grip in grips) grip.Hide(); PositionToolbar();
+                canvas.Hide(); sizeHint.Hide(); foreach (var grip in grips) grip.Hide(); foreach (var edge in edgeTargets) edge.Hide(); PositionToolbar();
                 captureChromeExcluded = Native.ExcludeFromCapture(Handle, true);
                 if (toolbar.Bounds.IntersectsWith(selection) && !captureChromeExcluded) throw new InvalidOperationException("请缩小选区，为停止按钮留出屏幕空间。");
                 UpdateRecordingRegion(); Capture = false; Native.ReleaseCapture();

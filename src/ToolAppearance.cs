@@ -98,6 +98,8 @@ namespace ShotInk
         internal Color AccentColor = ToolAppearance.Accent(DrawTool.None);
         internal bool Selected;
         internal bool IsSwatch;
+        internal string IconName;
+        private Bitmap glyph;
         private bool hovering;
         internal ToolOptionButton()
         {
@@ -134,11 +136,17 @@ namespace ShotInk
                 { g.FillPath(fill, path); g.DrawPath(border, path); }
             }
             });
-            if (!IsSwatch)
+            if (IconName != null)
+            {
+                if (glyph == null) glyph = ToolbarIcons.Create(IconName, AccentColor);
+                e.Graphics.DrawImageUnscaled(glyph, (Width - glyph.Width) / 2, (Height - glyph.Height) / 2);
+            }
+            else if (!IsSwatch)
                 TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, !Enabled ? SystemColors.GrayText : Selected ? AccentColor : ToolAppearance.Ink,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             if (Focused && ShowFocusCues)
             { var focus = ClientRectangle; focus.Inflate(-4, -4); ControlPaint.DrawFocusRectangle(e.Graphics, focus); }
         }
+        protected override void Dispose(bool disposing) { if (disposing && glyph != null) glyph.Dispose(); base.Dispose(disposing); }
     }
 }

@@ -13,6 +13,9 @@ namespace ShotInk
         private readonly bool scrolling;
         private readonly Label sizeHint;
         private readonly ResizeGrip[] grips = new ResizeGrip[8];
+        private readonly Control[] edgeTargets = new Control[4];
+        private readonly Timer edgeHold = new Timer { Interval = 350 };
+        private int keyboardEdge = -1;
         private Point anchor;
         private Point pointer;
         private Rectangle selection;
@@ -62,13 +65,25 @@ namespace ShotInk
             sizeHint = new Label { AutoSize = true, ForeColor = Color.White, BackColor = Color.FromArgb(25, 28, 33),
                 Font = new Font("Consolas", 10), Padding = new Padding(4, 2, 4, 2), Visible = false };
             Controls.Add(sizeHint);
-            Disposed += delegate { selectionHold.Dispose(); };
+            Disposed += delegate { selectionHold.Dispose(); edgeHold.Dispose(); };
+            edgeHold.Tick += delegate { edgeHold.Stop(); if (dragging && selection == dragOriginal && dragMode >= 0) { keyboardEdge = dragMode; Invalidate(); } };
             selectionHold.Tick += delegate
             {
                 selectionHold.Stop();
                 if (dragging && !ready && dragMode == -2 && !manualSelection) { manualSelection = true; selection = Rectangle.Empty; Invalidate(); }
             };
             pointer = new Point(Cursor.Position.X - bounds.X, Cursor.Position.Y - bounds.Y);
+            for (int i = 0; i < edgeTargets.Length; i++)
+            {
+                int handle = i * 2 + 1;
+                var edge = new Panel { Visible = false, BackColor = Color.FromArgb(38, 139, 255), Cursor = HandleCursor(handle), TabStop = false };
+                edge.MouseDown += delegate(object sender, MouseEventArgs e)
+                {
+                    if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
+                    if (e.Button == MouseButtons.Left) BeginAdjust(handle, PointToClient(((Control)sender).PointToScreen(e.Location)));
+                };
+                edgeTargets[i] = edge; Controls.Add(edge);
+            }
             for (int i = 0; i < grips.Length; i++)
             {
                 int index = i;
@@ -99,6 +114,11 @@ namespace ShotInk
                 }
                 using (var pen = new Pen(Color.FromArgb(38, 139, 255), 2))
                     g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
+                if (keyboardEdge >= 0)
+                {
+                    var points = SelectionGeometry.Handles(selection);
+                    using (var pen = new Pen(Color.DarkOrange, 3)) g.DrawLine(pen, points[keyboardEdge - 1], points[(keyboardEdge + 1) % 8]);
+                }
                 if (dragging)
                 {
                     string size = SelectionSizeText(selection);
@@ -151,6 +171,8 @@ namespace ShotInk
         private void BeginAdjust(int handle, Point location)
         {
             if (!ready || scrollSession != null || gifSession != null || (longViewport != null && handle != -1)) return;
+            edgeHold.Stop(); keyboardEdge = -1;
+            if (handle >= 0 && handle % 2 == 1) edgeHold.Start();
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
             if (longViewport != null)
             {
@@ -161,7 +183,9 @@ namespace ShotInk
             }
             if (canvas != null) { canvas.CommitTextEdit(); if (longViewport == null) canvas.Hide(); }
             sizeHint.Hide(); foreach (var grip in grips) grip.Hide();
+            foreach (var edge in edgeTargets) edge.Hide();
             if (toolbar != null) toolbar.Hide();
+            Focus();
             Capture = true; Invalidate(true);
         }
 
@@ -173,6 +197,7 @@ namespace ShotInk
             pointer = e.Location;
             if (dragging)
             {
+                if (keyboardEdge >= 0) return;
                 if (dragMode == -2)
                 {
                     if (Math.Abs(e.X - anchor.X) >= SystemInformation.DragSize.Width / 2 || Math.Abs(e.Y - anchor.Y) >= SystemInformation.DragSize.Height / 2) manualSelection = true;
@@ -182,6 +207,7 @@ namespace ShotInk
                 else
                 {
                     var delta = new Point(e.X - anchor.X, e.Y - anchor.Y);
+                    if (Math.Abs(delta.X) + Math.Abs(delta.Y) > 3) edgeHold.Stop();
                     selection = dragMode == -1 ? SelectionGeometry.Move(dragOriginal, delta, ClientRectangle) : SelectionGeometry.Resize(dragOriginal, dragMode, delta, ClientRectangle);
                 }
                 if (selection != previousSelection) InvalidateDrag(previousSelection);
@@ -200,10 +226,12 @@ namespace ShotInk
             if (rightCancelPending && e.Button == MouseButtons.Right)
             { rightCancelPending = false; Close(); return; }
             if (!dragging || e.Button != MouseButtons.Left) return;
+            edgeHold.Stop();
             selectionHold.Stop();
             if (!ready && dragMode == -2 && System.Diagnostics.Stopwatch.GetTimestamp() - selectionPressTime >= System.Diagnostics.Stopwatch.Frequency * 350 / 1000) manualSelection = true;
             // Process the final pointer position even when Windows coalesces mouse-move events.
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
+            keyboardEdge = -1;
             dragging = false; Capture = false;
             if (selection.Width < 8 || selection.Height < 8) { ClearSelection(); Invalidate(); return; }
             if (!ready) PrepareEditor();
@@ -326,6 +354,17 @@ namespace ShotInk
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
             sizeHint.BringToFront();
             var points = SelectionGeometry.Handles(selection);
+            for (int i = 0; i < edgeTargets.Length; i++)
+            {
+                var edge = edgeTargets[i];
+                edge.Visible = ready && longViewport == null && scrollSession == null && gifSession == null;
+                edge.BackColor = keyboardEdge == i * 2 + 1 ? Color.DarkOrange : Color.FromArgb(38, 139, 255);
+                edge.Bounds = i == 0 ? new Rectangle(selection.Left + 5, selection.Top - 1, Math.Max(1, selection.Width - 10), 2)
+                    : i == 1 ? new Rectangle(selection.Right - 1, selection.Top + 5, 2, Math.Max(1, selection.Height - 10))
+                    : i == 2 ? new Rectangle(selection.Left + 5, selection.Bottom - 1, Math.Max(1, selection.Width - 10), 2)
+                    : new Rectangle(selection.Left - 1, selection.Top + 5, 2, Math.Max(1, selection.Height - 10));
+                edge.BringToFront();
+            }
             for (int i = 0; i < grips.Length; i++)
             {
                 grips[i].Visible = ready && longViewport == null && scrollSession == null && gifSession == null;
@@ -339,6 +378,8 @@ namespace ShotInk
             if (dragging && !Capture)
             {
                 selectionHold.Stop();
+                edgeHold.Stop();
+                keyboardEdge = -1;
                 dragging = false;
                 if (ready)
                 {
@@ -354,6 +395,8 @@ namespace ShotInk
 
         private void ClearSelection()
         {
+            edgeHold.Stop(); keyboardEdge = -1;
+            foreach (var edge in edgeTargets) edge.Hide();
             ClearLongDragPreview();
             if (scrollSession != null) { scrollSession.Dispose(); scrollSession = null; ResetCaptureRegion(); }
             ready = false;
@@ -387,8 +430,41 @@ namespace ShotInk
             if (Completed != null) Completed(image, action); else image.Dispose();
         }
 
+        private static bool KeyboardEditorFocused(Control control)
+        {
+            if ((control is TextBoxBase || control is NumericUpDown || control is OvalSlider) && control.ContainsFocus) return true;
+            foreach (Control child in control.Controls) if (KeyboardEditorFocused(child)) return true;
+            return false;
+        }
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (NudgeSelection(keyData)) return true;
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+        private bool NudgeSelection(Keys key)
+        {
+            if (!ready || scrollSession != null || gifSession != null || longViewport != null || KeyboardEditorFocused(this)
+                || (key != Keys.Left && key != Keys.Right && key != Keys.Up && key != Keys.Down)) return false;
+            if (dragging && keyboardEdge < 0) return false;
+            int dx = key == Keys.Left ? -1 : key == Keys.Right ? 1 : 0;
+            int dy = key == Keys.Up ? -1 : key == Keys.Down ? 1 : 0;
+            var previous = selection;
+            var next = keyboardEdge < 0 ? SelectionGeometry.Move(previous, new Point(dx, dy), ClientRectangle)
+                : SelectionGeometry.Resize(previous, keyboardEdge, new Point(dx, dy), ClientRectangle);
+            if (next != previous)
+            {
+                selection = next;
+                canvas.Reframe(desktop.Clone(selection, desktop.PixelFormat), keyboardEdge < 0 ? Point.Empty : new Point(previous.Left - selection.Left, previous.Top - selection.Top));
+                canvas.Location = selection.Location;
+                if (dragging) dragOriginal = selection;
+                RememberSelection();
+            }
+            UpdateSelectionChrome(); PositionToolbar(); Invalidate(true); Update();
+            return true;
+        }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (NudgeSelection(e.KeyData)) { e.SuppressKeyPress = true; return; }
             if (gifSession != null)
             {
                 if (e.KeyCode == Keys.Escape) Close();

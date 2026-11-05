@@ -231,6 +231,17 @@ namespace ShotInk
             }
             Invalidate();
         }
+        protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
+        {
+            var previous = Bounds;
+            base.SetBoundsCore(x, y, width, height, specified);
+            if (Parent == null || previous == Bounds || !Visible) return;
+            // Transparent child windows can retain copied pixels when moved. Repaint
+            // both the overlay and overlapping canvas, including the old option row.
+            var damage = Rectangle.Union(previous, Bounds); damage.Inflate(2, 2);
+            Parent.Invalidate(damage, true);
+            if (IsHandleCreated) Parent.Update();
+        }
         internal static Point Clamp(Point point, Rectangle work, Size size)
         { return new Point(Math.Max(work.Left, Math.Min(point.X, work.Right - size.Width)), Math.Max(work.Top, Math.Min(point.Y, work.Bottom - size.Height))); }
         protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) { if (surface != null) { surface.Dispose(); surface = null; } foreach (var image in icons) image.Dispose(); } }
@@ -297,6 +308,26 @@ namespace ShotInk
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
                 switch (name)
                 {
+                    case "shape-rectangle": case "mode-rectangle": g.DrawRectangle(pen, 3, 4, 14, 12); break;
+                    case "shape-ellipse": g.DrawEllipse(pen, 3, 4, 14, 12); break;
+                    case "mode-brush": g.DrawLine(pen, 5, 15, 15, 4); g.FillEllipse(brush, 3, 13, 5, 5); break;
+                    case "line-arrow": g.DrawLine(pen, 3, 17, 17, 3); g.DrawLines(pen, new[] { new Point(8, 3), new Point(17, 3), new Point(17, 12) }); break;
+                    case "line-straight": g.DrawLine(pen, 3, 17, 17, 3); break;
+                    case "text-bold":
+                        using (var thick = new Pen(color, 2.6F)) { g.DrawLine(thick, 5, 3, 5, 17); g.DrawBezier(thick, 5, 3, 18, 1, 18, 11, 5, 10); g.DrawBezier(thick, 5, 10, 20, 7, 18, 20, 5, 17); } break;
+                    case "text-italic": g.DrawLine(pen, 8, 3, 16, 3); g.DrawLine(pen, 12, 3, 8, 17); g.DrawLine(pen, 4, 17, 12, 17); break;
+                    case "stroke-1": case "stroke-3": case "stroke-6":
+                        float diameter = name == "stroke-1" ? 3 : name == "stroke-3" ? 6 : 10;
+                        g.FillEllipse(brush, 10 - diameter / 2, 10 - diameter / 2, diameter, diameter); break;
+                    case "mosaic-size": case "mosaic-pixelate":
+                        for (int i = 3; i < 17; i += 5) for (int j = 3; j < 17; j += 5) g.FillRectangle(brush, i, j, 3, 3); break;
+                    case "blur-radius": case "mosaic-gaussian":
+                        for (int i = 15; i >= 3; i -= 4) using (var haze = new SolidBrush(Color.FromArgb(65, color))) g.FillEllipse(haze, 10 - i / 2F, 10 - i / 2F, i, i); break;
+                    case "mosaic-brush-size": case "eraser-brush-size": g.DrawEllipse(pen, 3, 3, 14, 14); g.FillEllipse(brush, 8, 8, 4, 4); break;
+                    case "custom-color":
+                        using (var red = new SolidBrush(Color.Coral)) g.FillEllipse(red, 2, 2, 10, 10);
+                        using (var blue = new SolidBrush(Color.DodgerBlue)) g.FillEllipse(blue, 8, 3, 10, 10);
+                        using (var green = new SolidBrush(Color.MediumSeaGreen)) g.FillEllipse(green, 5, 9, 10, 10); break;
                     case "grip":
                         for (int x = 7; x <= 13; x += 6) for (int y = 5; y <= 15; y += 5) g.FillEllipse(brush, x, y, 2, 2);
                         break;
