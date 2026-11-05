@@ -172,10 +172,78 @@ namespace ShotInk
             Console.WriteLine("PASS: pixel nudging, held edge expansion/shrinking/repeat, release reset and keyboard input isolation");
         }
 
+        private static void FreeSelection()
+        {
+            using (var source = new Bitmap(600, 400))
+            {
+                using (var g = Graphics.FromImage(source)) g.Clear(Color.Orange);
+                var settings = new AppSettings { LastCaptureRegion = new Rectangle(10, 20, 80, 60) };
+                using (var overlay = new CaptureOverlay(false, (Bitmap)source.Clone(), new Rectangle(-300, -100, 600, 400), settings))
+                {
+                    overlay.Show();
+                    ((Button)overlay.Controls.Find("selection-free", true)[0]).PerformClick();
+                    Mouse(overlay, "OnMouseDown", 80, 60); Mouse(overlay, "OnMouseMove", 84, 62);
+                    Check(!Field<bool>(overlay, "ready"), "Free selection snapped immediately after starting");
+                    Mouse(overlay, "OnMouseMove", 180, 60); Mouse(overlay, "OnMouseMove", 260, 60); Mouse(overlay, "OnMouseMove", 260, 220);
+                    Mouse(overlay, "OnMouseMove", 84, 63);
+                    Check(Field<bool>(overlay, "ready") && !Field<bool>(overlay, "dragging"), "Returning near the start did not finish before mouse release");
+                    Mouse(overlay, "OnMouseUp", 84, 63);
+                    var bounds = Field<Rectangle>(overlay, "selection");
+                    Check(bounds == new Rectangle(80, 60, 180, 160), "Free selection bounds lost negative-screen coordinates");
+                    Check(settings.LastCaptureRegion == new Rectangle(10, 20, 80, 60), "Free selection replaced the remembered rectangular quick capture");
+                    var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                    var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                    Check(!Field<ToolStripButton>(toolbar, "gif").Enabled && !Field<ToolStripButton>(toolbar, "scroll").Enabled, "Nonrectangular capture allowed unmasked recording");
+                    var mark = new Mark { Tool = DrawTool.Pen, Color = Color.Red, Width = 12 };
+                    mark.Points.Add(new PointF(5, 140)); mark.Points.Add(new PointF(175, 140)); canvas.AddMark(mark);
+                    using (var image = canvas.Render())
+                    {
+                        Check(image.GetPixel(5, 150).ToArgb() == 0, "Outside pixels or RGB data leaked through the free-selection mask");
+                        Check(image.GetPixel(150, 30).A == 255, "Interior pixels lost opacity");
+                        bool soft = false;
+                        for (int y = 1; y < image.Height - 1 && !soft; y++) for (int x = 1; x < image.Width - 1; x++)
+                            if (image.GetPixel(x, y).A > 0 && image.GetPixel(x, y).A < 255) { soft = true; break; }
+                        Check(soft, "Free selection edges lost antialiasing");
+                        using (var bytes = new MemoryStream())
+                        { image.Save(bytes, ImageFormat.Png); bytes.Position = 0; using (var saved = new Bitmap(bytes)) using (var editor = new AnnotationCanvas(new Bitmap(saved)))
+                            using (var exported = editor.Render()) Check(exported.GetPixel(5, 150).A == 0, "PNG reopened in the editor lost transparency"); }
+                    }
+                    canvas.Undo(); canvas.Redo();
+                    Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.Right));
+                    Check(Field<Rectangle>(overlay, "selection").X == 81, "Custom selection could not be nudged");
+                    bounds = Field<Rectangle>(overlay, "selection"); var edge = SelectionGeometry.Handles(bounds)[3];
+                    Call(overlay, "BeginAdjust", 3, edge); Mouse(overlay, "OnMouseUp", edge.X + 20, edge.Y);
+                    Check(canvas.Image.Width == 200 && canvas.Region != null, "Custom mask did not resize with its bounding frame");
+                    using (var image = canvas.Render()) Check(image.GetPixel(5, 150).A == 0 && image.GetPixel(170, 30).A == 255, "Resizing changed the custom mask");
+                    using (var preview = new Bitmap(overlay.Width, overlay.Height))
+                    { overlay.DrawToBitmap(preview, overlay.ClientRectangle); preview.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-free-selection-options.png")); }
+                    Bitmap output = null; overlay.Completed += delegate(Bitmap image, CaptureAction action) { output = image; };
+                    Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.Enter));
+                    using (output) Check(output != null && output.GetPixel(5, 150).A == 0, "Completing capture discarded the shape mask");
+                }
+                using (var overlay = new CaptureOverlay(false, (Bitmap)source.Clone(), new Rectangle(0, 0, 600, 400)))
+                {
+                    overlay.Show(); Call(overlay, "SetSelectionMode", true);
+                    Mouse(overlay, "OnMouseDown", 50, 50); Mouse(overlay, "OnMouseMove", 180, 50); Mouse(overlay, "OnMouseMove", 180, 180); Mouse(overlay, "OnMouseUp", 60, 150);
+                    Check(Field<bool>(overlay, "ready"), "An open contour was not closed on release");
+                    Field<ToolStripButton>(Field<CaptureToolbar>(overlay, "toolbar"), "freeSelection").PerformClick();
+                    Check(!Field<bool>(overlay, "ready") && overlay.Controls.Find("ocr-search", true).Length == 0, "Starting another contour left stale editor controls");
+                    Mouse(overlay, "OnMouseDown", 50, 50); Mouse(overlay, "OnMouseUp", 55, 52);
+                    Check(!Field<bool>(overlay, "ready") && !Field<bool>(overlay, "dragging"), "A tiny stroke became a selected region");
+                    Call(overlay, "OnKeyDown", new KeyEventArgs(Keys.L));
+                    Mouse(overlay, "OnMouseDown", 50, 50); Mouse(overlay, "OnMouseMove", 180, 180); Mouse(overlay, "OnMouseUp", 180, 180);
+                    Check(Field<bool>(overlay, "ready") && Field<PointF[]>(overlay, "selectionOutline") == null, "Rectangle mode did not recover after custom selection");
+                    overlay.Close();
+                }
+            }
+            Console.WriteLine("PASS: freehand selection snaps/closes, rejects tiny strokes, preserves transparent masks through annotation/resize/export and restores rectangle mode");
+        }
+
         internal static void Run()
         {
             CompactToolbar();
             KeyboardSelection();
+            FreeSelection();
             var previousClipboard = Clipboard.GetDataObject();
             var root = Path.Combine(Path.GetTempPath(), "ShotInk-capture-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);

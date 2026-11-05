@@ -29,7 +29,7 @@ namespace ShotInk
         internal async Task CaptureLongAsync()
         {
             EnsureCaptureUiContext();
-            if (!ready || scrollSession != null || gifSession != null || longViewport != null) return;
+            if (!ready || scrollSession != null || gifSession != null || longViewport != null || selectionOutline != null) return;
             if (selection.Width < 80 || selection.Height < 120)
             { MessageBox.Show(this, "长截图区域至少需要 80 × 120 像素。", "选区过小"); return; }
             var region = new Rectangle(selection.X + screenBounds.X, selection.Y + screenBounds.Y, selection.Width, selection.Height);

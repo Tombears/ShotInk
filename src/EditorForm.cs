@@ -325,13 +325,14 @@ namespace ShotInk
         internal Bitmap Render()
         {
             CommitTextEdit(); CompletePolyline(); EndTextTransform();
-            var result = new Bitmap(Image.Width, Image.Height, PixelFormat.Format24bppRgb);
+            var result = new Bitmap(Image.Width, Image.Height, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(result))
             {
                 g.DrawImageUnscaled(Image, 0, 0);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 foreach (var mark in Marks) DrawMark(g, mark);
             }
+            if (captureOutline != null) FreeSelectionGeometry.Mask(result, captureOutline);
             return result;
         }
         internal void DrawAnnotations(Graphics graphics)

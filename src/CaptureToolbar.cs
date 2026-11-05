@@ -17,6 +17,7 @@ namespace ShotInk
         private readonly ToolStripButton recognize;
         private readonly ToolStripButton scroll;
         private readonly ToolStripButton gif;
+        private readonly ToolStripButton freeSelection;
         private readonly Control dragGrip;
         private bool movingToolbar;
         private Point moveAnchor, moveOrigin;
@@ -48,6 +49,7 @@ namespace ShotInk
         internal event Action ScrollFinishClicked;
         internal event Action GifClicked;
         internal event Action ToolbarMoved;
+        internal event Action FreeSelectionClicked;
 
         internal CaptureToolbar(AppSettings settings = null)
         {
@@ -66,6 +68,8 @@ namespace ShotInk
             dragGrip.MouseCaptureChanged += delegate { if (!dragGrip.Capture) movingToolbar = false; };
             Controls.Add(dragGrip);
             AddTool("move", "移动选区", DrawTool.None);
+            freeSelection = Button("lasso", "自定义选框：画笔圈选，靠近起点吸附完成", delegate { if (FreeSelectionClicked != null) FreeSelectionClicked(); });
+            freeSelection.Name = "free-selection";
             var shape = Button("shape", "形状：单击使用矩形，下面可切换椭圆", delegate { ActivateTool(DrawTool.Rectangle); });
             tools.Add(DrawTool.Rectangle, shape); tools.Add(DrawTool.Ellipse, shape);
             var arrow = Button("arrow", "线条：箭头 / 直线，单击加点，右键或双击完成", delegate { ActivateTool(DrawTool.Arrow); });
@@ -131,7 +135,9 @@ namespace ShotInk
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
-        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; }
+        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; freeSelection.Enabled = !enabled; }
+        internal void SetFreeSelection(bool enabled) { scroll.Enabled = gif.Enabled = !enabled; }
+        internal void SetFreeSelectionAvailable(bool enabled) { freeSelection.Enabled = enabled; }
         internal void SetRecordingText(string text) { finishScroll.Text = text; }
         internal void ConfigureForGif()
         {
@@ -308,6 +314,10 @@ namespace ShotInk
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
                 switch (name)
                 {
+                    case "lasso":
+                        g.DrawBezier(pen, 5, 14, -2, 12, 2, 2, 10, 3);
+                        g.DrawBezier(pen, 10, 3, 20, 3, 20, 15, 10, 15);
+                        g.DrawLine(pen, 10, 15, 7, 13); g.DrawBezier(pen, 7, 13, 3, 11, 1, 18, 8, 18); break;
                     case "ocr-copy-selected":
                         g.DrawLines(pen, new[] { new Point(5, 2), new Point(2, 2), new Point(2, 7) });
                         g.DrawLines(pen, new[] { new Point(15, 2), new Point(18, 2), new Point(18, 7) });

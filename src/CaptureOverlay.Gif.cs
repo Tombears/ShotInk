@@ -14,7 +14,7 @@ namespace ShotInk
         internal async Task CaptureGifAsync()
         {
             EnsureCaptureUiContext();
-            if (!ready || gifSession != null || scrollSession != null || longViewport != null) return;
+            if (!ready || gifSession != null || scrollSession != null || longViewport != null || selectionOutline != null) return;
             var region = new Rectangle(selection.X + screenBounds.X, selection.Y + screenBounds.Y, selection.Width, selection.Height);
             var session = new GifCaptureSession(delegate { return CaptureGifFrame(region); }); gifSession = session;
             var clock = System.Diagnostics.Stopwatch.StartNew();

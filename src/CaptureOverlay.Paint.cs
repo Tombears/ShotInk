@@ -22,6 +22,7 @@ namespace ShotInk
                 graphics.FillRectangle(shade, new Rectangle(Point.Empty, shadedDesktop.Size));
                 pointerHintFont = new Font("Microsoft YaHei UI", 10);
                 pointerHintSize = graphics.MeasureString(scrolling ? "长截图 · 拖选滚动内容区域，避开固定导航栏 · Esc 取消" : RegionHint, pointerHintFont);
+                if (!scrolling) { var freeHintSize = graphics.MeasureString(FreeHint, pointerHintFont); pointerHintSize = new SizeF(Math.Max(pointerHintSize.Width, freeHintSize.Width), Math.Max(pointerHintSize.Height, freeHintSize.Height)); }
             }
         }
         private static string SelectionSizeText(Rectangle bounds) { return bounds.Width + " × " + bounds.Height + " px"; }

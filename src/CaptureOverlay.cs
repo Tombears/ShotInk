@@ -73,6 +73,7 @@ namespace ShotInk
                 if (dragging && !ready && dragMode == -2 && !manualSelection) { manualSelection = true; selection = Rectangle.Empty; Invalidate(); }
             };
             pointer = new Point(Cursor.Position.X - bounds.X, Cursor.Position.Y - bounds.Y);
+            SetupSelectionModes();
             for (int i = 0; i < edgeTargets.Length; i++)
             {
                 int handle = i * 2 + 1;
@@ -102,8 +103,12 @@ namespace ShotInk
             var g = e.Graphics;
             EnsurePaintCache();
             g.DrawImage(shadedDesktop, e.ClipRectangle, e.ClipRectangle, GraphicsUnit.Pixel);
+            if (dragging && dragMode == -3) { PaintFreeStroke(g); return; }
             if (selection.Width > 0 && selection.Height > 0)
             {
+                var surfaceState = g.Save();
+                if (selectionOutline != null)
+                    using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) g.SetClip(outline, CombineMode.Intersect);
                 g.DrawImage(desktop, selection, selection, GraphicsUnit.Pixel);
                 if (dragging && longDragPreview != null) g.DrawImageUnscaled(longDragPreview, selection.Location);
                 if (dragging && ready && canvas != null && longViewport == null)
@@ -112,8 +117,12 @@ namespace ShotInk
                     var shift = dragMode == -1 ? Point.Empty : new Point(dragOriginal.Left - selection.Left, dragOriginal.Top - selection.Top);
                     g.TranslateTransform(selection.Left + shift.X, selection.Top + shift.Y); canvas.DrawAnnotations(g); g.Restore(state);
                 }
+                g.Restore(surfaceState);
                 using (var pen = new Pen(Color.FromArgb(38, 139, 255), 2))
-                    g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
+                {
+                    if (selectionOutline == null) g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
+                    else using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) { g.SmoothingMode = SmoothingMode.AntiAlias; g.DrawPath(pen, outline); }
+                }
                 if (keyboardEdge >= 0)
                 {
                     var points = SelectionGeometry.Handles(selection);
@@ -133,7 +142,7 @@ namespace ShotInk
             {
                 using (var pen = new Pen(Color.FromArgb(180, Color.White)))
                 { pen.DashStyle = DashStyle.Dot; g.DrawLine(pen, pointer.X, 0, pointer.X, Height); g.DrawLine(pen, 0, pointer.Y, Width, pointer.Y); }
-                DrawHint(g, scrolling ? "长截图 · 拖选滚动内容区域，避开固定导航栏 · Esc 取消" : RegionHint, new Point(pointer.X + 18, pointer.Y + 24));
+                DrawHint(g, scrolling ? "长截图 · 拖选滚动内容区域，避开固定导航栏 · Esc 取消" : freeSelectionMode ? FreeHint : RegionHint, new Point(pointer.X + 18, pointer.Y + 24));
             }
         }
 
@@ -152,8 +161,10 @@ namespace ShotInk
             // The capture region stays fixed until the scrolling session ends.
             // Clicking the surrounding overlay must not clear or restart that session.
             if (scrollSession != null || gifSession != null) return;
-            if (ready && selection.Contains(e.Location)) { BeginAdjust(-1, e.Location); return; }
+            if (ready && SelectionContains(e.Location)) { BeginAdjust(-1, e.Location); return; }
+            if (freeSelectionMode) { BeginFreeStroke(e.Location); return; }
             ClearSelection();
+            modePicker.Hide();
             pressedWindow = WindowSelectionAt(e.Location);
             selectionPressTime = System.Diagnostics.Stopwatch.GetTimestamp(); manualSelection = scrolling;
             selectionHold.Start();
@@ -197,6 +208,7 @@ namespace ShotInk
             pointer = e.Location;
             if (dragging)
             {
+                if (dragMode == -3) { AddFreePoint(e.Location, true); return; }
                 if (keyboardEdge >= 0) return;
                 if (dragMode == -2)
                 {
@@ -214,7 +226,7 @@ namespace ShotInk
             }
             else if (!ready && previousPointer != pointer)
             {
-                selection = scrolling ? Rectangle.Empty : WindowSelectionAt(pointer);
+                selection = scrolling || freeSelectionMode ? Rectangle.Empty : WindowSelectionAt(pointer);
                 if (previousSelection != selection) Invalidate();
                 InvalidatePointer(previousPointer);
             }
@@ -226,6 +238,12 @@ namespace ShotInk
             if (rightCancelPending && e.Button == MouseButtons.Right)
             { rightCancelPending = false; Close(); return; }
             if (!dragging || e.Button != MouseButtons.Left) return;
+            if (dragMode == -3)
+            {
+                AddFreePoint(e.Location, false);
+                if (!CompleteFreeStroke()) { dragging = false; Capture = false; ClearSelection(); Invalidate(true); }
+                return;
+            }
             edgeHold.Stop();
             selectionHold.Stop();
             if (!ready && dragMode == -2 && System.Diagnostics.Stopwatch.GetTimestamp() - selectionPressTime >= System.Diagnostics.Stopwatch.Frequency * 350 / 1000) manualSelection = true;
@@ -266,11 +284,11 @@ namespace ShotInk
         {
             var local = globalRegion; local.Offset(-screenBounds.X, -screenBounds.Y);
             if (local.Width < 8 || local.Height < 8 || !ClientRectangle.Contains(local)) throw new ArgumentException("截图区域已不在当前屏幕内，请重新框选。");
-            selection = local; PrepareEditor(); UpdateSelectionChrome(); toolbar.Show(); PositionToolbar(); Invalidate();
+            selection = local; modePicker.Hide(); PrepareEditor(); UpdateSelectionChrome(); toolbar.Show(); PositionToolbar(); Invalidate();
         }
         private void RememberSelection()
         {
-            if (scrolling || longViewport != null) return;
+            if (scrolling || longViewport != null || selectionOutline != null) return;
             var region = selection; region.Offset(screenBounds.Location);
             if (settings.LastCaptureRegion != region) { settings.LastCaptureRegion = region; settings.NotifyChanged(); }
         }
@@ -292,6 +310,8 @@ namespace ShotInk
             Controls.Add(textSearch);
 #endif
             toolbar = new CaptureToolbar(settings);
+            toolbar.FreeSelectionClicked += delegate { SetSelectionMode(true); };
+            toolbar.SetFreeSelectionAvailable(!scrolling);
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
             toolbar.SettingsChanged += delegate { SyncSettings(); };
             toolbar.UndoClicked += delegate { canvas.Undo(); };
@@ -377,6 +397,7 @@ namespace ShotInk
             base.OnMouseCaptureChanged(e);
             if (dragging && !Capture)
             {
+                if (dragMode == -3) { dragging = false; ClearSelection(); Invalidate(true); return; }
                 selectionHold.Stop();
                 edgeHold.Stop();
                 keyboardEdge = -1;
@@ -388,13 +409,14 @@ namespace ShotInk
                     if (canvas != null) canvas.Show();
                     UpdateSelectionChrome(); if (toolbar != null) { toolbar.Show(); PositionToolbar(); }
                 }
-                else selection = Rectangle.Empty;
+                else { selection = Rectangle.Empty; modePicker.Visible = !scrolling; }
                 Invalidate(true);
             }
         }
 
         private void ClearSelection()
         {
+            selectionOutline = null; freePoints.Clear();
             edgeHold.Stop(); keyboardEdge = -1;
             foreach (var edge in edgeTargets) edge.Hide();
             ClearLongDragPreview();
@@ -402,12 +424,14 @@ namespace ShotInk
             ready = false;
 #if !SHOTINK_LITE
             if (recognition != null) { recognition.Dispose(); recognition = null; }
+            if (textSearch != null) { Controls.Remove(textSearch); textSearch.Dispose(); textSearch = null; }
 #endif
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); canvas = null; }
             if (longViewport != null) { Controls.Remove(longViewport); longViewport.Dispose(); longViewport = null; }
             longLimitReached = false; longAlignmentLost = false;
             if (toolbar != null) { Controls.Remove(toolbar); toolbar.Dispose(); toolbar = null; }
             selection = Rectangle.Empty; sizeHint.Hide();
+            if (modePicker != null) { modePicker.Visible = !scrolling; modePicker.BringToFront(); }
             foreach (var grip in grips) grip.Hide();
         }
 
@@ -464,6 +488,8 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (e.KeyData == Keys.L && !KeyboardEditorFocused(this) && !dragging && scrollSession == null && gifSession == null && longViewport == null)
+            { SetSelectionMode(!freeSelectionMode); e.SuppressKeyPress = true; return; }
             if (NudgeSelection(e.KeyData)) { e.SuppressKeyPress = true; return; }
             if (gifSession != null)
             {
