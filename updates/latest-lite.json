@@ -1,8 +1,8 @@
 {
   "version": "1.11.0",
-  "revision": "477FD9EEDF518FC61A7E3DA7360144C2B12DAD38ABD25A745AB8CDB10ADA9AE4",
-  "sha256": "ae6066aff6137bfe0b37dda5dcdd4677f7af49dc67b8341e524fafe34d6730e2",
-  "size": 468606,
+  "revision": "85DF7255B048590C4AC8B48DC4EE8DBBDC93C09924C2E3B5DEF533C25E82A8A3",
+  "sha256": "eb48dea67fcbcef83ff563290c583493ae79622b4288f804198263ae207ae85b",
+  "size": 468555,
   "url": "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v1.11.0/ShotInk-portable-lite.zip",
-  "notes": "# ShotInk 1.11.0\n\n- 新增自定义选框：截图时点击套索图标，用画笔圈出任意形状；L 可切换矩形与自定义模式。\n- 画出有效区域后，靠近起点 10 像素内自动吸附并完成选框；未回到起点时松开鼠标，也会自动连接首尾。过短或没有面积的笔迹不会生成选区。\n- 支持移动、缩放、方向键微调及后续标注；PNG 导出保留平滑透明边缘，选区外内容不会导出。\n- 自定义选框用于静态截图；长截图、GIF 录制继续使用矩形选框。快速截图仍沿用上次的矩形区域。\n\n提供完整 OCR 版 ShotInk-portable.zip 与轻量版 ShotInk-portable-lite.zip。\n"
+  "notes": "# ShotInk 1.11.0\n\n- 新增自定义选框：截图时点击上方套索选项，用画笔圈出任意形状；L 可切换矩形与自定义模式。\n- 画出有效区域后，靠近起点 10 像素内自动吸附并完成选框；未回到起点时松开鼠标，也会自动连接首尾。过短或没有面积的笔迹不会生成选区。\n- 支持移动、缩放、方向键微调及后续标注；PNG 导出保留平滑透明边缘，选区外内容不会导出。\n- 自定义选框用于静态截图；长截图、GIF 录制继续使用矩形选框。快速截图仍沿用上次的矩形区域。\n\n提供完整 OCR 版 ShotInk-portable.zip 与轻量版 ShotInk-portable-lite.zip。\n\n- 矩形／自定义选框选项仅显示在截图界面上方；自动记住上次选择，重启后也会保留。\n"
 }
