@@ -12,23 +12,27 @@ namespace ShotInk
         private readonly Button previous, next;
         private AnnotationCanvas canvas;
         private bool recognized;
+        private readonly ToolTip hints = new ToolTip();
 
         internal OcrSearchPanel()
         {
-            Name = "ocr-search"; Size = new Size(350, 38); BackColor = Color.White; Font = ToolAppearance.Font;
+            Name = "ocr-search"; Size = new Size(326, 34); BackColor = Color.White; Font = ToolAppearance.Font;
             AutoScaleMode = AutoScaleMode.None; Visible = false;
-            Controls.Add(new Label { Text = "搜索", Bounds = new Rectangle(10, 8, 34, 22), TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted });
-            query = new TextBox { Name = "ocr-search-query", AccessibleName = "搜索识别文字", BorderStyle = BorderStyle.FixedSingle, Bounds = new Rectangle(46, 8, 145, 24) };
-            count = new Label { Name = "ocr-search-count", Bounds = new Rectangle(193, 8, 58, 22), TextAlign = ContentAlignment.MiddleCenter, ForeColor = ToolAppearance.Muted };
-            previous = SearchButton("↑", "上一个匹配 (Shift+F3)", 253, delegate { canvas.MoveSearchMatch(-1); });
-            next = SearchButton("↓", "下一个匹配 (Enter / F3)", 284, delegate { canvas.MoveSearchMatch(1); });
-            SearchButton("×", "关闭搜索 (Esc)", 315, CloseSearch);
+            var searchIcon = new ToolOptionButton { IconName = "search", AccessibleName = "搜索识别文字 (Ctrl+F)", Bounds = new Rectangle(3, 4, 26, 26), TabStop = false, AccentColor = ToolAppearance.Accent("ocr") };
+            searchIcon.Click += delegate { OpenSearch(); }; hints.SetToolTip(searchIcon, searchIcon.AccessibleName); Controls.Add(searchIcon);
+            query = new TextBox { Name = "ocr-search-query", AccessibleName = "搜索识别文字", BorderStyle = BorderStyle.FixedSingle, Bounds = new Rectangle(33, 6, 145, 24) };
+            hints.SetToolTip(query, "搜索识别文字 (Ctrl+F)");
+            count = new Label { Name = "ocr-search-count", Bounds = new Rectangle(180, 6, 52, 22), TextAlign = ContentAlignment.MiddleCenter, ForeColor = ToolAppearance.Muted };
+            previous = SearchButton("search-previous", "上一个匹配 (Shift+F3)", 234, delegate { canvas.MoveSearchMatch(-1); });
+            next = SearchButton("search-next", "下一个匹配 (Enter / F3)", 264, delegate { canvas.MoveSearchMatch(1); });
+            SearchButton("cancel", "关闭搜索 (Esc)", 294, CloseSearch);
             Controls.Add(query); Controls.Add(count);
             query.TextChanged += delegate { if (canvas != null) canvas.SearchText(query.Text); };
         }
-        private Button SearchButton(string text, string hint, int x, Action action)
+        private Button SearchButton(string icon, string hint, int x, Action action)
         {
-            var button = new ToolOptionButton { Text = text, AccessibleName = hint, Bounds = new Rectangle(x, 5, 28, 28), AccentColor = ToolAppearance.Accent("ocr") };
+            var button = new ToolOptionButton { IconName = icon, AccessibleName = hint, Bounds = new Rectangle(x, 4, 28, 26), AccentColor = ToolAppearance.Accent("ocr") };
+            hints.SetToolTip(button, hint);
             button.Click += delegate { if (canvas != null) action(); }; Controls.Add(button); return button;
         }
         internal void Bind(AnnotationCanvas nextCanvas)
@@ -72,6 +76,7 @@ namespace ShotInk
         { base.OnPaint(e); using (var border = new Pen(ToolAppearance.Border)) e.Graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1); }
         protected override void Dispose(bool disposing)
         {
+            if (disposing) hints.Dispose();
             if (disposing && canvas != null) { canvas.TextSelectionChanged -= Synchronize; canvas.SearchRequested -= OpenSearch; }
             base.Dispose(disposing);
         }

@@ -100,6 +100,7 @@ namespace ShotInk
         internal bool IsSwatch;
         internal string IconName;
         private Bitmap glyph;
+        private Color glyphColor;
         private bool hovering;
         internal ToolOptionButton()
         {
@@ -138,7 +139,12 @@ namespace ShotInk
             });
             if (IconName != null)
             {
-                if (glyph == null) glyph = ToolbarIcons.Create(IconName, AccentColor);
+                var color = Enabled ? AccentColor : ToolAppearance.Muted;
+                if (glyph == null || glyphColor != color)
+                {
+                    if (glyph != null) glyph.Dispose();
+                    glyph = ToolbarIcons.Create(IconName, color); glyphColor = color;
+                }
                 e.Graphics.DrawImageUnscaled(glyph, (Width - glyph.Width) / 2, (Height - glyph.Height) / 2);
             }
             else if (!IsSwatch)

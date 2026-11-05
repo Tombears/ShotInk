@@ -203,35 +203,29 @@ namespace ShotInk
     internal sealed class OcrSelectionActions : FlowLayoutPanel
     {
         private readonly Button copy;
+        private readonly ToolTip hints = new ToolTip();
         internal event Action CopySelected;
         internal event Action CopyAll;
         internal event Action ExitSelection;
         internal OcrSelectionActions()
         {
-            Height = 112; Width = 440; WrapContents = false; FlowDirection = FlowDirection.TopDown;
-            Padding = new Padding(12, 8, 12, 8); BackColor = Color.White; Font = ToolAppearance.Font;
-            var header = new FlowLayoutPanel { Width = 400, Height = 30, WrapContents = false, Margin = new Padding(0, 0, 0, 6) };
-            header.Controls.Add(new Label { Text = "文字识别", Width = 72, Height = 28, TextAlign = ContentAlignment.MiddleLeft,
-                ForeColor = ToolAppearance.Accent("ocr"), Font = ToolAppearance.HeadingFont, Margin = Padding.Empty });
-            header.Controls.Add(new Label { Text = "从图片中选择并复制文字", Width = 260, Height = 28, TextAlign = ContentAlignment.MiddleLeft,
-                ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
-            Controls.Add(header);
-            var actions = new FlowLayoutPanel { Width = 400, Height = 36, WrapContents = false, Margin = Padding.Empty };
-            copy = ActionButton(actions, "复制选中", delegate { if (CopySelected != null) CopySelected(); });
+            Height = 34; Width = 440; WrapContents = false; FlowDirection = FlowDirection.LeftToRight;
+            Padding = new Padding(7, 3, 7, 3); BackColor = Color.White; Font = ToolAppearance.Font;
+            copy = ActionButton("ocr-copy-selected", "复制选中 (Ctrl+C) · 拖选文字，双击选择整行", delegate { if (CopySelected != null) CopySelected(); });
             ((ToolOptionButton)copy).Selected = true;
-            ActionButton(actions, "复制全部", delegate { if (CopyAll != null) CopyAll(); });
-            ActionButton(actions, "返回标注", delegate { if (ExitSelection != null) ExitSelection(); });
-            Controls.Add(actions);
-            Controls.Add(new Label { Text = "拖选文字 · Ctrl+A 全选 · Ctrl+C 复制", Width = 400, Height = 24,
-                TextAlign = ContentAlignment.MiddleLeft, ForeColor = ToolAppearance.Muted, Margin = Padding.Empty });
+            ActionButton("ocr-copy-all", "复制全部 · Ctrl+A 全选", delegate { if (CopyAll != null) CopyAll(); });
+            ActionButton("ocr-return", "返回标注", delegate { if (ExitSelection != null) ExitSelection(); });
             SetSelection(false);
         }
-        private Button ActionButton(FlowLayoutPanel row, string text, Action action)
+        private Button ActionButton(string icon, string hint, Action action)
         {
-            var button = new ToolOptionButton { Text = text, Width = 96, Height = 30, Margin = new Padding(0, 1, 8, 0), AccentColor = ToolAppearance.Accent("ocr") };
-            button.Click += delegate { action(); }; row.Controls.Add(button); return button;
+            var button = new ToolOptionButton { Name = icon, IconName = icon, AccessibleName = hint, Width = 28, Height = 26,
+                Margin = new Padding(0, 0, 3, 0), AccentColor = ToolAppearance.Accent("ocr") };
+            hints.SetToolTip(button, hint);
+            button.Click += delegate { action(); }; Controls.Add(button); return button;
         }
         internal void SetSelection(bool selected) { copy.Enabled = selected; }
+        protected override void Dispose(bool disposing) { if (disposing) hints.Dispose(); base.Dispose(disposing); }
     }
 }
 

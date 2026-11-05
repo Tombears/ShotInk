@@ -308,6 +308,23 @@ namespace ShotInk
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
                 switch (name)
                 {
+                    case "ocr-copy-selected":
+                        g.DrawLines(pen, new[] { new Point(5, 2), new Point(2, 2), new Point(2, 7) });
+                        g.DrawLines(pen, new[] { new Point(15, 2), new Point(18, 2), new Point(18, 7) });
+                        g.DrawLines(pen, new[] { new Point(2, 13), new Point(2, 18), new Point(5, 18) });
+                        g.DrawLines(pen, new[] { new Point(18, 13), new Point(18, 18), new Point(15, 18) });
+                        g.DrawLine(pen, 6, 7, 14, 7); g.DrawLine(pen, 6, 11, 14, 11); g.DrawLine(pen, 6, 15, 11, 15); break;
+                    case "ocr-copy-all":
+                        g.DrawRectangle(pen, 6, 5, 11, 13);
+                        g.DrawLines(pen, new[] { new Point(3, 14), new Point(2, 14), new Point(2, 2), new Point(13, 2) });
+                        g.DrawLine(pen, 9, 9, 14, 9); g.DrawLine(pen, 9, 12, 14, 12); g.DrawLine(pen, 9, 15, 12, 15); break;
+                    case "ocr-return":
+                        g.DrawLines(pen, new[] { new Point(7, 2), new Point(2, 7), new Point(7, 12) });
+                        g.DrawBezier(pen, 2, 7, 15, 3, 20, 12, 11, 17); break;
+                    case "search": g.DrawEllipse(pen, 3, 2, 11, 11); g.DrawLine(pen, 12, 12, 18, 18); break;
+                    case "search-previous": case "search-next":
+                        if (name == "search-next") { g.TranslateTransform(0, 20); g.ScaleTransform(1, -1); }
+                        g.DrawLine(pen, 10, 3, 10, 17); g.DrawLines(pen, new[] { new Point(4, 9), new Point(10, 3), new Point(16, 9) }); break;
                     case "shape-rectangle": case "mode-rectangle": g.DrawRectangle(pen, 3, 4, 14, 12); break;
                     case "shape-ellipse": g.DrawEllipse(pen, 3, 4, 14, 12); break;
                     case "mode-brush": g.DrawLine(pen, 5, 15, 15, 4); g.FillEllipse(brush, 3, 13, 5, 5); break;
