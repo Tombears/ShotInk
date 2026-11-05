@@ -273,7 +273,7 @@ namespace ShotInk
         internal void EnableWindowSelection(Rectangle[] windows)
         {
             windowBounds = windows ?? new Rectangle[0];
-            selection = scrolling ? Rectangle.Empty : WindowSelectionAt(pointer);
+            selection = scrolling || freeSelectionMode ? Rectangle.Empty : WindowSelectionAt(pointer);
         }
         private Rectangle WindowSelectionAt(Point point)
         {
@@ -310,8 +310,6 @@ namespace ShotInk
             Controls.Add(textSearch);
 #endif
             toolbar = new CaptureToolbar(settings);
-            toolbar.FreeSelectionClicked += delegate { SetSelectionMode(true); };
-            toolbar.SetFreeSelectionAvailable(!scrolling);
             toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
             toolbar.SettingsChanged += delegate { SyncSettings(); };
             toolbar.UndoClicked += delegate { canvas.Undo(); };

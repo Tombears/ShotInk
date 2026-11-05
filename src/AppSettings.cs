@@ -32,6 +32,7 @@ namespace ShotInk
         internal Keys QuickEditShortcut = Keys.Control | Keys.Alt | Keys.E;
         internal Keys FullScreenShortcut = Keys.Control | Keys.Alt | Keys.A;
         internal Rectangle LastCaptureRegion;
+        internal bool FreeSelectionMode;
         internal Keys CaptureShortcut = Keys.F1;
         internal Keys PinShortcut = Keys.F3;
         internal Keys ScrollShortcut = Keys.Control | Keys.Alt | Keys.L;
@@ -56,6 +57,7 @@ namespace ShotInk
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
             QuickCopyShortcut = other.QuickCopyShortcut; QuickEditShortcut = other.QuickEditShortcut; FullScreenShortcut = other.FullScreenShortcut;
             LastCaptureRegion = other.LastCaptureRegion;
+            FreeSelectionMode = other.FreeSelectionMode;
             LoadWarning = other.LoadWarning; loadFailed = other.loadFailed; recoveredFromBackup = other.recoveredFromBackup;
             tools.Clear(); foreach (var item in other.tools) tools.Add(item.Key, item.Value.Clone());
         }
@@ -86,7 +88,7 @@ namespace ShotInk
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
-                var knownKeys = new[] { "save", "history-limit", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region" };
+                var knownKeys = new[] { "save", "history-limit", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value;
@@ -94,6 +96,7 @@ namespace ShotInk
                 settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
                 if (values.TryGetValue("ask-save-location", out value)) settings.AskSaveLocation = value != "0";
                 if (values.TryGetValue("start-with-windows", out value)) settings.StartWithWindows = value == "1";
+                if (values.TryGetValue("free-selection-mode", out value)) settings.FreeSelectionMode = value == "1";
                 if (values.TryGetValue("save-directory", out value))
                 {
                     if (!AbsolutePath(value)) throw new InvalidDataException("保存文件夹配置无效。");
@@ -164,6 +167,7 @@ namespace ShotInk
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
                 "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut,
                 "hotkey-quick-copy=" + (int)QuickCopyShortcut, "hotkey-quick-edit=" + (int)QuickEditShortcut, "hotkey-fullscreen=" + (int)FullScreenShortcut,
+                "free-selection-mode=" + (FreeSelectionMode ? "1" : "0"),
                 "last-capture-region=" + string.Join(",", new[] { LastCaptureRegion.X, LastCaptureRegion.Y, LastCaptureRegion.Width, LastCaptureRegion.Height }) };
             foreach (var item in tools.OrderBy(item => (int)item.Key))
             {

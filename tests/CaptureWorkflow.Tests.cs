@@ -226,7 +226,7 @@ namespace ShotInk
                     overlay.Show(); Call(overlay, "SetSelectionMode", true);
                     Mouse(overlay, "OnMouseDown", 50, 50); Mouse(overlay, "OnMouseMove", 180, 50); Mouse(overlay, "OnMouseMove", 180, 180); Mouse(overlay, "OnMouseUp", 60, 150);
                     Check(Field<bool>(overlay, "ready"), "An open contour was not closed on release");
-                    Field<ToolStripButton>(Field<CaptureToolbar>(overlay, "toolbar"), "freeSelection").PerformClick();
+                    Call(overlay, "SetSelectionMode", true);
                     Check(!Field<bool>(overlay, "ready") && overlay.Controls.Find("ocr-search", true).Length == 0, "Starting another contour left stale editor controls");
                     Mouse(overlay, "OnMouseDown", 50, 50); Mouse(overlay, "OnMouseUp", 55, 52);
                     Check(!Field<bool>(overlay, "ready") && !Field<bool>(overlay, "dragging"), "A tiny stroke became a selected region");
@@ -239,6 +239,37 @@ namespace ShotInk
             Console.WriteLine("PASS: freehand selection snaps/closes, rejects tiny strokes, preserves transparent masks through annotation/resize/export and restores rectangle mode");
         }
 
+        private static void SelectionModePersistence(string root)
+        {
+            var path = Path.Combine(root, "selection-mode.ini");
+            var settings = new AppSettings(); int changes = 0;
+            settings.Changed += delegate { changes++; };
+            using (var overlay = new CaptureOverlay(false, new Bitmap(600, 400), new Rectangle(0, 0, 600, 400), settings))
+            {
+                overlay.Show();
+                ((Button)overlay.Controls.Find("selection-free", true)[0]).PerformClick();
+                Check(settings.FreeSelectionMode && changes == 1, "Selection mode did not notify settings persistence");
+                overlay.Close();
+            }
+            settings.Save(path); var restored = AppSettings.Load(path).Clone();
+            Check(restored.FreeSelectionMode, "Selection mode was lost after restart or settings clone");
+            using (var overlay = new CaptureOverlay(false, new Bitmap(600, 400), new Rectangle(0, 0, 600, 400), restored))
+            {
+                overlay.Show(); overlay.EnableWindowSelection(new[] { new Rectangle(0, 0, 600, 400) });
+                Check(Field<bool>(overlay, "freeSelectionMode") && Field<Rectangle>(overlay, "selection").IsEmpty
+                    && ((ToolOptionButton)overlay.Controls.Find("selection-free", true)[0]).Selected, "Saved free mode did not initialize the upper selector or suppressed window selection incorrectly");
+                Mouse(overlay, "OnMouseDown", 40, 40); Mouse(overlay, "OnMouseMove", 200, 40); Mouse(overlay, "OnMouseMove", 200, 200); Mouse(overlay, "OnMouseUp", 50, 180);
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                Check(!Field<ToolStrip>(toolbar, "strip").Items.Cast<ToolStripItem>().Any(item => item.Name == "free-selection"), "Editing toolbar still contains a free-selection entry");
+                Call(overlay, "SetSelectionMode", false); overlay.Close();
+            }
+            restored.Save(path); Check(!AppSettings.Load(path).FreeSelectionMode, "Rectangle mode did not replace the remembered option");
+            restored.FreeSelectionMode = true;
+            using (var scroll = new CaptureOverlay(true, new Bitmap(600, 400), new Rectangle(0, 0, 600, 400), restored))
+                Check(!Field<bool>(scroll, "freeSelectionMode") && restored.FreeSelectionMode, "Long capture reset the normal capture preference");
+            Console.WriteLine("PASS: upper-only selection controls remember the last option across restart, settings clone and long capture");
+        }
+
         internal static void Run()
         {
             CompactToolbar();
@@ -249,6 +280,7 @@ namespace ShotInk
             Directory.CreateDirectory(root);
             try
             {
+                SelectionModePersistence(root);
                 var settings = new AppSettings();
                 var window = new Rectangle(40, 30, 180, 120);
                 var bounds = new Rectangle(-300, 20, 600, 400);

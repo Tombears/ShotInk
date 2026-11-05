@@ -17,7 +17,6 @@ namespace ShotInk
         private readonly ToolStripButton recognize;
         private readonly ToolStripButton scroll;
         private readonly ToolStripButton gif;
-        private readonly ToolStripButton freeSelection;
         private readonly Control dragGrip;
         private bool movingToolbar;
         private Point moveAnchor, moveOrigin;
@@ -49,7 +48,6 @@ namespace ShotInk
         internal event Action ScrollFinishClicked;
         internal event Action GifClicked;
         internal event Action ToolbarMoved;
-        internal event Action FreeSelectionClicked;
 
         internal CaptureToolbar(AppSettings settings = null)
         {
@@ -68,8 +66,6 @@ namespace ShotInk
             dragGrip.MouseCaptureChanged += delegate { if (!dragGrip.Capture) movingToolbar = false; };
             Controls.Add(dragGrip);
             AddTool("move", "移动选区", DrawTool.None);
-            freeSelection = Button("lasso", "自定义选框：画笔圈选，靠近起点吸附完成", delegate { if (FreeSelectionClicked != null) FreeSelectionClicked(); });
-            freeSelection.Name = "free-selection";
             var shape = Button("shape", "形状：单击使用矩形，下面可切换椭圆", delegate { ActivateTool(DrawTool.Rectangle); });
             tools.Add(DrawTool.Rectangle, shape); tools.Add(DrawTool.Ellipse, shape);
             var arrow = Button("arrow", "线条：箭头 / 直线，单击加点，右键或双击完成", delegate { ActivateTool(DrawTool.Arrow); });
@@ -135,9 +131,8 @@ namespace ShotInk
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
-        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; freeSelection.Enabled = !enabled; }
+        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; }
         internal void SetFreeSelection(bool enabled) { scroll.Enabled = gif.Enabled = !enabled; }
-        internal void SetFreeSelectionAvailable(bool enabled) { freeSelection.Enabled = enabled; }
         internal void SetRecordingText(string text) { finishScroll.Text = text; }
         internal void ConfigureForGif()
         {

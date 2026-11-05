@@ -18,6 +18,8 @@ namespace ShotInk
         private void SetupSelectionModes()
         {
             modePicker = new SelectionModePicker();
+            freeSelectionMode = !scrolling && settings.FreeSelectionMode;
+            modePicker.SetMode(freeSelectionMode);
             modePicker.ModeChanged += SetSelectionMode;
             var work = Screen.FromPoint(Cursor.Position).WorkingArea; work.Offset(-screenBounds.X, -screenBounds.Y);
             modePicker.Location = CaptureToolbar.Clamp(new Point(work.Left + (work.Width - modePicker.Width) / 2, work.Top + 16), ClientRectangle, modePicker.Size);
@@ -27,6 +29,7 @@ namespace ShotInk
         {
             if (scrolling || scrollSession != null || gifSession != null || longViewport != null) return;
             ClearSelection(); freeSelectionMode = free;
+            if (settings.FreeSelectionMode != free) { settings.FreeSelectionMode = free; settings.NotifyChanged(); }
             modePicker.SetMode(free); modePicker.Show(); modePicker.BringToFront();
             Focus(); Invalidate(true);
         }
