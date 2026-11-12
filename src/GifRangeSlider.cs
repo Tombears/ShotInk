@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace ShotInk
@@ -17,7 +18,9 @@ namespace ShotInk
         internal int First { get { return first; } }
         internal int Last { get { return last; } }
         internal bool EditingStart { get; private set; }
+        internal bool IsDragging { get { return dragging; } }
         internal event Action<int> RangeChanged;
+        internal event Action DragStarted, DragCompleted;
         internal GifRangeSlider(int maximum)
         {
             Maximum = maximum; last = maximum; EditingStart = true;
@@ -51,51 +54,53 @@ namespace ShotInk
         internal void AdjustBoundary(int delta)
         { if (EditingStart) SetRange(Math.Max(0, Math.Min(last, first + delta)), last); else SetRange(first, Math.Max(first, Math.Min(Maximum, last + delta))); }
         private float Pixel(int value) { return 18 + Math.Max(0, Width - 36) * (Maximum == 0 ? 0 : value / (float)Maximum); }
+        private float TrackY { get { return Math.Max(14, Height - 14); } }
         private int Frame(int x) { return Maximum == 0 ? 0 : Math.Max(0, Math.Min(Maximum, (int)Math.Round((x - 18) * Maximum / (double)Math.Max(1, Width - 36)))); }
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e); if (!Enabled || e.Button != MouseButtons.Left) return;
             EditingStart = Math.Abs(e.X - Pixel(first)) < Math.Abs(e.X - Pixel(last)) || (first == last && e.X <= Pixel(first));
-            Focus(); dragging = true; Capture = true; MoveHandle(e.X);
+            Focus(); dragging = true; Capture = true;
+            if (DragStarted != null) DragStarted();
+            MoveHandle(e.X, true);
         }
-        private void MoveHandle(int x)
-        { int at = Frame(x); if (EditingStart) SetRange(Math.Min(at, last), last); else SetRange(first, Math.Max(at, first)); }
+        private void MoveHandle(int x, bool force = false)
+        {
+            int at = Frame(x), start = EditingStart ? Math.Min(at, last) : first, end = EditingStart ? last : Math.Max(at, first);
+            if (force || start != first || end != last) SetRange(start, end);
+        }
+        private void EndDrag()
+        {
+            if (!dragging) return;
+            dragging = false; Capture = false; Invalidate();
+            if (DragCompleted != null) DragCompleted();
+        }
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            bool start = Math.Abs(e.X - Pixel(first)) <= 14 && Math.Abs(e.Y - SliderAppearance.TrackY(Height)) <= 14;
-            bool end = Math.Abs(e.X - Pixel(last)) <= 14 && Math.Abs(e.Y - SliderAppearance.TrackY(Height)) <= 14;
+            bool start = Math.Abs(e.X - Pixel(first)) <= 14 && Math.Abs(e.Y - TrackY) <= 14;
+            bool end = Math.Abs(e.X - Pixel(last)) <= 14 && Math.Abs(e.Y - TrackY) <= 14;
             if (start != hoverStart || end != hoverEnd) { hoverStart = start; hoverEnd = end; Invalidate(); }
             if (dragging && Enabled) MoveHandle(e.X);
         }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hoverStart = hoverEnd = false; Invalidate(); }
-        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); if (!Enabled) { dragging = false; Capture = false; } Invalidate(); }
-        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); if (e.Button == MouseButtons.Left) { if (dragging) MoveHandle(e.X); dragging = false; Capture = false; } }
-        protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) dragging = false; }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); if (!Enabled) EndDrag(); Invalidate(); }
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); if (e.Button == MouseButtons.Left && dragging) { MoveHandle(e.X); EndDrag(); } }
+        protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) EndDrag(); }
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
         protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); Invalidate(); }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
-            {
-            float y = SliderAppearance.TrackY(Height), a = Pixel(first), b = Pixel(last);
+            var g = e.Graphics;
+            var state = g.Save(); g.SmoothingMode = SmoothingMode.AntiAlias;
+            float y = TrackY, a = Pixel(first), b = Pixel(last);
             var color = ToolAppearance.Accent("gif");
             SliderAppearance.Track(g, 18, Math.Max(18, Width - 18), y, a, b, color, Enabled);
-            if (b - a < 115)
-            {
-                float middle = (a + b) / 2;
-                if (middle > 130 && middle < Width - 130) SliderAppearance.Bubble(g, "起 " + (first + 1) + " · 止 " + (last + 1), middle, y, Width, color, Enabled);
-            }
-            else
-            {
-                if (a > 110 && a < Width - 110) SliderAppearance.Bubble(g, "起 " + (first + 1), a, y, Width, color, Enabled);
-                if (b > 110 && b < Width - 110) SliderAppearance.Bubble(g, "止 " + (last + 1), b, y, Width, color, Enabled);
-            }
             SliderAppearance.Thumb(g, a, y, color, Enabled, hoverStart, Focused && EditingStart, dragging && EditingStart);
             SliderAppearance.Thumb(g, b, y, color, Enabled, hoverEnd, Focused && !EditingStart, dragging && !EditingStart);
-            });
+            g.Restore(state);
         }
     }
 }

@@ -39,7 +39,7 @@ namespace ShotInk
             layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 2, RowCount = 7 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 54)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            foreach (int height in new[] { 34, 28, SliderAppearance.Height, 24, 38, 22 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (int height in new[] { 34, 28, SliderAppearance.RangeHeight, 24, 38, 22 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             preview = new GifPreviewBox { Name = "gif-preview", Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(28, 31, 38) };
             preview.MouseDown += delegate { Pause(); ShowFrame(frameIndex); if (frameCanvas == null) preview.Focus(); };
             viewport = new Panel { Dock = DockStyle.Fill, BackColor = preview.BackColor }; viewport.Controls.Add(preview);
@@ -50,6 +50,8 @@ namespace ShotInk
             range = new GifRangeSlider(clip.Frames.Count - 1) { Name = "gif-range", Dock = DockStyle.Fill };
             layout.Controls.Add(range, 0, 3); layout.SetColumnSpan(range, 2);
             range.RangeChanged += TrimChanged;
+            range.DragStarted += delegate { dragPreviewSession++; Pause(); ReleaseFrameCanvas(true); preview.Show(); frameCache.CancelPrefetch(); };
+            range.DragCompleted += delegate { if (!disposed && !busy) ShowFrame(frameIndex); };
             var hint = new Label { Text = "预览区 ← / → 逐帧查看；点击起点或终点手柄后，← / → 每次调整一帧。", ForeColor = Color.DimGray, Dock = DockStyle.Fill };
             layout.Controls.Add(hint, 0, 4); layout.SetColumnSpan(hint, 2);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
@@ -74,7 +76,12 @@ namespace ShotInk
         }
         private int FrameDelay(int index) { return Math.Max(20, clip.EndTime(index) - clip.Frames[index].Time); }
         private void Pause() { playback.Stop(); play.Text = "播放选段"; }
-        private void TrimChanged(int index) { Pause(); encoded = null; ShowFrame(index); }
+        private void TrimChanged(int index)
+        {
+            Pause(); encoded = null;
+            if (range.IsDragging) { UpdateFramePosition(index); RequestDragPreview(); }
+            else ShowFrame(index);
+        }
         private void DeleteSelected()
         { DeleteFrames(range.First, range.Last, 0); }
         private void DeleteFrames(int first, int last, int nextIndex)
@@ -93,6 +100,8 @@ namespace ShotInk
         { range.Enabled = play.Enabled = copy.Enabled = save.Enabled = delete.Enabled = deleteCurrent.Enabled = toolbar.Enabled = scope.Enabled = viewport.Enabled = enabled && clip.Frames.Count > 0; }
         private void ShowFrame(int index, bool editing = true)
         {
+            dragPreviewRevision++;
+            dragPreviewSession++;
             ReleaseFrameCanvas(true); preview.Show();
             if (clip.Frames.Count == 0)
             {
@@ -101,10 +110,15 @@ namespace ShotInk
             }
             var previous = preview.Image;
             preview.Image = editing && activeTool != DrawTool.None ? null : clip.Frames[index].Decode();
-            if (previous != null) previous.Dispose(); frameIndex = index;
+            if (previous != null) previous.Dispose();
+            UpdateFramePosition(index);
+            if (editing && activeTool != DrawTool.None) EnsureFrameCanvas(); UpdateAnnotationHistory();
+        }
+        private void UpdateFramePosition(int index)
+        {
+            frameIndex = index;
             position.Text = string.Format("第 {0} / {1} 帧 · 当前 {2:0.00}s · 选段 {3:0.00}s — {4:0.00}s · 共 {5} 帧", index + 1, clip.Frames.Count,
                 clip.Frames[index].Time / 1000.0, clip.Frames[range.First].Time / 1000.0, clip.EndTime(range.Last) / 1000.0, range.Last - range.First + 1);
-            if (editing && activeTool != DrawTool.None) EnsureFrameCanvas(); UpdateAnnotationHistory();
         }
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {

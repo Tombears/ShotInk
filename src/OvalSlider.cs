@@ -106,14 +106,13 @@ namespace ShotInk
             if (form == null || form.ClientSize.Width < 240) return false;
             if (!ThumbBounds.Contains(e.Location)) SetFromPointer(e.X);
             var pointer = PointToScreen(e.Location);
-            var at = form.PointToClient(pointer);
             var origin = form.PointToClient(PointToScreen(Point.Empty));
             int width = Math.Min(320, form.ClientSize.Width - 16);
             expandedSlider = new OvalSlider { Minimum = minimum, Maximum = maximum, Value = value, AccentColor = AccentColor,
                 SmallChange = SmallChange, LargeChange = LargeChange, Size = new Size(width - 12, SliderAppearance.Height), Location = new Point(6, 6), AccessibleName = AccessibleName };
             expandedSlider.collapseExpansion = CloseExpansion;
             var thumb = expandedSlider.ThumbBounds;
-            int left = at.X - 6 - (int)(thumb.Left + thumb.Width / 2);
+            int left = origin.X + (Width - width) / 2;
             int top = origin.Y - 6;
             var panel = new ExpandedSliderPanel { Size = new Size(width, SliderAppearance.Height + 12) };
             panel.Location = new Point(Math.Max(8, Math.Min(form.ClientSize.Width - width - 8, left)),
@@ -138,7 +137,13 @@ namespace ShotInk
         private void CloseExpansion()
         {
             var panel = expandedPanel; expandedPanel = null; expandedSlider = null;
-            if (panel != null) { if (panel.Parent != null) panel.Parent.Controls.Remove(panel); panel.Dispose(); }
+            if (panel != null)
+            {
+                var parent = panel.Parent; var bounds = panel.Bounds;
+                if (parent != null) parent.Controls.Remove(panel);
+                panel.Dispose();
+                if (parent != null && !parent.IsDisposed) parent.Invalidate(bounds, true);
+            }
             if (!IsDisposed && !Disposing) { Focus(); Invalidate(); }
         }
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -160,7 +165,14 @@ namespace ShotInk
             internal ExpandedSliderPanel()
             {
                 SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
-                BackColor = Color.Transparent;
+                BackColor = Color.White;
+            }
+            protected override void OnSizeChanged(EventArgs e)
+            {
+                base.OnSizeChanged(e);
+                if (Width < 2 || Height < 2) return;
+                using (var path = ToolAppearance.Rounded(new RectangleF(0, 0, Width, Height), 8))
+                { var previous = Region; Region = new Region(path); if (previous != null) previous.Dispose(); }
             }
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -232,7 +244,6 @@ namespace ShotInk
             var thumb = ThumbBounds;
             float x = thumb.Left + thumb.Width / 2;
             SliderAppearance.Track(g, TrackLeft, TrackRight, y, TrackLeft, x, AccentColor, Enabled);
-            SliderAppearance.Bubble(g, value.ToString(), x, y, Width - 50, AccentColor, Enabled);
             SliderAppearance.Thumb(g, x, y, AccentColor, Enabled, hovering, Focused, dragging);
             });
         }

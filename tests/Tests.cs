@@ -19,6 +19,8 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--slider-tests")
+                { Run("compact sliders expand centrally with clean rounded corners", TestOvalSlider); return 0; }
                 if (args.Length == 1 && args[0] == "--stitch-tests")
                 {
                     TestStitch(); TestScrollReversals(); TestDocumentStitch(); TestTextSeams();
@@ -2195,16 +2197,35 @@ namespace ShotInk
                 slider.Enabled = true; slider.Minimum = 7; slider.Maximum = 7;
                 Assert(slider.Value == 7 && !float.IsNaN(slider.ThumbBounds.X), "Zero-range slider produced invalid geometry.");
             }
-            using (var host = new Form { ClientSize = new Size(600, 180) })
+            using (var host = new Form { ClientSize = new Size(600, 180), BackColor = Color.FromArgb(45, 50, 60), TopMost = true, ShowInTaskbar = false })
             using (var slider = new OvalSlider { Minimum = 4, Maximum = 48, Value = 14, Width = 124, Location = new Point(460, 80) })
             {
                 host.Controls.Add(slider); host.Show(); Application.DoEvents();
-                var thumb = slider.ThumbBounds;
-                Mouse(slider, "OnMouseDown", MouseButtons.Left, (int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2));
-                var expanded = Field<OvalSlider>(slider, "expandedSlider"); var panel = Field<Panel>(slider, "expandedPanel");
-                Assert(expanded != null && expanded.Width > slider.Width && panel.Right <= host.ClientSize.Width && panel.Left >= 0 && slider.Value == 14, "Short slider did not expand within the window while preserving its value.");
-                Mouse(expanded, "OnMouseMove", MouseButtons.Left, 10000, 38); Mouse(expanded, "OnMouseUp", MouseButtons.Left, 10000, 38); Application.DoEvents();
-                Assert(slider.Value == 48 && Field<Panel>(slider, "expandedPanel") == null && panel.IsDisposed, "Expanded slider did not apply its value and collapse after release.");
+                WaitUntil(delegate
+                {
+                    using (var image = Native.Capture(host.RectangleToScreen(new Rectangle(5, 60, 1, 1))))
+                        return image.GetPixel(0, 0).ToArgb() == host.BackColor.ToArgb();
+                });
+                foreach (int left in new[] { 220, 460 })
+                {
+                    slider.Left = left; slider.Value = 14;
+                    var thumb = slider.ThumbBounds;
+                    Mouse(slider, "OnMouseDown", MouseButtons.Left, (int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2));
+                    var expanded = Field<OvalSlider>(slider, "expandedSlider"); var panel = Field<Panel>(slider, "expandedPanel");
+                    Assert(expanded != null && expanded.Width > slider.Width && panel.Right <= host.ClientSize.Width && panel.Left >= 0 && slider.Value == 14, "Short slider did not expand within the window while preserving its value.");
+                    if (left == 220) Assert(Math.Abs(panel.Left + panel.Width / 2 - slider.Left - slider.Width / 2) <= 1, "Short slider expansion was not centered on the original control.");
+                    Assert(panel.Region != null && !panel.Region.IsVisible(0, 0) && !panel.Region.IsVisible(panel.Width - 1, panel.Height - 1), "Expanded slider corners were not clipped to the rounded surface.");
+                    host.Update(); panel.Refresh(); Native.FlushDesktop();
+                    using (var image = Native.Capture(panel.RectangleToScreen(panel.ClientRectangle)))
+                    {
+                        if (left == 220) image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-expanded-slider-options.png"));
+                        foreach (var point in new[] { Point.Empty, new Point(image.Width - 1, 0), new Point(0, image.Height - 1), new Point(image.Width - 1, image.Height - 1) })
+                            Assert(image.GetPixel(point.X, point.Y).ToArgb() == host.BackColor.ToArgb(), "Expanded slider corner at " + point + " is " + image.GetPixel(point.X, point.Y) + ", expected " + host.BackColor);
+                    }
+                    int y = (int)SliderAppearance.TrackY(expanded.Height);
+                    Mouse(expanded, "OnMouseMove", MouseButtons.Left, 10000, y); Mouse(expanded, "OnMouseUp", MouseButtons.Left, 10000, y); Application.DoEvents();
+                    Assert(slider.Value == 48 && Field<Panel>(slider, "expandedPanel") == null && panel.IsDisposed, "Expanded slider did not apply its value and collapse after release.");
+                }
                 host.Close();
             }
         }

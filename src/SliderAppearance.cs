@@ -1,4 +1,3 @@
-using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
@@ -6,8 +5,9 @@ namespace ShotInk
 {
     internal static class SliderAppearance
     {
-        internal const int Height = 52;
-        internal static float TrackY(int height) { return Math.Max(14, height - 14); }
+        internal const int Height = 36;
+        internal const int RangeHeight = 52;
+        internal static float TrackY(int height) { return height / 2F; }
         internal static void Track(Graphics g, float left, float right, float y, float first, float last, Color accent, bool enabled)
         {
             using (var pen = new Pen(Color.FromArgb(223, 225, 234), 6))
@@ -31,20 +31,6 @@ namespace ShotInk
             using (var face = new SolidBrush(Color.White)) g.FillEllipse(face, x - radius, y - radius, radius * 2, radius * 2);
             using (var rim = new Pen(focused ? color : Color.FromArgb(219, 220, 231), focused ? 1.5F : 1)) g.DrawEllipse(rim, x - radius, y - radius, radius * 2, radius * 2);
             using (var dot = new SolidBrush(color)) g.FillEllipse(dot, x - 4, y - 4, 8, 8);
-        }
-        internal static void Bubble(Graphics g, string text, float x, float y, int width, Color accent, bool enabled)
-        {
-            float bubbleWidth = Math.Max(28, g.MeasureString(text, ToolAppearance.HeadingFont).Width + 12);
-            bubbleWidth = Math.Min(bubbleWidth, Math.Max(1, width - 2));
-            float left = Math.Max(1, Math.Min(width - bubbleWidth - 1, x - bubbleWidth / 2));
-            var bounds = new RectangleF(left, y - 35, bubbleWidth, 21);
-            var color = enabled ? accent : Color.FromArgb(171, 175, 192);
-            using (var path = ToolAppearance.Rounded(bounds, 6))
-            using (var fill = new LinearGradientBrush(bounds, ToolAppearance.Tint(color, 0.14F), color, LinearGradientMode.Vertical)) g.FillPath(fill, path);
-            float pointer = Math.Max(left + 6, Math.Min(left + bubbleWidth - 6, x));
-            using (var fill = new SolidBrush(color)) g.FillPolygon(fill, new[] { new PointF(pointer - 4, bounds.Bottom - 1), new PointF(pointer + 4, bounds.Bottom - 1), new PointF(x, y - 10) });
-            using (var fill = new SolidBrush(Color.White))
-            using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }) g.DrawString(text, ToolAppearance.HeadingFont, fill, bounds, format);
         }
     }
 }

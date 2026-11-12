@@ -15,6 +15,8 @@ namespace ShotInk
         private static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
         private static T Field<T>(object item, string name) { return (T)item.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance).GetValue(item); }
         private static void Key(GifEditorForm editor, Keys key) { typeof(GifEditorForm).GetMethod("ProcessCmdKey", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, new object[] { new Message(), key }); }
+        private static void Mouse(Control control, string method, int x, int y)
+        { control.GetType().GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance).Invoke(control, new object[] { new MouseEventArgs(MouseButtons.Left, 1, x, y, 0) }); }
         private static GifClip Fixture()
         {
             var clip = new GifClip { Duration = 300 };
@@ -86,6 +88,39 @@ namespace ShotInk
             }
             finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
+        private static void TestDragPreview()
+        {
+            var clip = new GifClip { Duration = 2400 };
+            var colors = new[] { Color.Red, Color.Lime, Color.Blue };
+            var images = new byte[3][];
+            for (int index = 0; index < images.Length; index++)
+            using (var image = new Bitmap(768, 432)) using (var bytes = new MemoryStream())
+            { using (var graphics = Graphics.FromImage(image)) graphics.Clear(colors[index]); image.Save(bytes, ImageFormat.Png); images[index] = bytes.ToArray(); }
+            for (int index = 0; index < 60; index++) clip.Frames.Add(new GifFrame { Time = index * 40, Png = images[index % 3] });
+            using (var editor = new GifEditorForm(clip, new AppSettings()))
+            {
+                editor.Show(); Application.DoEvents(); var range = Field<GifRangeSlider>(editor, "range"); var preview = Field<PictureBox>(editor, "preview");
+                var firstImage = preview.Image; var clock = System.Diagnostics.Stopwatch.StartNew();
+                for (int index = 0; index < GifEncoder.Workers; index++) GifRenderWorkers.Gate.Wait();
+                try
+                {
+                    Mouse(range, "OnMouseDown", 18, 38);
+                    for (int index = 0; index < 300; index++) Mouse(range, "OnMouseMove", index % 2 == 0 ? 18 : range.Width / 2, 38);
+                    Console.WriteLine("GIF timeline: " + clock.ElapsedMilliseconds + " ms for 300 pointer updates.");
+                    Assert(ReferenceEquals(firstImage, preview.Image) && Field<bool>(editor, "dragPreviewRunning"), "Dragging decoded preview frames synchronously on the UI thread.");
+                }
+                finally { GifRenderWorkers.Gate.Release(GifEncoder.Workers); }
+                int endX = 18 + (int)Math.Round((range.Width - 36) * 31.0 / 59);
+                Mouse(range, "OnMouseUp", endX, 38);
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (Field<bool>(editor, "dragPreviewRunning") && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(1); }
+                Assert(!Field<bool>(editor, "dragPreviewRunning") && Field<int>(editor, "frameIndex") == 31 && ((Bitmap)preview.Image).GetPixel(50, 50).G > 240, "A stale preview replaced the final dragged frame.");
+                Mouse(range, "OnMouseDown", 18, 38); editor.Close();
+                deadline = DateTime.UtcNow.AddSeconds(10);
+                while (Field<bool>(editor, "dragPreviewRunning") && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(1); }
+                Assert(!Field<bool>(editor, "dragPreviewRunning"), "Closing the GIF editor left a drag preview worker running.");
+            }
+        }
         private static void Line(AnnotationCanvas canvas, int y)
         {
             var mark = new Mark { Tool = DrawTool.Pen, Color = Color.White, Width = 5 }; mark.Points.Add(new PointF(10, y)); mark.Points.Add(new PointF(45, y)); canvas.AddMark(mark);
@@ -93,6 +128,7 @@ namespace ShotInk
         internal static void Run()
         {
             TestFrameControls();
+            TestDragPreview();
             var clip = Fixture();
             using (var editor = new GifEditorForm(clip, new AppSettings()))
             {

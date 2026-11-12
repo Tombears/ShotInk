@@ -165,7 +165,7 @@ namespace ShotInk
         {
             var row = new FlowLayoutPanel { Height = 28, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 WrapContents = false, Margin = new Padding(0, 0, 3, 0), Padding = Padding.Empty, BackColor = Color.White };
-            if (currentTool == DrawTool.Mosaic || currentTool == DrawTool.Eraser) row.Padding = new Padding(0, 25, 0, 0);
+            if (currentTool == DrawTool.Mosaic || currentTool == DrawTool.Eraser) row.Padding = new Padding(0, 5, 0, 0);
             Controls.Add(row); return row;
         }
         private void Choice(FlowLayoutPanel row, string text, string name, bool selected, Action clicked)
@@ -180,13 +180,13 @@ namespace ShotInk
         {
             var row = Row();
             row.Padding = Padding.Empty;
-            var icon = new ToolOptionButton { IconName = name, Width = 24, Height = 26, Enabled = enabled, TabStop = false, Margin = new Padding(0, 25, 0, 0) };
+            var icon = new ToolOptionButton { IconName = name, Width = 24, Height = 26, Enabled = enabled, TabStop = false, Margin = new Padding(0, 5, 0, 0) };
             hints.SetToolTip(icon, label); row.Controls.Add(icon);
             var slider = new OvalSlider { Name = name, AccessibleName = label, Minimum = minimum, Maximum = maximum, Value = value,
                 Width = 124, Height = SliderAppearance.Height, AccentColor = ToolAppearance.Accent(currentTool),
                 SmallChange = 1, LargeChange = 4, Margin = Padding.Empty, Enabled = enabled };
-            slider.ValueChanged += delegate { hints.SetToolTip(slider, label + "：" + slider.Value); changed(slider.Value); };
-            hints.SetToolTip(slider, label + "：" + value); row.Controls.Add(slider);
+            slider.ValueChanged += delegate { changed(slider.Value); };
+            hints.SetToolTip(slider, label); row.Controls.Add(slider);
         }
         protected override void Dispose(bool disposing) { if (disposing) hints.Dispose(); base.Dispose(disposing); }
         private void SetMode(DrawTool tool, ApplyMode mode)
