@@ -1,8 +1,8 @@
 {
-  "version": "1.11.0",
-  "revision": "7E68A26624316C8095B17D65D501F25D71B4147A63C289FA1E29AE488FAC4637",
-  "sha256": "aaa6c5e629cb9370d15af9db319bdb57579e3f8db15111dec034f14cbbc0c4f6",
-  "size": 468867,
-  "url": "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v1.11.0/ShotInk-portable-lite.zip",
-  "notes": "# ShotInk 1.11.0\n\n- 优化长截图对底部固定栏、悬浮按钮的识别与接缝位置，减少重复图层、横条和正文截断，支持滚动回看后继续拼接。\n\n- 新增自定义选框：截图时点击上方套索选项，用画笔圈出任意形状；L 可切换矩形与自定义模式。\n- 画出有效区域后，靠近起点 10 像素内自动吸附并完成选框；未回到起点时松开鼠标，也会自动连接首尾。过短或没有面积的笔迹不会生成选区。\n- 支持移动、缩放、方向键微调及后续标注；PNG 导出保留平滑透明边缘，选区外内容不会导出。\n- 自定义选框用于静态截图；长截图、GIF 录制继续使用矩形选框。快速截图仍沿用上次的矩形区域。\n\n提供完整 OCR 版 ShotInk-portable.zip 与轻量版 ShotInk-portable-lite.zip。\n\n- 矩形／自定义选框选项仅显示在截图界面上方；自动记住上次选择，重启后也会保留。\n"
+  "version": "1.12.0",
+  "revision": "79413033E6DE313EDD2E6689C8A2B684FF9E8F9254D592A55857A55D8C2338C2",
+  "sha256": "ae1d2d901c7417458526b5c1ae775d45b6811f68a00c75d5306aaa504cb02c22",
+  "size": 474488,
+  "url": "https://gitee.com/clear_wind_and_rain/ShotInk/releases/download/v1.12.0/ShotInk-portable-lite.zip",
+  "notes": "# ShotInk 1.12.0\n\n- GIF 默认采样从 10 提高到 30 帧/秒。设置中可调整默认每秒帧数，支持 1～50 帧/秒，保存后用于后续录制。\n- GIF 剪辑新增「删除当前帧」，删除正在查看的一帧后继续显示相邻帧。\n- Ctrl+X 删除当前帧，Ctrl+Shift+X 删除选中帧，Ctrl+Z 撤销删除或标注，Ctrl+Y 重做。支持连续撤销，恢复帧画面、时长和选区。\n- 设置新增 GIF 页，可调整默认每秒帧数，以及删除当前帧、删除选中帧、撤销操作的快捷键。\n- 统一 GIF 选段、马赛克像素、模糊强度和画笔大小滑块样式，使用圆形拖拽点、实时数值气泡与悬停／聚焦反馈，颜色沿用对应工具。\n- 移除滑块下方标尺，数值框支持点击后手动输入。GIF 起点、终点数值框位于滑轨左上角和右上角，其他滑块在右侧输入实际数值，自动限制有效范围。\n- 设置、搜索、工具参数及 GIF 起止帧号等输入框统一使用圆角边框，聚焦时按对应功能显示强调色。\n- 较短的参数滑块在拖动时自动展开为长轨道，实时同步数值，松开后收回，展开区域根据窗口边界调整位置。\n\n提供完整 OCR 版 ShotInk-portable.zip 与轻量版 ShotInk-portable-lite.zip。\n"
 }
