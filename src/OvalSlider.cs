@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Windows.Forms;
 
@@ -38,14 +37,14 @@ namespace ShotInk
                 SetValue(value);
             }
         }
-        private float TrackLeft { get { return Math.Min(14, Width / 2F); } }
-        private float TrackRight { get { return Math.Max(TrackLeft, Width - 14); } }
+        private float TrackLeft { get { return Math.Min(18, Width / 2F); } }
+        private float TrackRight { get { return Math.Max(TrackLeft, Width - 18); } }
         internal RectangleF ThumbBounds
         {
             get
             {
                 float ratio = maximum == minimum ? 0 : (float)((double)(value - minimum) / ((double)maximum - minimum));
-                return new RectangleF(TrackLeft + (TrackRight - TrackLeft) * ratio - 11, Height / 2F - 8, 22, 16);
+                return new RectangleF(TrackLeft + (TrackRight - TrackLeft) * ratio - 9, SliderAppearance.TrackY(Height) - 9, 18, 18);
             }
         }
 
@@ -53,7 +52,7 @@ namespace ShotInk
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                 ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor | ControlStyles.Selectable, true);
-            Size = new Size(216, 27);
+            Size = new Size(216, SliderAppearance.Height);
             BackColor = Color.Transparent;
             Cursor = Cursors.Hand;
             TabStop = true;
@@ -137,26 +136,14 @@ namespace ShotInk
             base.OnPaint(e);
             ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
             {
-            float y = Height / 2F;
+            float y = SliderAppearance.TrackY(Height);
             var thumb = ThumbBounds;
-            using (var track = new Pen(Enabled ? Color.FromArgb(189, 199, 211) : Color.FromArgb(215, 218, 223), 4))
-            {
-                track.StartCap = LineCap.Round; track.EndCap = LineCap.Round;
-                g.DrawLine(track, TrackLeft, y, TrackRight, y);
-                if (Enabled && value > minimum)
-                { track.Color = AccentColor; g.DrawLine(track, TrackLeft, y, thumb.Left + thumb.Width / 2, y); }
-            }
-            var shadow = thumb; shadow.Offset(0, dragging ? 1 : 2);
-            using (var shade = new SolidBrush(Color.FromArgb(Enabled ? 48 : 20, 38, 56, 77))) g.FillEllipse(shade, shadow);
-            Color top = Enabled ? Color.White : Color.FromArgb(244, 245, 247);
-            Color bottom = !Enabled ? Color.FromArgb(212, 216, 221) : ToolAppearance.Tint(AccentColor, dragging ? 0.62F : 0.84F);
-            using (var face = new LinearGradientBrush(thumb, top, bottom, LinearGradientMode.Vertical)) g.FillEllipse(face, thumb);
-            using (var rim = new Pen(Enabled && (hovering || dragging || Focused) ? AccentColor : Color.FromArgb(145, 155, 169))) g.DrawEllipse(rim, thumb);
-            var highlight = thumb; highlight.Inflate(-2, -2);
-            using (var light = new Pen(Color.FromArgb(205, Color.White))) g.DrawArc(light, highlight, 190, 150);
+            float x = thumb.Left + thumb.Width / 2;
+            SliderAppearance.Track(g, TrackLeft, TrackRight, y, TrackLeft, x, AccentColor, Enabled);
+            SliderAppearance.Ticks(g, TrackLeft, TrackRight, y, minimum, maximum, Enabled);
+            SliderAppearance.Bubble(g, value.ToString(), x, y, Width, AccentColor, Enabled);
+            SliderAppearance.Thumb(g, x, y, AccentColor, Enabled, hovering, Focused, dragging);
             });
-            if (Focused && ShowFocusCues)
-            { var focus = Rectangle.Ceiling(ThumbBounds); focus.Inflate(3, 3); ControlPaint.DrawFocusRectangle(e.Graphics, focus); }
         }
         protected override AccessibleObject CreateAccessibilityInstance() { return new SliderAccessibility(this); }
         private sealed class SliderAccessibility : ControlAccessibleObject

@@ -44,7 +44,7 @@ namespace ShotInk
             layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 2, RowCount = 8 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 54)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            foreach (int height in new[] { 34, 28, 64, 24, 34, 38, 22 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (int height in new[] { 34, 28, SliderAppearance.Height, 24, SliderAppearance.Height, 38, 22 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             preview = new GifPreviewBox { Name = "gif-preview", Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(28, 31, 38) };
             preview.MouseDown += delegate { Pause(); ShowFrame(frameIndex); if (frameCanvas == null) preview.Focus(); };
             viewport = new Panel { Dock = DockStyle.Fill, BackColor = preview.BackColor }; viewport.Controls.Add(preview);
@@ -60,7 +60,7 @@ namespace ShotInk
             var frameCountRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
             frameCountRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250)); frameCountRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             frameCountLabel = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            frameCount = new OvalSlider { Name = "gif-frame-count", AccessibleName = "选中区间输出帧数", Minimum = 1, Maximum = clip.Frames.Count, Value = clip.Frames.Count, Dock = DockStyle.Fill };
+            frameCount = new OvalSlider { Name = "gif-frame-count", AccessibleName = "选中区间输出帧数", Minimum = 1, Maximum = clip.Frames.Count, Value = clip.Frames.Count, Dock = DockStyle.Fill, AccentColor = ToolAppearance.Accent("gif") };
             frameCountRow.Controls.Add(frameCountLabel, 0, 0); frameCountRow.Controls.Add(frameCount, 1, 0);
             layout.Controls.Add(frameCountRow, 0, 5); layout.SetColumnSpan(frameCountRow, 2);
             frameCount.ValueChanged += delegate { if (!updatingFrameCount) { Pause(); encoded = null; UpdateFrameCountLabel(); } };

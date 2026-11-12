@@ -156,7 +156,7 @@ namespace ShotInk
 
                 }
             }
-            Height = 34;
+            Height = tool == DrawTool.Mosaic || tool == DrawTool.Eraser ? SliderAppearance.Height + 6 : 34;
             Visible = tool != DrawTool.None;
             ResumeLayout();
         }
@@ -165,6 +165,7 @@ namespace ShotInk
         {
             var row = new FlowLayoutPanel { Height = 28, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 WrapContents = false, Margin = new Padding(0, 0, 3, 0), Padding = Padding.Empty, BackColor = Color.White };
+            if (currentTool == DrawTool.Mosaic || currentTool == DrawTool.Eraser) row.Padding = new Padding(0, 27, 0, 0);
             Controls.Add(row); return row;
         }
         private void Choice(FlowLayoutPanel row, string text, string name, bool selected, Action clicked)
@@ -178,15 +179,14 @@ namespace ShotInk
         private void Slider(string label, string name, int minimum, int maximum, int value, bool enabled, Action<int> changed)
         {
             var row = Row();
-            var icon = new ToolOptionButton { IconName = name, Width = 24, Height = 26, Enabled = enabled, TabStop = false, Margin = Padding.Empty };
+            row.Padding = Padding.Empty;
+            var icon = new ToolOptionButton { IconName = name, Width = 24, Height = 26, Enabled = enabled, TabStop = false, Margin = new Padding(0, 27, 0, 0) };
             hints.SetToolTip(icon, label); row.Controls.Add(icon);
             var slider = new OvalSlider { Name = name, AccessibleName = label, Minimum = minimum, Maximum = maximum, Value = value,
-                Width = 76, Height = 26, AccentColor = ToolAppearance.Accent(currentTool),
+                Width = 110, Height = SliderAppearance.Height, AccentColor = ToolAppearance.Accent(currentTool),
                 SmallChange = 1, LargeChange = 4, Margin = Padding.Empty, Enabled = enabled };
-            var number = new Label { Text = value.ToString(), Width = 30, Height = 24, TextAlign = ContentAlignment.MiddleCenter,
-                Margin = new Padding(4, 1, 0, 0), ForeColor = ToolAppearance.Accent(currentTool), BackColor = ToolAppearance.Tint(ToolAppearance.Accent(currentTool), 0.94F), Enabled = enabled };
-            slider.ValueChanged += delegate { number.Text = slider.Value.ToString(); hints.SetToolTip(slider, label + "：" + slider.Value); changed(slider.Value); };
-            hints.SetToolTip(slider, label + "：" + value); row.Controls.Add(slider); row.Controls.Add(number);
+            slider.ValueChanged += delegate { hints.SetToolTip(slider, label + "：" + slider.Value); changed(slider.Value); };
+            hints.SetToolTip(slider, label + "：" + value); row.Controls.Add(slider);
         }
         protected override void Dispose(bool disposing) { if (disposing) hints.Dispose(); base.Dispose(disposing); }
         private void SetMode(DrawTool tool, ApplyMode mode)

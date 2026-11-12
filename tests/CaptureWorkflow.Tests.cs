@@ -105,7 +105,8 @@ namespace ShotInk
                     foreach (var tool in new[] { DrawTool.Rectangle, DrawTool.Arrow, DrawTool.Pen, DrawTool.Highlight, DrawTool.Text, DrawTool.Mosaic, DrawTool.Eraser })
                     {
                         toolbar.SelectTool(tool); options.PerformLayout();
-                        Check(options.Height == 34, "Options grew into multiple rows: " + tool);
+                        int expectedHeight = tool == DrawTool.Mosaic || tool == DrawTool.Eraser ? SliderAppearance.Height + 6 : 34;
+                        Check(options.Height == expectedHeight, "Options did not reserve space for slider values and ticks: " + tool);
                         foreach (Control row in options.Controls)
                         {
                             Check(row.Top == options.Padding.Top && row.Right <= options.ClientSize.Width - options.Padding.Right, "Options are wrapped or clipped: " + tool);

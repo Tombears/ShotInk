@@ -2169,7 +2169,7 @@ namespace ShotInk
             {
                 int changes = 0; slider.ValueChanged += delegate { changes++; };
                 var thumb = slider.ThumbBounds;
-                Assert(thumb.Width > thumb.Height, "Slider thumb is not an ellipse.");
+                Assert(thumb.Width == thumb.Height, "Slider thumb did not use the circular style.");
                 Mouse(slider, "OnMouseDown", MouseButtons.Left, (int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2));
                 Mouse(slider, "OnMouseMove", MouseButtons.Left, 10000, 13);
                 Mouse(slider, "OnMouseUp", MouseButtons.Left, 10000, 13);
