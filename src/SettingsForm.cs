@@ -25,6 +25,7 @@ namespace ShotInk
         private readonly ShortcutBox capture;
         private readonly ShortcutBox pin;
         private readonly ShortcutBox scroll, quickCopy, quickEdit, fullScreen;
+        private readonly ShortcutBox gifDeleteCurrent, gifDeleteSelected, gifUndo;
         private readonly TextBox folder;
         private readonly CheckBox ask;
         private readonly CheckBox startup;
@@ -42,12 +43,12 @@ namespace ShotInk
             this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
-            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(680, 732); MinimumSize = new Size(690, 760);
+            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(680, 698); MinimumSize = new Size(690, 726);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 17 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-            foreach (int height in new[] { 38, 38, 38, 38, 38, 38, 35, 42, 34, 35, 34, 36, 34, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (int height in new[] { 38, 38, 38, 38, 38, 38, 35, 42, 34, 35, 34, 36, 0, 36, 34, 0, 0 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
@@ -69,10 +70,17 @@ namespace ShotInk
             layout.Controls.Add(startup, 0, 10); layout.SetColumnSpan(startup, 3);
             var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
             layout.Controls.Add(startupHint, 0, 11); layout.SetColumnSpan(startupHint, 3);
-            layout.Controls.Add(new Label { Text = "GIF 默认每秒帧数", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 12);
+            var gifLayout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 2, RowCount = 5 };
+            gifLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); gifLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            foreach (int height in new[] { 42, 42, 42, 42, 60 }) gifLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            gifLayout.Controls.Add(new Label { Text = "默认每秒帧数（1～50）", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
             gifFps = new NumericUpDown { Name = "gif-fps", Minimum = 1, Maximum = 50, Value = current.GifFramesPerSecond, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 3) };
-            layout.Controls.Add(gifFps, 1, 12);
-            layout.Controls.Add(new Label { Text = "1～50 帧 / 秒", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 2, 12);
+            gifLayout.Controls.Add(gifFps, 1, 0);
+            gifDeleteCurrent = AddGifShortcut(gifLayout, "删除当前帧", "gif-delete-current", 1, current.GifDeleteCurrentShortcut);
+            gifDeleteSelected = AddGifShortcut(gifLayout, "删除选中帧", "gif-delete-selected", 2, current.GifDeleteSelectedShortcut);
+            gifUndo = AddGifShortcut(gifLayout, "撤销操作", "gif-undo", 3, current.GifUndoShortcut);
+            var gifHint = new Label { Text = "快捷键在 GIF 剪辑窗口内生效。点击输入框后按快捷键，Backspace 清除。编辑文字时沿用文字的剪切与撤销。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
+            gifLayout.Controls.Add(gifHint, 0, 4); gifLayout.SetColumnSpan(gifHint, 2);
             var version = new Label { Text = "当前版本 " + Application.ProductVersion + (BuildFeatures.Ocr ? " · 完整版" : " · 轻量版"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(version, 0, 13); layout.SetColumnSpan(version, 2);
             updateCheck = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = updates != null };
@@ -81,8 +89,8 @@ namespace ShotInk
             layout.Controls.Add(updateStatus, 0, 14); layout.SetColumnSpan(updateStatus, 2);
             updateDetails = new Button { Name = "view-update", Text = "查看并更新", Dock = DockStyle.Fill, Enabled = false };
             updateDetails.Click += delegate { if (showUpdateDetails != null) showUpdateDetails(); }; layout.Controls.Add(updateDetails, 2, 14);
-            error = new Label { Dock = DockStyle.Fill, ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" }; layout.Controls.Add(error, 0, 15); layout.SetColumnSpan(error, 3);
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
+            error = new Label { Dock = DockStyle.Fill, Padding = new Padding(22, 0, 22, 0), ForeColor = Color.Firebrick, Text = current.LoadWarning ?? "" };
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 50, Padding = new Padding(12, 0, 12, 0), FlowDirection = FlowDirection.RightToLeft };
             var save = new Button { Text = "保存", Width = 85, Height = 30 };
             save.Click += delegate
             {
@@ -91,10 +99,14 @@ namespace ShotInk
             };
             var cancel = new Button { Text = "取消", Width = 85, Height = 30, DialogResult = DialogResult.Cancel };
             var reset = new Button { Text = "恢复默认快捷键", Width = 130, Height = 30 };
-            reset.Click += delegate { var defaults = new AppSettings(); capture.ShortcutValue = defaults.CaptureShortcut; pin.ShortcutValue = defaults.PinShortcut; scroll.ShortcutValue = defaults.ScrollShortcut; quickCopy.ShortcutValue = defaults.QuickCopyShortcut; quickEdit.ShortcutValue = defaults.QuickEditShortcut; fullScreen.ShortcutValue = defaults.FullScreenShortcut; };
+            reset.Click += delegate { var defaults = new AppSettings(); capture.ShortcutValue = defaults.CaptureShortcut; pin.ShortcutValue = defaults.PinShortcut; scroll.ShortcutValue = defaults.ScrollShortcut; quickCopy.ShortcutValue = defaults.QuickCopyShortcut; quickEdit.ShortcutValue = defaults.QuickEditShortcut; fullScreen.ShortcutValue = defaults.FullScreenShortcut; gifDeleteCurrent.ShortcutValue = defaults.GifDeleteCurrentShortcut; gifDeleteSelected.ShortcutValue = defaults.GifDeleteSelectedShortcut; gifUndo.ShortcutValue = defaults.GifUndoShortcut; };
             buttons.Controls.Add(save); buttons.Controls.Add(cancel); buttons.Controls.Add(reset);
-            layout.Controls.Add(buttons, 0, 16); layout.SetColumnSpan(buttons, 3);
-            Controls.Add(layout); AcceptButton = save; CancelButton = cancel;
+            var tabs = new TabControl { Dock = DockStyle.Fill };
+            var generalTab = new TabPage("常规") { BackColor = Color.White }; generalTab.Controls.Add(layout);
+            var gifTab = new TabPage("GIF") { BackColor = Color.White }; gifTab.Controls.Add(gifLayout);
+            tabs.TabPages.Add(generalTab); tabs.TabPages.Add(gifTab);
+            var footer = new Panel { Dock = DockStyle.Bottom, Height = 80 }; footer.Controls.Add(error); footer.Controls.Add(buttons);
+            Controls.Add(tabs); Controls.Add(footer); AcceptButton = save; CancelButton = cancel;
             statusTimer = new Timer { Interval = 1000 };
             statusTimer.Tick += delegate { RefreshShortcutStatus(); };
             foreach (var box in new[] { capture, pin, scroll, quickCopy, quickEdit, fullScreen })
@@ -147,11 +159,18 @@ namespace ShotInk
             shortcutStatus[row] = new Label { Name = "hotkey-status-" + row, Text = "待检测", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(10, 0, 0, 0) };
             layout.Controls.Add(shortcutStatus[row], 2, row); return box;
         }
+        private static ShortcutBox AddGifShortcut(TableLayoutPanel layout, string title, string name, int row, Keys value)
+        {
+            layout.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
+            var box = new ShortcutBox { Name = name, ShortcutValue = value, Dock = DockStyle.Fill, Margin = new Padding(3, 6, 3, 3) };
+            layout.Controls.Add(box, 1, row); return box;
+        }
         internal AppSettings ReadSettings()
         {
             var candidate = original.Clone(); candidate.CaptureShortcut = capture.ShortcutValue; candidate.PinShortcut = pin.ShortcutValue; candidate.ScrollShortcut = scroll.ShortcutValue;
             candidate.QuickCopyShortcut = quickCopy.ShortcutValue; candidate.QuickEditShortcut = quickEdit.ShortcutValue; candidate.FullScreenShortcut = fullScreen.ShortcutValue;
             candidate.GifFramesPerSecond = (int)gifFps.Value;
+            candidate.GifDeleteCurrentShortcut = gifDeleteCurrent.ShortcutValue; candidate.GifDeleteSelectedShortcut = gifDeleteSelected.ShortcutValue; candidate.GifUndoShortcut = gifUndo.ShortcutValue;
             candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.Validate(); return candidate;
         }
     }

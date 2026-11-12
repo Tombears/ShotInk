@@ -41,7 +41,8 @@ namespace ShotInk
             }
             Assert(clip.Frames.Count == 3 && clip.Frames[1].Time == 100, "Resampling mutated source frames.");
             Assert(clip.Resample(1, 2, 1).Duration == 200, "Trimmed output included time outside the selection.");
-            using (var editor = new GifEditorForm(clip, new AppSettings()))
+            var editorSettings = new AppSettings();
+            using (var editor = new GifEditorForm(clip, editorSettings))
             {
                 editor.Show(); Application.DoEvents();
                 var slider = Field<OvalSlider>(editor, "frameCount"); slider.Value = 1;
@@ -52,6 +53,25 @@ namespace ShotInk
                 using (var image = clip.Frames[1].Decode()) Assert(image.GetPixel(60, 50).B > 240, "Current-frame deletion removed the wrong image.");
                 Field<Button>(editor, "deleteCurrent").PerformClick(); Field<Button>(editor, "deleteCurrent").PerformClick();
                 Assert(clip.Frames.Count == 0 && !slider.Enabled && !Field<Button>(editor, "deleteCurrent").Enabled, "Empty clip retained frame controls.");
+                Key(editor, Keys.Control | Keys.Z); Key(editor, Keys.Control | Keys.Z); Key(editor, Keys.Control | Keys.Z);
+                Assert(clip.Frames.Count == 3 && clip.Duration == 300 && clip.Frames.Select(frame => frame.Time).SequenceEqual(new[] { 0, 100, 200 }), "Undo did not restore deleted frames and original timing.");
+                var range = Field<GifRangeSlider>(editor, "range"); range.SetRange(1, 2);
+                Assert(slider.Maximum == 2 && slider.Value == 2, "Frame slider did not follow the selected interval.");
+                slider.Value = 1; Key(editor, Keys.Control | Keys.Shift | Keys.X);
+                Assert(clip.Frames.Count == 1 && clip.Duration == 100, "Ctrl+Shift+X did not delete the selected interval.");
+                Key(editor, Keys.Control | Keys.Z);
+                Assert(clip.Frames.Count == 3 && range.First == 1 && range.Last == 2 && slider.Value == 1 && slider.Maximum == 2, "Undo did not restore selection and selected-frame output count.");
+                Key(editor, Keys.Control | Keys.X); Assert(clip.Frames.Count == 2, "Ctrl+X did not delete only the current frame.");
+                Key(editor, Keys.Control | Keys.Z); range.SetRange(0, 2);
+                editorSettings.GifDeleteCurrentShortcut = Keys.Control | Keys.Alt | Keys.D;
+                editorSettings.GifUndoShortcut = Keys.Control | Keys.Alt | Keys.Z;
+                Key(editor, Keys.Control | Keys.X); Assert(clip.Frames.Count == 3, "Disabled default shortcut remained active.");
+                var toolbar = Field<CaptureToolbar>(editor, "toolbar"); toolbar.SelectTool(DrawTool.Pen); Line(Field<AnnotationCanvas>(editor, "frameCanvas"), 15);
+                Key(editor, editorSettings.GifDeleteCurrentShortcut); Assert(clip.Frames.Count == 2, "Configured deletion shortcut was ignored.");
+                Key(editor, editorSettings.GifUndoShortcut); Assert(clip.Frames.Count == 3 && clip.Frames[0].Annotations.Count == 1, "Undo deletion lost frame annotations.");
+                Key(editor, editorSettings.GifUndoShortcut); Assert(clip.Frames[0].Annotations.Count == 0, "Deletion discarded earlier annotation history.");
+                Key(editor, Keys.Control | Keys.Y); Key(editor, Keys.Control | Keys.Y);
+                Assert(clip.Frames.Count == 2, "Redo failed across annotation and deletion operations.");
                 editor.Close();
             }
             string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gif-settings-" + Guid.NewGuid().ToString("N"));
@@ -59,12 +79,19 @@ namespace ShotInk
             {
                 string path = Path.Combine(root, "settings.ini"); var settings = AppSettings.Load(path);
                 Assert(settings.GifFramesPerSecond == 30, "Default GIF frame rate did not increase from 10 to 30.");
-                settings.GifFramesPerSecond = 24; settings.Save(path);
+                settings.GifFramesPerSecond = 24; settings.GifDeleteCurrentShortcut = Keys.Control | Keys.Alt | Keys.D; settings.Save(path);
                 Assert(AppSettings.Load(path).Clone().GifFramesPerSecond == 24, "GIF frame rate did not survive save, load and clone.");
+                Assert(AppSettings.Load(path).Clone().GifDeleteCurrentShortcut == settings.GifDeleteCurrentShortcut, "GIF shortcuts did not survive save, load and clone.");
                 using (var form = new SettingsForm(settings, delegate { return null; }, delegate { return true; }))
                 {
                     var number = (NumericUpDown)form.Controls.Find("gif-fps", true)[0]; number.Value = 50;
                     Assert(form.ReadSettings().GifFramesPerSecond == 50, "Settings UI ignored the default GIF frame rate.");
+                    ((ShortcutBox)form.Controls.Find("gif-delete-selected", true)[0]).ShortcutValue = Keys.Control | Keys.Alt | Keys.S;
+                    Assert(form.ReadSettings().GifDeleteSelectedShortcut == (Keys.Control | Keys.Alt | Keys.S), "Settings UI ignored the GIF deletion shortcut.");
+                    form.Show(); Application.DoEvents();
+                    var tabs = form.Controls.OfType<TabControl>().Single(); tabs.SelectedIndex = 1; Application.DoEvents();
+                    using (var preview = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size)); preview.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-settings-gif-options.png")); }
+                    form.Close();
                 }
                 using (var session = new GifCaptureSession(delegate { return new Bitmap(2, 2); }, 24))
                     Assert(Math.Abs(Field<double>(session, "interval") - 1000.0 / 24) < 0.001, "Capture ignored the configured frame rate.");
@@ -123,7 +150,7 @@ namespace ShotInk
                 using (var screenshot = new Bitmap(editor.Width, editor.Height)) { editor.DrawToBitmap(screenshot, new Rectangle(Point.Empty, screenshot.Size)); screenshot.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-gif-frame-tools-options.png")); }
                 Field<Button>(editor, "delete").PerformClick();
                 Assert(clip.Frames.Count == 1 && range.First == 0 && range.Last == 0 && range.Maximum == 0, "Deletion with frame annotations did not reset its range.");
-                Key(editor, Keys.Control | Keys.Z); Assert(clip.Frames.Count == 1, "Annotation undo restored deleted frames.");
+                Key(editor, Keys.Control | Keys.Z); Assert(clip.Frames.Count == 3 && clip.Frames.All(frame => frame.Annotations.Count == 2), "Undo deletion did not restore all annotated frames.");
                 editor.Close();
             }
             string directory = Path.Combine(Path.GetTempPath(), "ShotInk-gif-export-" + Guid.NewGuid().ToString("N"));

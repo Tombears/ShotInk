@@ -25,6 +25,26 @@ namespace ShotInk
         {
             internal readonly Dictionary<GifFrame, List<Mark>> Before = new Dictionary<GifFrame, List<Mark>>();
             internal readonly Dictionary<GifFrame, List<Mark>> After = new Dictionary<GifFrame, List<Mark>>();
+            internal TimelineState BeforeTimeline, AfterTimeline;
+        }
+        private sealed class TimelineState
+        {
+            internal GifFrame[] Frames;
+            internal int[] Times;
+            internal int Duration, First, Last, FrameIndex, OutputCount;
+        }
+        private TimelineState CaptureTimeline()
+        {
+            return new TimelineState { Frames = clip.Frames.ToArray(), Times = clip.Frames.Select(frame => frame.Time).ToArray(), Duration = clip.Duration,
+                First = range.First, Last = range.Last, FrameIndex = frameIndex, OutputCount = frameCount.Value };
+        }
+        private void RestoreTimeline(TimelineState state)
+        {
+            clip.Frames.Clear(); clip.Frames.AddRange(state.Frames); clip.Duration = state.Duration;
+            for (int index = 0; index < state.Frames.Length; index++) state.Frames[index].Time = state.Times[index];
+            range.Reset(Math.Max(0, clip.Frames.Count - 1)); range.SetRange(state.First, state.Last);
+            SetFrameCount(state.OutputCount);
+            frameCache.Prune(clip.Frames); EnableEditing(true); ShowFrame(state.FrameIndex); UpdateFrameCountLabel();
         }
         private void SetupAnnotationTools()
         {
@@ -133,28 +153,20 @@ namespace ShotInk
         }
         private void PreloadNearbyFrames()
         { frameCache.Schedule(Enumerable.Range(0, clip.Frames.Count).OrderBy(index => Math.Abs(index - frameIndex)).Select(index => clip.Frames[index])); }
-        private void UpdateAnnotationHistory() { if (toolbar != null) toolbar.UpdateHistory(annotationUndo.Count > 0, annotationRedo.Count > 0); }
+        private void UpdateAnnotationHistory()
+        {
+            if (toolbar == null) return;
+            toolbar.Enabled = !busy && (clip.Frames.Count > 0 || annotationUndo.Count > 0 || annotationRedo.Count > 0);
+            toolbar.UpdateHistory(annotationUndo.Count > 0, annotationRedo.Count > 0);
+        }
         private void ChangeAnnotationHistory(bool redo)
         {
-            if (busy || clip.Frames.Count == 0) return; Pause(); CommitFrameCanvas();
+            if (busy) return; Pause(); CommitFrameCanvas();
             var source = redo ? annotationRedo : annotationUndo; if (source.Count == 0) return;
             var edit = source.Pop(); ReleaseFrameCanvas(false);
-            foreach (var pair in redo ? edit.After : edit.Before) pair.Key.Annotations = pair.Value;
+            if (edit.BeforeTimeline != null) RestoreTimeline(redo ? edit.AfterTimeline : edit.BeforeTimeline);
+            else foreach (var pair in redo ? edit.After : edit.Before) pair.Key.Annotations = pair.Value;
             (redo ? annotationUndo : annotationRedo).Push(edit); encoded = null; cachedFirst = cachedLast = -1; ShowFrame(frameIndex); PreloadNearbyFrames();
-        }
-        private void PruneAnnotationHistory()
-        {
-            frameCache.Prune(clip.Frames);
-            foreach (var stack in new[] { annotationUndo, annotationRedo })
-            {
-                var keep = new List<FrameEdit>();
-                foreach (var edit in stack.Reverse())
-                {
-                    foreach (var frame in edit.Before.Keys.Where(frame => !clip.Frames.Contains(frame)).ToList()) { edit.Before.Remove(frame); edit.After.Remove(frame); }
-                    if (edit.Before.Count > 0) keep.Add(edit);
-                }
-                stack.Clear(); foreach (var edit in keep) stack.Push(edit);
-            }
         }
         private bool HandleAnnotationKey(ref Message message, Keys keyData)
         {
@@ -167,7 +179,7 @@ namespace ShotInk
                 if (frameCanvas.HandleGestureKey(key) || frameCanvas.HandleTextKey(key) || frameCanvas.HandleRecognitionKey(key))
                     return key.SuppressKeyPress || frameCanvas.EditingInlineText;
             }
-            if (keyData == (Keys.Control | Keys.Z) || keyData == (Keys.Control | Keys.Y)) { ChangeAnnotationHistory(keyData == (Keys.Control | Keys.Y)); return true; }
+            if (keyData == (Keys.Control | Keys.Y)) { ChangeAnnotationHistory(true); return true; }
             return false;
         }
     }

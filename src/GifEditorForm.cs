@@ -60,7 +60,7 @@ namespace ShotInk
             var frameCountRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
             frameCountRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250)); frameCountRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             frameCountLabel = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            frameCount = new OvalSlider { Name = "gif-frame-count", AccessibleName = "整体输出帧数", Minimum = 1, Maximum = clip.Frames.Count, Value = clip.Frames.Count, Dock = DockStyle.Fill };
+            frameCount = new OvalSlider { Name = "gif-frame-count", AccessibleName = "选中区间输出帧数", Minimum = 1, Maximum = clip.Frames.Count, Value = clip.Frames.Count, Dock = DockStyle.Fill };
             frameCountRow.Controls.Add(frameCountLabel, 0, 0); frameCountRow.Controls.Add(frameCount, 1, 0);
             layout.Controls.Add(frameCountRow, 0, 5); layout.SetColumnSpan(frameCountRow, 2);
             frameCount.ValueChanged += delegate { if (!updatingFrameCount) { Pause(); encoded = null; UpdateFrameCountLabel(); } };
@@ -85,7 +85,14 @@ namespace ShotInk
             ShowFrame(0);
             UpdateFrameCountLabel();
         }
-        private int OutputFrameCount { get { return Math.Max(1, (int)Math.Round((range.Last - range.First + 1) * (double)frameCount.Value / Math.Max(1, clip.Frames.Count))); } }
+        private int OutputFrameCount { get { return frameCount.Value; } }
+        private void SetFrameCount(int count)
+        {
+            updatingFrameCount = true;
+            frameCount.Maximum = Math.Max(1, range.Last - range.First + 1);
+            frameCount.Value = Math.Max(1, Math.Min(frameCount.Maximum, count));
+            updatingFrameCount = false; UpdateFrameCountLabel();
+        }
         private void StartPlayback()
         {
             playbackFrames = GifClip.SampleIndices(range.First, range.Last, OutputFrameCount); playbackIndex = 0;
@@ -98,24 +105,23 @@ namespace ShotInk
             ShowFrame(index, false); playback.Interval = Math.Max(20, end - clip.Frames[index].Time);
         }
         private void UpdateFrameCountLabel()
-        { frameCountLabel.Text = string.Format("整体帧数 {0} / {1} · 选段输出 {2} 帧", clip.Frames.Count == 0 ? 0 : frameCount.Value, clip.Frames.Count, clip.Frames.Count == 0 ? 0 : OutputFrameCount); }
+        { frameCountLabel.Text = string.Format("选段输出帧数 {0} / {1}", clip.Frames.Count == 0 ? 0 : frameCount.Value, clip.Frames.Count == 0 ? 0 : range.Last - range.First + 1); }
         private void Pause() { playback.Stop(); play.Text = "播放选段"; }
-        private void TrimChanged(int index) { Pause(); encoded = null; ShowFrame(index); UpdateFrameCountLabel(); }
+        private void TrimChanged(int index) { Pause(); encoded = null; SetFrameCount(range.Last - range.First + 1); ShowFrame(index); }
         private void DeleteSelected()
         { DeleteFrames(range.First, range.Last, 0); }
         private void DeleteFrames(int first, int last, int nextIndex)
         {
             if (busy || clip.Frames.Count == 0) return;
             Pause(); ReleaseFrameCanvas(true); int count = last - first + 1;
-            double ratio = (double)frameCount.Value / clip.Frames.Count;
+            var edit = new FrameEdit { BeforeTimeline = CaptureTimeline() };
+            double ratio = (double)frameCount.Value / (range.Last - range.First + 1);
             clip.DeleteRange(first, last); encoded = null; cachedFirst = cachedLast = -1;
-            PruneAnnotationHistory();
-            updatingFrameCount = true;
-            frameCount.Maximum = Math.Max(1, clip.Frames.Count);
-            frameCount.Value = Math.Max(1, (int)Math.Round(ratio * clip.Frames.Count));
-            updatingFrameCount = false;
+            frameCache.Prune(clip.Frames);
             range.Reset(Math.Max(0, clip.Frames.Count - 1)); EnableEditing(true);
+            SetFrameCount((int)Math.Round(ratio * clip.Frames.Count));
             ShowFrame(Math.Min(nextIndex, Math.Max(0, clip.Frames.Count - 1))); UpdateFrameCountLabel();
+            edit.AfterTimeline = CaptureTimeline(); annotationUndo.Push(edit); annotationRedo.Clear(); UpdateAnnotationHistory();
             SetStatus("已删除 " + count + " 帧。" + (clip.Frames.Count == 0 ? "暂无可用帧。" : "起点和终点已复位。")); preview.Focus();
         }
         private void EnableEditing(bool enabled)
@@ -144,6 +150,16 @@ namespace ShotInk
             }
             if (toolbar.ContainsFocus && (keyData == Keys.Left || keyData == Keys.Right)) return base.ProcessCmdKey(ref msg, keyData);
             if (frameCount.Focused && (keyData == Keys.Left || keyData == Keys.Right || keyData == Keys.Home || keyData == Keys.End)) return base.ProcessCmdKey(ref msg, keyData);
+            if (!busy && keyData != Keys.None)
+            {
+                if (keyData == settings.GifDeleteCurrentShortcut) { DeleteFrames(frameIndex, frameIndex, frameIndex); return true; }
+                if (keyData == settings.GifDeleteSelectedShortcut) { DeleteSelected(); return true; }
+                if (keyData == settings.GifUndoShortcut)
+                {
+                    if (frameCanvas != null && frameCanvas.HandleGestureKey(new KeyEventArgs(keyData))) return true;
+                    ChangeAnnotationHistory(false); return true;
+                }
+            }
             if (!busy && HandleAnnotationKey(ref msg, keyData)) return true;
             if (keyData == (Keys.Control | Keys.C)) { CopyFromKey(); return true; }
             if (keyData == (Keys.Control | Keys.S)) { SaveFromKey(); return true; }
