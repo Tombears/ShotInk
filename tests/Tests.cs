@@ -396,6 +396,8 @@ namespace ShotInk
                     using (var browser = new GiteeBrowserForm(info, Path.Combine(blocked, "download.zip"), testUrl: server.Url + "download", testAllowed: allowed, testProfile: profile))
                     {
                         var run = browser.RunAsync(owner, System.Threading.CancellationToken.None);
+                        BrowserWait(delegate { return run.IsCompleted || browser.VerificationShown; }, System.Threading.Tasks.Task.FromResult(true), "write-failure navigation");
+                        if (browser.VerificationShown) browser.Browser.CoreWebView2.ExecuteScriptAsync("document.getElementById('verify').click()");
                         BrowserWait(delegate { return run.IsCompleted; }, System.Threading.Tasks.Task.FromResult(true), "download write failure");
                         Assert(run.IsFaulted && owner.Enabled && File.ReadAllText(blocked) == "not a directory", "A download write failure escaped the browser task or changed existing files.");
                         try { run.GetAwaiter().GetResult(); } catch (IOException) { }
