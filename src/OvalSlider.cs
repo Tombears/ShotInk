@@ -13,10 +13,17 @@ namespace ShotInk
         private bool dragging;
         private bool hovering;
         private float grabOffset;
+        private readonly SliderValueBox valueInput;
+        private readonly RoundedInputFrame valueInputFrame;
         internal event EventHandler ValueChanged;
         internal int SmallChange = 1;
         internal int LargeChange = 4;
-        internal Color AccentColor = Color.FromArgb(91, 155, 235);
+        private Color accentColor = Color.FromArgb(91, 155, 235);
+        internal Color AccentColor
+        {
+            get { return accentColor; }
+            set { accentColor = value; if (valueInputFrame != null) { valueInputFrame.AccentColor = value; valueInputFrame.Invalidate(); } Invalidate(); }
+        }
 
         internal int Minimum
         {
@@ -38,7 +45,7 @@ namespace ShotInk
             }
         }
         private float TrackLeft { get { return Math.Min(18, Width / 2F); } }
-        private float TrackRight { get { return Math.Max(TrackLeft, Width - 18); } }
+        private float TrackRight { get { return Math.Max(TrackLeft, Width - 56); } }
         internal RectangleF ThumbBounds
         {
             get
@@ -57,12 +64,18 @@ namespace ShotInk
             Cursor = Cursors.Hand;
             TabStop = true;
             AccessibleRole = AccessibleRole.Slider;
+            valueInput = new SliderValueBox(delegate { return value; }, delegate { return minimum; }, delegate { return maximum; }, SetValue) { Name = "slider-value", AccessibleName = "实际数值" };
+            valueInputFrame = new RoundedInputFrame(valueInput, AccentColor); Controls.Add(valueInputFrame); PositionInput();
         }
+        private void PositionInput()
+        { if (valueInputFrame != null) valueInputFrame.Location = new Point(Math.Max(0, Width - valueInputFrame.Width), (int)SliderAppearance.TrackY(Height) - valueInputFrame.Height / 2); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); PositionInput(); }
         private void SetValue(int next)
         {
             next = Math.Max(minimum, Math.Min(maximum, next));
-            if (value == next) return;
+            if (value == next) { if (valueInput != null) valueInput.RefreshValue(); return; }
             value = next; Invalidate();
+            if (valueInput != null) valueInput.RefreshValue();
             if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
             AccessibilityNotifyClients(AccessibleEvents.ValueChange, -1);
         }
@@ -140,8 +153,7 @@ namespace ShotInk
             var thumb = ThumbBounds;
             float x = thumb.Left + thumb.Width / 2;
             SliderAppearance.Track(g, TrackLeft, TrackRight, y, TrackLeft, x, AccentColor, Enabled);
-            SliderAppearance.Ticks(g, TrackLeft, TrackRight, y, minimum, maximum, Enabled);
-            SliderAppearance.Bubble(g, value.ToString(), x, y, Width, AccentColor, Enabled);
+            SliderAppearance.Bubble(g, value.ToString(), x, y, Width - 50, AccentColor, Enabled);
             SliderAppearance.Thumb(g, x, y, AccentColor, Enabled, hovering, Focused, dragging);
             });
         }

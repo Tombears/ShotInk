@@ -105,7 +105,7 @@ namespace ShotInk
                         DecimalPlaces = 1, Value = Math.Max(6, Math.Min(300, (decimal)TextFontSize)), Width = 72, Font = Font,
                         BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 2, 4, 0) };
                     size.ValueChanged += delegate { TextFontSize = (float)size.Value; NotifySettings(); };
-                    text.Controls.Add(size);
+                    text.Controls.Add(new RoundedInputFrame(size, ToolAppearance.Accent(tool)));
 
                     Choice(text, "粗体", "text-bold", (TextFontStyle & FontStyle.Bold) != 0, delegate { TextFontStyle ^= FontStyle.Bold; NotifySettings(); ShowTool(tool); });
                     Choice(text, "斜体", "text-italic", (TextFontStyle & FontStyle.Italic) != 0, delegate { TextFontStyle ^= FontStyle.Italic; NotifySettings(); ShowTool(tool); });
@@ -152,7 +152,7 @@ namespace ShotInk
                             if (choice != null) { choice.Selected = choice.Name == "stroke-" + stroke.Value; choice.Invalidate(); }
                         }
                     };
-                    widths.Controls.Add(stroke);
+                    widths.Controls.Add(new RoundedInputFrame(stroke, ToolAppearance.Accent(tool)));
 
                 }
             }
@@ -165,7 +165,7 @@ namespace ShotInk
         {
             var row = new FlowLayoutPanel { Height = 28, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 WrapContents = false, Margin = new Padding(0, 0, 3, 0), Padding = Padding.Empty, BackColor = Color.White };
-            if (currentTool == DrawTool.Mosaic || currentTool == DrawTool.Eraser) row.Padding = new Padding(0, 27, 0, 0);
+            if (currentTool == DrawTool.Mosaic || currentTool == DrawTool.Eraser) row.Padding = new Padding(0, 25, 0, 0);
             Controls.Add(row); return row;
         }
         private void Choice(FlowLayoutPanel row, string text, string name, bool selected, Action clicked)
@@ -180,10 +180,10 @@ namespace ShotInk
         {
             var row = Row();
             row.Padding = Padding.Empty;
-            var icon = new ToolOptionButton { IconName = name, Width = 24, Height = 26, Enabled = enabled, TabStop = false, Margin = new Padding(0, 27, 0, 0) };
+            var icon = new ToolOptionButton { IconName = name, Width = 24, Height = 26, Enabled = enabled, TabStop = false, Margin = new Padding(0, 25, 0, 0) };
             hints.SetToolTip(icon, label); row.Controls.Add(icon);
             var slider = new OvalSlider { Name = name, AccessibleName = label, Minimum = minimum, Maximum = maximum, Value = value,
-                Width = 110, Height = SliderAppearance.Height, AccentColor = ToolAppearance.Accent(currentTool),
+                Width = 124, Height = SliderAppearance.Height, AccentColor = ToolAppearance.Accent(currentTool),
                 SmallChange = 1, LargeChange = 4, Margin = Padding.Empty, Enabled = enabled };
             slider.ValueChanged += delegate { hints.SetToolTip(slider, label + "：" + slider.Value); changed(slider.Value); };
             hints.SetToolTip(slider, label + "：" + value); row.Controls.Add(slider);

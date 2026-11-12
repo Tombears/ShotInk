@@ -106,7 +106,7 @@ namespace ShotInk
                     {
                         toolbar.SelectTool(tool); options.PerformLayout();
                         int expectedHeight = tool == DrawTool.Mosaic || tool == DrawTool.Eraser ? SliderAppearance.Height + 6 : 34;
-                        Check(options.Height == expectedHeight, "Options did not reserve space for slider values and ticks: " + tool);
+                        Check(options.Height == expectedHeight, "Options did not reserve space for slider values: " + tool);
                         foreach (Control row in options.Controls)
                         {
                             Check(row.Top == options.Padding.Top && row.Right <= options.ClientSize.Width - options.Padding.Right, "Options are wrapped or clipped: " + tool);

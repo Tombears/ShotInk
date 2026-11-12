@@ -26,43 +26,31 @@ namespace ShotInk
         private static void TestFrameControls()
         {
             var clip = Fixture();
-            foreach (int count in new[] { 1, 2, 3 })
-            {
-                var sampled = clip.Resample(0, 2, count);
-                Assert(sampled.Frames.Count == count && sampled.Duration == 300 && sampled.Frames[0].Time == 0, "Resampling changed clip duration or frame count.");
-                using (var stream = new MemoryStream(GifEncoder.Encode(sampled, 0, count - 1)))
-                using (var image = Image.FromStream(stream))
-                {
-                    Assert(image.GetFrameCount(FrameDimension.Time) == count, "Export ignored the output frame count.");
-                    var delays = image.GetPropertyItem(0x5100).Value; int total = 0;
-                    for (int index = 0; index < count; index++) total += BitConverter.ToInt32(delays, index * 4);
-                    Assert(total == 30, "Reducing frames changed GIF playback duration.");
-                }
-            }
-            Assert(clip.Frames.Count == 3 && clip.Frames[1].Time == 100, "Resampling mutated source frames.");
-            Assert(clip.Resample(1, 2, 1).Duration == 200, "Trimmed output included time outside the selection.");
             var editorSettings = new AppSettings();
             using (var editor = new GifEditorForm(clip, editorSettings))
             {
                 editor.Show(); Application.DoEvents();
-                var slider = Field<OvalSlider>(editor, "frameCount"); slider.Value = 1;
-                Assert(clip.Frames.Count == 3 && slider.Maximum == 3, "Frame slider discarded recorded frames.");
-                slider.Value = 3; Key(editor, Keys.Right);
+                Assert(editor.Controls.Find("gif-frame-count", true).Length == 0, "GIF retained the removed frame count adjustment.");
+                Key(editor, Keys.Right);
                 Field<Button>(editor, "deleteCurrent").PerformClick();
-                Assert(clip.Frames.Count == 2 && clip.Duration == 200 && Field<int>(editor, "frameIndex") == 1 && slider.Maximum == 2 && slider.Value == 2, "Delete current frame affected the full selected range or lost slider bounds.");
+                Assert(clip.Frames.Count == 2 && clip.Duration == 200 && Field<int>(editor, "frameIndex") == 1, "Delete current frame affected the full selected range.");
                 using (var image = clip.Frames[1].Decode()) Assert(image.GetPixel(60, 50).B > 240, "Current-frame deletion removed the wrong image.");
                 Field<Button>(editor, "deleteCurrent").PerformClick(); Field<Button>(editor, "deleteCurrent").PerformClick();
-                Assert(clip.Frames.Count == 0 && !slider.Enabled && !Field<Button>(editor, "deleteCurrent").Enabled, "Empty clip retained frame controls.");
+                Assert(clip.Frames.Count == 0 && !Field<Button>(editor, "deleteCurrent").Enabled, "Empty clip retained frame controls.");
                 Key(editor, Keys.Control | Keys.Z); Key(editor, Keys.Control | Keys.Z); Key(editor, Keys.Control | Keys.Z);
                 Assert(clip.Frames.Count == 3 && clip.Duration == 300 && clip.Frames.Select(frame => frame.Time).SequenceEqual(new[] { 0, 100, 200 }), "Undo did not restore deleted frames and original timing.");
                 var range = Field<GifRangeSlider>(editor, "range"); range.SetRange(1, 2);
-                Assert(slider.Maximum == 2 && slider.Value == 2, "Frame slider did not follow the selected interval.");
-                slider.Value = 1; Key(editor, Keys.Control | Keys.Shift | Keys.X);
+                var firstInput = (SliderValueBox)range.Controls.Find("gif-first-frame", true)[0];
+                var lastInput = (SliderValueBox)range.Controls.Find("gif-last-frame", true)[0];
+                firstInput.Text = "1"; lastInput.Text = "2";
+                Assert(range.First == 0 && range.Last == 1 && firstInput.Parent.Left < range.Width / 2 && lastInput.Parent.Left > range.Width / 2, "GIF endpoint inputs did not edit the matching range at the requested corners.");
+                range.SetRange(1, 2);
+                Key(editor, Keys.Control | Keys.Shift | Keys.X);
                 Assert(clip.Frames.Count == 1 && clip.Duration == 100, "Ctrl+Shift+X did not delete the selected interval.");
                 Key(editor, Keys.Control | Keys.Z);
-                Assert(clip.Frames.Count == 3 && range.First == 1 && range.Last == 2 && slider.Value == 1 && slider.Maximum == 2, "Undo did not restore selection and selected-frame output count.");
+                Assert(clip.Frames.Count == 3 && range.First == 1 && range.Last == 2, "Undo did not restore selection.");
                 Key(editor, Keys.Control | Keys.X); Assert(clip.Frames.Count == 2, "Ctrl+X did not delete only the current frame.");
-                Key(editor, Keys.Control | Keys.Z); range.SetRange(0, 2);
+                Key(editor, Keys.Control | Keys.Z); range.SelectBoundary(true); range.SetRange(0, 2);
                 editorSettings.GifDeleteCurrentShortcut = Keys.Control | Keys.Alt | Keys.D;
                 editorSettings.GifUndoShortcut = Keys.Control | Keys.Alt | Keys.Z;
                 Key(editor, Keys.Control | Keys.X); Assert(clip.Frames.Count == 3, "Disabled default shortcut remained active.");

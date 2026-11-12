@@ -9,6 +9,10 @@ namespace ShotInk
         private int first, last;
         private bool dragging;
         private bool hoverStart, hoverEnd;
+        private readonly SliderValueBox firstInput, lastInput;
+        private readonly RoundedInputFrame firstInputFrame, lastInputFrame;
+        private readonly Label firstLabel, lastLabel;
+        internal bool EditingValue { get { return firstInput.ContainsFocus || lastInput.ContainsFocus; } }
         internal int Maximum { get; private set; }
         internal int First { get { return first; } }
         internal int Last { get { return last; } }
@@ -19,7 +23,20 @@ namespace ShotInk
             Maximum = maximum; last = maximum; EditingStart = true;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.Selectable, true);
             TabStop = true; AccessibleName = "GIF 起点与终点区段"; AccessibleRole = AccessibleRole.Slider; Cursor = Cursors.Hand; BackColor = Color.White;
+            firstLabel = new Label { Text = "起点", AutoSize = true, Font = ToolAppearance.Font };
+            lastLabel = new Label { Text = "终点", AutoSize = true, Font = ToolAppearance.Font };
+            firstInput = new SliderValueBox(delegate { return first + 1; }, delegate { return 1; }, delegate { return last + 1; }, delegate(int value) { EditingStart = true; SetRange(value - 1, last); }) { Name = "gif-first-frame", AccessibleName = "起点帧" };
+            lastInput = new SliderValueBox(delegate { return last + 1; }, delegate { return first + 1; }, delegate { return Maximum + 1; }, delegate(int value) { EditingStart = false; SetRange(first, value - 1); }) { Name = "gif-last-frame", AccessibleName = "终点帧" };
+            firstInputFrame = new RoundedInputFrame(firstInput, ToolAppearance.Accent("gif")); lastInputFrame = new RoundedInputFrame(lastInput, ToolAppearance.Accent("gif"));
+            Controls.Add(firstLabel); Controls.Add(firstInputFrame); Controls.Add(lastLabel); Controls.Add(lastInputFrame); PositionInputs();
         }
+        private void PositionInputs()
+        {
+            if (firstInputFrame == null) return;
+            firstLabel.Location = new Point(0, 4); firstInputFrame.Location = new Point(36, 0);
+            lastInputFrame.Location = new Point(Math.Max(0, Width - 80), 0); lastLabel.Location = new Point(Math.Max(0, Width - 32), 4);
+        }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); PositionInputs(); }
         internal void SelectBoundary(bool start) { EditingStart = start; Focus(); Invalidate(); }
         internal void Reset(int maximum)
         {
@@ -29,7 +46,7 @@ namespace ShotInk
         internal void SetRange(int start, int end)
         {
             if (start < 0 || end < start || end > Maximum) throw new ArgumentOutOfRangeException("start");
-            first = start; last = end; Invalidate(); if (RangeChanged != null) RangeChanged(EditingStart ? first : last);
+            first = start; last = end; firstInput.RefreshValue(); lastInput.RefreshValue(); Invalidate(); if (RangeChanged != null) RangeChanged(EditingStart ? first : last);
         }
         internal void AdjustBoundary(int delta)
         { if (EditingStart) SetRange(Math.Max(0, Math.Min(last, first + delta)), last); else SetRange(first, Math.Max(first, Math.Min(Maximum, last + delta))); }
@@ -66,12 +83,15 @@ namespace ShotInk
             float y = SliderAppearance.TrackY(Height), a = Pixel(first), b = Pixel(last);
             var color = ToolAppearance.Accent("gif");
             SliderAppearance.Track(g, 18, Math.Max(18, Width - 18), y, a, b, color, Enabled);
-            SliderAppearance.Ticks(g, 18, Math.Max(18, Width - 18), y, 1, Maximum + 1, Enabled);
-            if (b - a < 115) SliderAppearance.Bubble(g, "起 " + (first + 1) + " · 止 " + (last + 1), (a + b) / 2, y, Width, color, Enabled);
+            if (b - a < 115)
+            {
+                float middle = (a + b) / 2;
+                if (middle > 130 && middle < Width - 130) SliderAppearance.Bubble(g, "起 " + (first + 1) + " · 止 " + (last + 1), middle, y, Width, color, Enabled);
+            }
             else
             {
-                SliderAppearance.Bubble(g, "起 " + (first + 1), a, y, Width, color, Enabled);
-                SliderAppearance.Bubble(g, "止 " + (last + 1), b, y, Width, color, Enabled);
+                if (a > 110 && a < Width - 110) SliderAppearance.Bubble(g, "起 " + (first + 1), a, y, Width, color, Enabled);
+                if (b > 110 && b < Width - 110) SliderAppearance.Bubble(g, "止 " + (last + 1), b, y, Width, color, Enabled);
             }
             SliderAppearance.Thumb(g, a, y, color, Enabled, hoverStart, Focused && EditingStart, dragging && EditingStart);
             SliderAppearance.Thumb(g, b, y, color, Enabled, hoverEnd, Focused && !EditingStart, dragging && !EditingStart);

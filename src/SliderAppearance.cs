@@ -6,8 +6,8 @@ namespace ShotInk
 {
     internal static class SliderAppearance
     {
-        internal const int Height = 70;
-        internal static float TrackY(int height) { return Math.Max(14, height - 30); }
+        internal const int Height = 52;
+        internal static float TrackY(int height) { return Math.Max(14, height - 14); }
         internal static void Track(Graphics g, float left, float right, float y, float first, float last, Color accent, bool enabled)
         {
             using (var pen = new Pen(Color.FromArgb(223, 225, 234), 6))
@@ -45,25 +45,6 @@ namespace ShotInk
             using (var fill = new SolidBrush(color)) g.FillPolygon(fill, new[] { new PointF(pointer - 4, bounds.Bottom - 1), new PointF(pointer + 4, bounds.Bottom - 1), new PointF(x, y - 10) });
             using (var fill = new SolidBrush(Color.White))
             using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }) g.DrawString(text, ToolAppearance.HeadingFont, fill, bounds, format);
-        }
-        internal static void Ticks(Graphics g, float left, float right, float y, int minimum, int maximum, bool enabled)
-        {
-            int intervals = maximum == minimum ? 0 : right - left < 140 ? 2 : 4;
-            int previous = int.MinValue;
-            using (var pen = new Pen(enabled ? Color.FromArgb(146, 151, 173) : Color.FromArgb(204, 206, 216)))
-            using (var text = new SolidBrush(enabled ? ToolAppearance.Muted : Color.FromArgb(180, 184, 197)))
-            using (var format = new StringFormat { Alignment = StringAlignment.Center })
-            {
-                for (int index = 0; index <= intervals; index++)
-                {
-                    int value = intervals == 0 ? minimum : minimum + (int)Math.Round((maximum - (double)minimum) * index / intervals);
-                    if (value == previous) continue;
-                    previous = value;
-                    float x = maximum == minimum ? left : left + (right - left) * (float)((value - (double)minimum) / (maximum - (double)minimum));
-                    g.DrawLine(pen, x, y + 10, x, y + 14);
-                    g.DrawString(value.ToString(), ToolAppearance.Font, text, x, y + 15, format);
-                }
-            }
         }
     }
 }

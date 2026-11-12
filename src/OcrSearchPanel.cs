@@ -26,7 +26,7 @@ namespace ShotInk
             previous = SearchButton("search-previous", "上一个匹配 (Shift+F3)", 234, delegate { canvas.MoveSearchMatch(-1); });
             next = SearchButton("search-next", "下一个匹配 (Enter / F3)", 264, delegate { canvas.MoveSearchMatch(1); });
             SearchButton("cancel", "关闭搜索 (Esc)", 294, CloseSearch);
-            Controls.Add(query); Controls.Add(count);
+            Controls.Add(new RoundedInputFrame(query, ToolAppearance.Accent("ocr"))); Controls.Add(count);
             query.TextChanged += delegate { if (canvas != null) canvas.SearchText(query.Text); };
         }
         private Button SearchButton(string icon, string hint, int x, Action action)

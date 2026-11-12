@@ -113,7 +113,7 @@ namespace ShotInk
             historyLimit = new NumericUpDown { Name = "history-limit", Minimum = 1, Maximum = 10000, Value = settings.HistoryLimit, Width = 65, Margin = new Padding(3, 12, 2, 0), Enabled = autoSave.Checked };
             autoSave.CheckedChanged += delegate { settings.AutoHistory = autoSave.Checked; historyLimit.Enabled = autoSave.Checked; settings.NotifyChanged(); };
             historyLimit.ValueChanged += delegate { settings.HistoryLimit = (int)historyLimit.Value; settings.NotifyChanged(); PruneHistory(); LoadHistory(); };
-            historyBar.Controls.Add(autoSave); historyBar.Controls.Add(historyLimit);
+            historyBar.Controls.Add(autoSave); historyBar.Controls.Add(new RoundedInputFrame(historyLimit, ToolAppearance.Accent("shape")));
             historyBar.Controls.Add(new Label { Text = "张", AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(0, 16, 0, 0) }); content.Controls.Add(historyBar, 0, 3);
 
             thumbnails = new ImageList { ImageSize = new Size(150, 94), ColorDepth = ColorDepth.Depth32Bit };

@@ -31,20 +31,19 @@ namespace ShotInk
         {
             internal GifFrame[] Frames;
             internal int[] Times;
-            internal int Duration, First, Last, FrameIndex, OutputCount;
+            internal int Duration, First, Last, FrameIndex;
         }
         private TimelineState CaptureTimeline()
         {
             return new TimelineState { Frames = clip.Frames.ToArray(), Times = clip.Frames.Select(frame => frame.Time).ToArray(), Duration = clip.Duration,
-                First = range.First, Last = range.Last, FrameIndex = frameIndex, OutputCount = frameCount.Value };
+                First = range.First, Last = range.Last, FrameIndex = frameIndex };
         }
         private void RestoreTimeline(TimelineState state)
         {
             clip.Frames.Clear(); clip.Frames.AddRange(state.Frames); clip.Duration = state.Duration;
             for (int index = 0; index < state.Frames.Length; index++) state.Frames[index].Time = state.Times[index];
             range.Reset(Math.Max(0, clip.Frames.Count - 1)); range.SetRange(state.First, state.Last);
-            SetFrameCount(state.OutputCount);
-            frameCache.Prune(clip.Frames); EnableEditing(true); ShowFrame(state.FrameIndex); UpdateFrameCountLabel();
+            frameCache.Prune(clip.Frames); EnableEditing(true); ShowFrame(state.FrameIndex);
         }
         private void SetupAnnotationTools()
         {

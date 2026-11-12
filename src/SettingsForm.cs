@@ -58,7 +58,7 @@ namespace ShotInk
             var hint = new Label { Text = "点击输入框后按快捷键；Backspace 清除。占用状态每秒刷新。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(hint, 0, 6); layout.SetColumnSpan(hint, 3);
             layout.Controls.Add(new Label { Text = "默认保存文件夹", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 7);
-            folder = new TextBox { Name = "save-directory", Dock = DockStyle.Fill, Text = current.SaveDirectory, Margin = new Padding(3, 8, 3, 3) }; layout.Controls.Add(folder, 1, 7);
+            folder = new TextBox { Name = "save-directory", Dock = DockStyle.Fill, Text = current.SaveDirectory, Margin = new Padding(3, 8, 3, 3) }; layout.Controls.Add(new RoundedInputFrame(folder, ToolAppearance.Accent("shape")), 1, 7);
             var browse = new Button { Text = "浏览…", Dock = DockStyle.Fill, Margin = new Padding(6, 5, 0, 5) };
             browse.Click += delegate { using (var dialog = new FolderBrowserDialog { Description = "选择图片默认保存文件夹", SelectedPath = folder.Text }) if (dialog.ShowDialog(this) == DialogResult.OK) folder.Text = dialog.SelectedPath; };
             layout.Controls.Add(browse, 2, 7);
@@ -75,7 +75,7 @@ namespace ShotInk
             foreach (int height in new[] { 42, 42, 42, 42, 60 }) gifLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             gifLayout.Controls.Add(new Label { Text = "默认每秒帧数（1～50）", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
             gifFps = new NumericUpDown { Name = "gif-fps", Minimum = 1, Maximum = 50, Value = current.GifFramesPerSecond, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 3) };
-            gifLayout.Controls.Add(gifFps, 1, 0);
+            gifLayout.Controls.Add(new RoundedInputFrame(gifFps, ToolAppearance.Accent("gif")), 1, 0);
             gifDeleteCurrent = AddGifShortcut(gifLayout, "删除当前帧", "gif-delete-current", 1, current.GifDeleteCurrentShortcut);
             gifDeleteSelected = AddGifShortcut(gifLayout, "删除选中帧", "gif-delete-selected", 2, current.GifDeleteSelectedShortcut);
             gifUndo = AddGifShortcut(gifLayout, "撤销操作", "gif-undo", 3, current.GifUndoShortcut);
@@ -155,7 +155,7 @@ namespace ShotInk
         {
             layout.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
             var box = new ShortcutBox { Name = "hotkey-" + row, ShortcutValue = value, Dock = DockStyle.Fill, Margin = new Padding(3, 6, 3, 3) };
-            layout.Controls.Add(box, 1, row);
+            layout.Controls.Add(new RoundedInputFrame(box, ToolAppearance.Accent("shape")), 1, row);
             shortcutStatus[row] = new Label { Name = "hotkey-status-" + row, Text = "待检测", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(10, 0, 0, 0) };
             layout.Controls.Add(shortcutStatus[row], 2, row); return box;
         }
@@ -163,7 +163,7 @@ namespace ShotInk
         {
             layout.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
             var box = new ShortcutBox { Name = name, ShortcutValue = value, Dock = DockStyle.Fill, Margin = new Padding(3, 6, 3, 3) };
-            layout.Controls.Add(box, 1, row); return box;
+            layout.Controls.Add(new RoundedInputFrame(box, ToolAppearance.Accent("gif")), 1, row); return box;
         }
         internal AppSettings ReadSettings()
         {

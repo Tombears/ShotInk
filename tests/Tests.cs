@@ -2181,6 +2181,11 @@ namespace ShotInk
                 Key(slider, Keys.End); Assert(slider.Value == 48, "End key did not reach the maximum.");
                 slider.Enabled = false; Mouse(slider, "OnMouseDown", MouseButtons.Left, 0, 13); Key(slider, Keys.Home);
                 Assert(slider.Value == 48, "Disabled slider changed its value.");
+                slider.Enabled = true;
+                var input = slider.Controls.Find("slider-value", true).OfType<SliderValueBox>().Single(); input.Text = "21";
+                Assert(slider.Value == 21, "Manual slider value did not update the actual value.");
+                input.Text = "999"; Key(input, Keys.Enter); Assert(slider.Value == 48 && input.Text == "48", "Manual slider value escaped its bounds.");
+                input.Text = "invalid"; Key(input, Keys.Enter); Assert(input.Text == "48", "Invalid manual slider input did not recover.");
                 slider.Enabled = true; slider.Minimum = 7; slider.Maximum = 7;
                 Assert(slider.Value == 7 && !float.IsNaN(slider.ThumbBounds.X), "Zero-range slider produced invalid geometry.");
             }

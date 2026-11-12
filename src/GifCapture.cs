@@ -44,27 +44,6 @@ namespace ShotInk
             for (int index = first; index < Frames.Count; index++) Frames[index].Time -= removedTime;
             Duration = Frames.Count == 0 ? 0 : Duration - removedTime;
         }
-        internal static int[] SampleIndices(int first, int last, int count)
-        {
-            if (first < 0 || last < first || count < 1 || count > last - first + 1) throw new ArgumentOutOfRangeException("count");
-            var indices = new int[count];
-            for (int index = 0; index < count; index++)
-                indices[index] = count == 1 ? first : first + (int)((long)index * (last - first) / (count - 1));
-            return indices;
-        }
-        internal GifClip Resample(int first, int last, int count)
-        {
-            if (last >= Frames.Count) throw new ArgumentOutOfRangeException("last");
-            var indices = SampleIndices(first, last, count);
-            int start = Frames[first].Time;
-            var result = new GifClip { Duration = EndTime(last) - start };
-            foreach (int index in indices)
-            {
-                var source = Frames[index];
-                result.Frames.Add(new GifFrame { Png = source.Png, Time = source.Time - start, Annotations = source.Annotations });
-            }
-            return result;
-        }
     }
     internal sealed class GifCaptureSession : IDisposable
     {
