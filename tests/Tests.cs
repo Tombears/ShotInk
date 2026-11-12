@@ -2189,6 +2189,18 @@ namespace ShotInk
                 slider.Enabled = true; slider.Minimum = 7; slider.Maximum = 7;
                 Assert(slider.Value == 7 && !float.IsNaN(slider.ThumbBounds.X), "Zero-range slider produced invalid geometry.");
             }
+            using (var host = new Form { ClientSize = new Size(600, 180) })
+            using (var slider = new OvalSlider { Minimum = 4, Maximum = 48, Value = 14, Width = 124, Location = new Point(460, 80) })
+            {
+                host.Controls.Add(slider); host.Show(); Application.DoEvents();
+                var thumb = slider.ThumbBounds;
+                Mouse(slider, "OnMouseDown", MouseButtons.Left, (int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2));
+                var expanded = Field<OvalSlider>(slider, "expandedSlider"); var panel = Field<Panel>(slider, "expandedPanel");
+                Assert(expanded != null && expanded.Width > slider.Width && panel.Right <= host.ClientSize.Width && panel.Left >= 0 && slider.Value == 14, "Short slider did not expand within the window while preserving its value.");
+                Mouse(expanded, "OnMouseMove", MouseButtons.Left, 10000, 38); Mouse(expanded, "OnMouseUp", MouseButtons.Left, 10000, 38); Application.DoEvents();
+                Assert(slider.Value == 48 && Field<Panel>(slider, "expandedPanel") == null && panel.IsDisposed, "Expanded slider did not apply its value and collapse after release.");
+                host.Close();
+            }
         }
         private static void Key(Control control, Keys key)
         { control.GetType().GetMethod("OnKeyDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(control, new object[] { new KeyEventArgs(key) }); }

@@ -15,6 +15,10 @@ namespace ShotInk
         private float grabOffset;
         private readonly SliderValueBox valueInput;
         private readonly RoundedInputFrame valueInputFrame;
+        private Panel expandedPanel;
+        private OvalSlider expandedSlider;
+        private Action collapseExpansion;
+        private bool expansionCloseQueued;
         internal event EventHandler ValueChanged;
         internal int SmallChange = 1;
         internal int LargeChange = 4;
@@ -76,6 +80,7 @@ namespace ShotInk
             if (value == next) { if (valueInput != null) valueInput.RefreshValue(); return; }
             value = next; Invalidate();
             if (valueInput != null) valueInput.RefreshValue();
+            if (expandedSlider != null && expandedSlider.Value != next) expandedSlider.Value = next;
             if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
             AccessibilityNotifyClients(AccessibleEvents.ValueChange, -1);
         }
@@ -88,11 +93,85 @@ namespace ShotInk
         {
             base.OnMouseDown(e);
             if (!Enabled || e.Button != MouseButtons.Left) return;
+            if (collapseExpansion == null && Width < 210 && BeginExpandedDrag(e)) return;
             Focus();
             var thumb = ThumbBounds;
             grabOffset = thumb.Contains(e.Location) ? e.X - (thumb.Left + thumb.Width / 2) : 0;
             dragging = true; Capture = true;
             SetFromPointer(e.X - grabOffset); Invalidate();
+        }
+        private bool BeginExpandedDrag(MouseEventArgs e)
+        {
+            var form = FindForm();
+            if (form == null || form.ClientSize.Width < 240) return false;
+            if (!ThumbBounds.Contains(e.Location)) SetFromPointer(e.X);
+            var pointer = PointToScreen(e.Location);
+            var at = form.PointToClient(pointer);
+            var origin = form.PointToClient(PointToScreen(Point.Empty));
+            int width = Math.Min(320, form.ClientSize.Width - 16);
+            expandedSlider = new OvalSlider { Minimum = minimum, Maximum = maximum, Value = value, AccentColor = AccentColor,
+                SmallChange = SmallChange, LargeChange = LargeChange, Size = new Size(width - 12, SliderAppearance.Height), Location = new Point(6, 6), AccessibleName = AccessibleName };
+            expandedSlider.collapseExpansion = CloseExpansion;
+            var thumb = expandedSlider.ThumbBounds;
+            int left = at.X - 6 - (int)(thumb.Left + thumb.Width / 2);
+            int top = origin.Y - 6;
+            var panel = new ExpandedSliderPanel { Size = new Size(width, SliderAppearance.Height + 12) };
+            panel.Location = new Point(Math.Max(8, Math.Min(form.ClientSize.Width - width - 8, left)),
+                Math.Max(8, Math.Min(form.ClientSize.Height - panel.Height - 8, top)));
+            expandedPanel = panel; panel.Controls.Add(expandedSlider);
+            var liveSlider = expandedSlider;
+            expandedSlider.ValueChanged += delegate { Value = liveSlider.Value; };
+            expandedSlider.MouseUp += delegate { QueueCloseExpansion(); };
+            expandedSlider.MouseCaptureChanged += delegate { if (expandedSlider != null && !expandedSlider.Capture) QueueCloseExpansion(); };
+            form.Controls.Add(panel); panel.BringToFront(); expandedSlider.Focus();
+            var local = expandedSlider.PointToClient(pointer);
+            expandedSlider.grabOffset = local.X - (thumb.Left + thumb.Width / 2);
+            expandedSlider.dragging = true; expandedSlider.Capture = true; expandedSlider.Invalidate();
+            return true;
+        }
+        private void QueueCloseExpansion()
+        {
+            if (expandedPanel == null || expansionCloseQueued || IsDisposed || Disposing) return;
+            expansionCloseQueued = true;
+            BeginInvoke(new Action(delegate { expansionCloseQueued = false; CloseExpansion(); }));
+        }
+        private void CloseExpansion()
+        {
+            var panel = expandedPanel; expandedPanel = null; expandedSlider = null;
+            if (panel != null) { if (panel.Parent != null) panel.Parent.Controls.Remove(panel); panel.Dispose(); }
+            if (!IsDisposed && !Disposing) { Focus(); Invalidate(); }
+        }
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (collapseExpansion != null)
+            {
+                if (keyData == Keys.Escape) { collapseExpansion(); return true; }
+                if (IsInputKey(keyData)) { OnKeyDown(new KeyEventArgs(keyData)); return true; }
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && expandedPanel != null) CloseExpansion();
+            base.Dispose(disposing);
+        }
+        private sealed class ExpandedSliderPanel : Panel
+        {
+            internal ExpandedSliderPanel()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+                BackColor = Color.Transparent;
+            }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
+                {
+                    using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 8))
+                    using (var fill = new SolidBrush(Color.White))
+                    using (var border = new Pen(ToolAppearance.Border)) { g.FillPath(fill, path); g.DrawPath(border, path); }
+                });
+            }
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {
