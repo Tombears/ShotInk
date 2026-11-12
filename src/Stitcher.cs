@@ -44,9 +44,10 @@ namespace ShotInk
             if (frame.Width != Width || frame.Height != frameHeight) throw new ArgumentException("截图区域尺寸发生变化。");
             var before = previous;
             var after = ReadPixels(frame);
+            int fixedBottom = FindFixedBottom(before, after, Width, frameHeight);
             double unchanged = Error(before, after, Width, frame.Height, 0, double.MaxValue, 1);
             if (unchanged < 0.15) return StitchStatus.Unchanged;
-            int maximum = frame.Height - Math.Max(32, frame.Height / 10);
+            int maximum = frame.Height - fixedBottom - Math.Max(32, frame.Height / 10);
             if (maximum < 1) return StitchStatus.Unmatched;
             int best = 0;
             double bestError = double.MaxValue;
@@ -57,18 +58,18 @@ namespace ShotInk
                 for (int pass = 0; pass < 2; pass++)
                 {
                     int offset = distance * preferred * (pass == 0 ? 1 : -1);
-                    double error = Error(before, after, Width, frame.Height, offset, Math.Min(12, bestError));
+                    double error = Error(before, after, Width, frame.Height, offset, Math.Min(12, bestError), 0, fixedBottom);
                     if (error < bestError) { bestError = error; best = offset; }
                 }
             }
             if (best == 0 || bestError > 12 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
             // Validate the alignment at full width; sparse sampling can miss a one-pixel text shift.
             int coarse = best;
-            bestError = Error(before, after, Width, frame.Height, best, 3, 1);
+            bestError = Error(before, after, Width, frame.Height, best, 3, 1, fixedBottom);
             foreach (int delta in new[] { -1, 1, -2, 2 })
             {
                 int candidate = coarse + delta; if (candidate == 0 || Math.Abs(candidate) > maximum) continue;
-                double error = Error(before, after, Width, frame.Height, candidate, Math.Min(3, bestError), 1);
+                double error = Error(before, after, Width, frame.Height, candidate, Math.Min(3, bestError), 1, fixedBottom);
                 if (error < bestError) { bestError = error; best = candidate; }
             }
             LastError = bestError;
@@ -77,11 +78,12 @@ namespace ShotInk
             if (position < 0)
             {
                 int prepend = -position;
-                if (prepend > maximum || Error(head, after, Width, frameHeight, -prepend, 3, 1) > 3) return StitchStatus.Unmatched;
+                int headBottom = Math.Max(fixedBottom, FindFixedBottom(head, after, Width, frameHeight));
+                if (prepend > maximum || Error(head, after, Width, frameHeight, -prepend, 3, 1, headBottom) > 3) return StitchStatus.Unmatched;
                 if (Height + prepend > heightLimit || (long)Width * (Height + prepend) > pixelLimit) return StitchStatus.LimitReached;
                 // The new viewport precedes the old head. Replace its overlapping
                 // prefix at a quiet row, just as appending replaces the old tail.
-                int headSeam = FindTextSeam(after, head, Width, frameHeight, prepend);
+                int headSeam = FindTextSeam(after, head, Width, frameHeight, prepend, headBottom);
                 TrimHead(headSeam);
                 strips.Insert(0, frame.Clone(new Rectangle(0, 0, Width, prepend + headSeam), PixelFormat.Format24bppRgb));
                 Height += prepend;
@@ -97,9 +99,10 @@ namespace ShotInk
             }
             // Returning through previously captured content must not append it again.
             // Validate any new tail against the furthest captured viewport, not the last revisited frame.
-            if (added > maximum || Error(frontier, after, Width, frameHeight, added, 3, 1) > 3) return StitchStatus.Unmatched;
+            int tailBottom = Math.Max(fixedBottom, FindFixedBottom(frontier, after, Width, frameHeight));
+            if (added > maximum || Error(frontier, after, Width, frameHeight, added, 3, 1, tailBottom) > 3) return StitchStatus.Unmatched;
             if (Height + added > heightLimit || (long)Width * (Height + added) > pixelLimit) return StitchStatus.LimitReached;
-            int seam = FindTextSeam(frontier, after, Width, frame.Height, added);
+            int seam = FindTextSeam(frontier, after, Width, frame.Height, added, tailBottom);
             TrimTail(Height - (frame.Height - added - seam));
             strips.Add(frame.Clone(new Rectangle(0, seam, Width, frame.Height - seam), PixelFormat.Format24bppRgb));
             Height += added;
@@ -130,12 +133,12 @@ namespace ShotInk
             finally { image.UnlockBits(data); }
         }
 
-        private static double Error(byte[] before, byte[] after, int width, int height, int offset, double cutoff = double.MaxValue, int pixelStep = 0)
+        private static double Error(byte[] before, byte[] after, int width, int height, int offset, double cutoff = double.MaxValue, int pixelStep = 0, int fixedBottom = 0)
         {
             int displacement = Math.Abs(offset);
             int beforeY = Math.Max(0, offset), afterY = Math.Max(0, -offset);
             int marginY = Math.Min(24, Math.Max(1, (height - displacement) / 12));
-            int endY = height - displacement - marginY;
+            int endY = height - fixedBottom - displacement - marginY;
             if (endY <= marginY) return double.MaxValue;
             int stepX = pixelStep > 0 ? pixelStep : Math.Max(1, width / 192);
             int stepY = pixelStep > 0 ? 1 : Math.Max(1, height / 160);

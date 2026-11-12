@@ -19,6 +19,12 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (args.Length == 1 && args[0] == "--stitch-tests")
+                {
+                    TestStitch(); TestScrollReversals(); TestDocumentStitch(); TestTextSeams();
+                    TestFixedBottom(); TestUnchanged(); TestUnrelated(); TestAccumulatedLimit();
+                    Console.WriteLine("PASS: stitching regression checks"); return 0;
+                }
                 if (args.Length == 1 && args[0] == "--gif-scroll-tests")
                 {
                     Run("GIF rendering leaves subsequent long capture responsive", delegate
@@ -70,6 +76,7 @@ namespace ShotInk
                 Run("scroll reversals revisit existing rows without duplicating or losing new tail pixels", TestScrollReversals);
                 Run("text pages with whitespace and small overlaps preserve every row", TestDocumentStitch);
                 Run("text seams retain whole glyphs and narrow left-hand content", TestTextSeams);
+                Run("fixed bottom panels and floating controls appear only in the final viewport", TestFixedBottom);
                 Run("unchanged frame does not duplicate content", TestUnchanged);
                 Run("unrelated frames are rejected", TestUnrelated);
                 Run("changed frame dimensions are rejected", TestDimensions);
@@ -1550,6 +1557,46 @@ namespace ShotInk
                     using (var frame = content.Clone(new Rectangle(0, offset, 1024, 200), PixelFormat.Format24bppRgb))
                         Assert(stitcher.Add(frame) == StitchStatus.Added, "Sparse content near the left edge was mistaken for a stationary page.");
                 using (var result = stitcher.Build()) EqualPixels(content, result, 237);
+            }
+        }
+        private static void TestFixedBottom()
+        {
+            foreach (bool floating in new[] { false, true })
+            using (var content = Pattern(360, 1300, 391))
+            using (var stitcher = new VerticalStitcher())
+            {
+                int[] positions = { 120, 61, 0, 61, 122, 183, 122, 61, 122, 183, 244, 305, 366, 427, 488 };
+                foreach (int position in positions)
+                using (var frame = content.Clone(new Rectangle(0, position, 360, 360), PixelFormat.Format24bppRgb))
+                {
+                    DrawFixedBottom(frame, floating, 0);
+                    var status = stitcher.Add(frame, position < 120 ? -1 : 1);
+                    Assert(status != StitchStatus.Unmatched, "Fixed bottom lost alignment at " + position + ", floating=" + floating);
+                }
+                using (var expected = content.Clone(new Rectangle(0, 0, 360, 848), PixelFormat.Format24bppRgb))
+                using (var result = stitcher.Build())
+                {
+                    DrawFixedBottom(expected, floating, 488);
+                    EqualPixels(expected, result, expected.Height);
+                }
+            }
+        }
+        private static void DrawFixedBottom(Bitmap frame, bool floating, int viewportTop)
+        {
+            using (var g = Graphics.FromImage(frame))
+            {
+                if (floating)
+                {
+                    g.FillEllipse(Brushes.Black, 162, viewportTop + 270, 36, 36);
+                    g.DrawEllipse(Pens.White, 167, viewportTop + 275, 26, 26);
+                    g.FillRectangle(Brushes.White, 178, viewportTop + 279, 3, 18);
+                }
+                else
+                {
+                    g.FillRectangle(Brushes.Black, 0, viewportTop + 290, 360, 70);
+                    g.FillRectangle(Brushes.DimGray, 0, viewportTop + 290, 360, 4);
+                    g.FillRectangle(Brushes.White, 120, viewportTop + 318, 120, 12);
+                }
             }
         }
         private static void TestStitch()
