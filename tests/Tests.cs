@@ -850,6 +850,12 @@ namespace ShotInk
         }
         private static void TestGifSampling()
         {
+            int slowCalls = 0;
+            using (var slow = new GifCaptureSession(delegate { System.Threading.Interlocked.Increment(ref slowCalls); return new Bitmap(2, 2); }, 1))
+            {
+                var task = slow.RunAsync(); WaitUntil(delegate { return slowCalls > 0; }); slow.Finish(); Pump(task);
+                Assert(task.Result.Duration < 900, "Stopping a low-FPS recording waited for an extra sample interval.");
+            }
             int calls = 0;
             using (var session = new GifCaptureSession(delegate { System.Threading.Interlocked.Increment(ref calls); return new Bitmap(40, 30); }))
             {

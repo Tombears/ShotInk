@@ -49,6 +49,7 @@ namespace ShotInk
     {
         private readonly Func<Bitmap> capture;
         private readonly CancellationTokenSource cancel = new CancellationTokenSource();
+        private readonly TaskCompletionSource<bool> finishing = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         private volatile bool finish;
         private int disposed;
         private readonly double interval;
@@ -57,7 +58,7 @@ namespace ShotInk
             if (framesPerSecond < 1 || framesPerSecond > 50) throw new ArgumentOutOfRangeException("framesPerSecond");
             this.capture = capture; interval = 1000.0 / framesPerSecond;
         }
-        internal void Finish() { finish = true; }
+        internal void Finish() { finish = true; finishing.TrySetResult(true); }
         internal bool IsFinishing { get { return finish; } }
         internal Task<GifClip> RunAsync()
         {
@@ -77,7 +78,11 @@ namespace ShotInk
                     }
                     if (clock.ElapsedMilliseconds >= 60000 || bytes >= 192L * 1024 * 1024) { clip.LimitReached = true; break; }
                     nextFrame = Math.Max(nextFrame + interval, clock.Elapsed.TotalMilliseconds);
-                    if (!finish) await Task.Delay((int)Math.Max(1, Math.Ceiling(nextFrame - clock.Elapsed.TotalMilliseconds)), token).ConfigureAwait(false);
+                    if (!finish)
+                    {
+                        int delay = (int)Math.Max(1, Math.Ceiling(nextFrame - clock.Elapsed.TotalMilliseconds));
+                        await Task.WhenAny(Task.Delay(delay, token), finishing.Task).ConfigureAwait(false);
+                    }
                 } while (!finish);
                 token.ThrowIfCancellationRequested();
                 clip.Duration = Math.Max(clip.Frames[clip.Frames.Count - 1].Time + 20, (int)clock.ElapsedMilliseconds);
