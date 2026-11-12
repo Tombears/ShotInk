@@ -25,6 +25,7 @@ namespace ShotInk
     {
         internal bool AutoHistory = true;
         internal int HistoryLimit = 10;
+        internal int GifFramesPerSecond = 30;
         internal bool AskSaveLocation = true;
         internal bool StartWithWindows;
         internal string SaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
@@ -54,6 +55,7 @@ namespace ShotInk
         {
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
             StartWithWindows = other.StartWithWindows;
+            GifFramesPerSecond = other.GifFramesPerSecond;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
             QuickCopyShortcut = other.QuickCopyShortcut; QuickEditShortcut = other.QuickEditShortcut; FullScreenShortcut = other.FullScreenShortcut;
             LastCaptureRegion = other.LastCaptureRegion;
@@ -88,12 +90,13 @@ namespace ShotInk
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
-                var knownKeys = new[] { "save", "history-limit", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
+                var knownKeys = new[] { "save", "history-limit", "gif-fps", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value;
                 if (values.TryGetValue("save", out value)) settings.AutoHistory = value != "0";
                 settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
+                settings.GifFramesPerSecond = (int)ReadNumber(values, "gif-fps", 1, 50, settings.GifFramesPerSecond);
                 if (values.TryGetValue("ask-save-location", out value)) settings.AskSaveLocation = value != "0";
                 if (values.TryGetValue("start-with-windows", out value)) settings.StartWithWindows = value == "1";
                 if (values.TryGetValue("free-selection-mode", out value)) settings.FreeSelectionMode = value == "1";
@@ -154,6 +157,7 @@ namespace ShotInk
                 throw new ArgumentException("请选择有效的绝对保存路径。");
             Path.GetFullPath(SaveDirectory);
             if (HistoryLimit < 1 || HistoryLimit > 10000) throw new ArgumentException("历史保留张数应为 1～10000。");
+            if (GifFramesPerSecond < 1 || GifFramesPerSecond > 50) throw new ArgumentException("GIF 每秒帧数应为 1～50。");
             if (Shortcuts.Any(key => !Shortcut.Valid(key))) throw new ArgumentException("快捷键无效：字母、数字和 Esc 需搭配 Ctrl 或 Alt，不能只使用修饰键。");
             if (Shortcuts.Where(key => key != Keys.None).Distinct().Count() != Shortcuts.Count(key => key != Keys.None)) throw new ArgumentException("不同功能不能使用相同的快捷键。");
         }
@@ -165,6 +169,7 @@ namespace ShotInk
             Validate(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
+                "gif-fps=" + GifFramesPerSecond,
                 "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut,
                 "hotkey-quick-copy=" + (int)QuickCopyShortcut, "hotkey-quick-edit=" + (int)QuickEditShortcut, "hotkey-fullscreen=" + (int)FullScreenShortcut,
                 "free-selection-mode=" + (FreeSelectionMode ? "1" : "0"),

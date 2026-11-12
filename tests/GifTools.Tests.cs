@@ -23,12 +23,61 @@ namespace ShotInk
             { using (var graphics = Graphics.FromImage(image)) graphics.Clear(color); image.Save(bytes, ImageFormat.Png); clip.Frames.Add(new GifFrame { Time = clip.Frames.Count * 100, Png = bytes.ToArray() }); }
             return clip;
         }
+        private static void TestFrameControls()
+        {
+            var clip = Fixture();
+            foreach (int count in new[] { 1, 2, 3 })
+            {
+                var sampled = clip.Resample(0, 2, count);
+                Assert(sampled.Frames.Count == count && sampled.Duration == 300 && sampled.Frames[0].Time == 0, "Resampling changed clip duration or frame count.");
+                using (var stream = new MemoryStream(GifEncoder.Encode(sampled, 0, count - 1)))
+                using (var image = Image.FromStream(stream))
+                {
+                    Assert(image.GetFrameCount(FrameDimension.Time) == count, "Export ignored the output frame count.");
+                    var delays = image.GetPropertyItem(0x5100).Value; int total = 0;
+                    for (int index = 0; index < count; index++) total += BitConverter.ToInt32(delays, index * 4);
+                    Assert(total == 30, "Reducing frames changed GIF playback duration.");
+                }
+            }
+            Assert(clip.Frames.Count == 3 && clip.Frames[1].Time == 100, "Resampling mutated source frames.");
+            Assert(clip.Resample(1, 2, 1).Duration == 200, "Trimmed output included time outside the selection.");
+            using (var editor = new GifEditorForm(clip, new AppSettings()))
+            {
+                editor.Show(); Application.DoEvents();
+                var slider = Field<OvalSlider>(editor, "frameCount"); slider.Value = 1;
+                Assert(clip.Frames.Count == 3 && slider.Maximum == 3, "Frame slider discarded recorded frames.");
+                slider.Value = 3; Key(editor, Keys.Right);
+                Field<Button>(editor, "deleteCurrent").PerformClick();
+                Assert(clip.Frames.Count == 2 && clip.Duration == 200 && Field<int>(editor, "frameIndex") == 1 && slider.Maximum == 2 && slider.Value == 2, "Delete current frame affected the full selected range or lost slider bounds.");
+                using (var image = clip.Frames[1].Decode()) Assert(image.GetPixel(60, 50).B > 240, "Current-frame deletion removed the wrong image.");
+                Field<Button>(editor, "deleteCurrent").PerformClick(); Field<Button>(editor, "deleteCurrent").PerformClick();
+                Assert(clip.Frames.Count == 0 && !slider.Enabled && !Field<Button>(editor, "deleteCurrent").Enabled, "Empty clip retained frame controls.");
+                editor.Close();
+            }
+            string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gif-settings-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string path = Path.Combine(root, "settings.ini"); var settings = AppSettings.Load(path);
+                Assert(settings.GifFramesPerSecond == 30, "Default GIF frame rate did not increase from 10 to 30.");
+                settings.GifFramesPerSecond = 24; settings.Save(path);
+                Assert(AppSettings.Load(path).Clone().GifFramesPerSecond == 24, "GIF frame rate did not survive save, load and clone.");
+                using (var form = new SettingsForm(settings, delegate { return null; }, delegate { return true; }))
+                {
+                    var number = (NumericUpDown)form.Controls.Find("gif-fps", true)[0]; number.Value = 50;
+                    Assert(form.ReadSettings().GifFramesPerSecond == 50, "Settings UI ignored the default GIF frame rate.");
+                }
+                using (var session = new GifCaptureSession(delegate { return new Bitmap(2, 2); }, 24))
+                    Assert(Math.Abs(Field<double>(session, "interval") - 1000.0 / 24) < 0.001, "Capture ignored the configured frame rate.");
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
         private static void Line(AnnotationCanvas canvas, int y)
         {
             var mark = new Mark { Tool = DrawTool.Pen, Color = Color.White, Width = 5 }; mark.Points.Add(new PointF(10, y)); mark.Points.Add(new PointF(45, y)); canvas.AddMark(mark);
         }
         internal static void Run()
         {
+            TestFrameControls();
             var clip = Fixture();
             using (var editor = new GifEditorForm(clip, new AppSettings()))
             {

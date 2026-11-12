@@ -44,6 +44,27 @@ namespace ShotInk
             for (int index = first; index < Frames.Count; index++) Frames[index].Time -= removedTime;
             Duration = Frames.Count == 0 ? 0 : Duration - removedTime;
         }
+        internal static int[] SampleIndices(int first, int last, int count)
+        {
+            if (first < 0 || last < first || count < 1 || count > last - first + 1) throw new ArgumentOutOfRangeException("count");
+            var indices = new int[count];
+            for (int index = 0; index < count; index++)
+                indices[index] = count == 1 ? first : first + (int)((long)index * (last - first) / (count - 1));
+            return indices;
+        }
+        internal GifClip Resample(int first, int last, int count)
+        {
+            if (last >= Frames.Count) throw new ArgumentOutOfRangeException("last");
+            var indices = SampleIndices(first, last, count);
+            int start = Frames[first].Time;
+            var result = new GifClip { Duration = EndTime(last) - start };
+            foreach (int index in indices)
+            {
+                var source = Frames[index];
+                result.Frames.Add(new GifFrame { Png = source.Png, Time = source.Time - start, Annotations = source.Annotations });
+            }
+            return result;
+        }
     }
     internal sealed class GifCaptureSession : IDisposable
     {
@@ -51,7 +72,12 @@ namespace ShotInk
         private readonly CancellationTokenSource cancel = new CancellationTokenSource();
         private volatile bool finish;
         private int disposed;
-        internal GifCaptureSession(Func<Bitmap> capture) { this.capture = capture; }
+        private readonly double interval;
+        internal GifCaptureSession(Func<Bitmap> capture, int framesPerSecond = 30)
+        {
+            if (framesPerSecond < 1 || framesPerSecond > 50) throw new ArgumentOutOfRangeException("framesPerSecond");
+            this.capture = capture; interval = 1000.0 / framesPerSecond;
+        }
         internal void Finish() { finish = true; }
         internal bool IsFinishing { get { return finish; } }
         internal Task<GifClip> RunAsync()
@@ -59,7 +85,7 @@ namespace ShotInk
             var token = cancel.Token;
             return Task.Run(async delegate
             {
-                var clip = new GifClip(); var clock = Stopwatch.StartNew(); long bytes = 0;
+                var clip = new GifClip(); var clock = Stopwatch.StartNew(); long bytes = 0; double nextFrame = 0;
                 do
                 {
                     token.ThrowIfCancellationRequested();
@@ -71,7 +97,8 @@ namespace ShotInk
                         clip.Frames.Add(frame); bytes += frame.Png.Length;
                     }
                     if (clock.ElapsedMilliseconds >= 60000 || bytes >= 192L * 1024 * 1024) { clip.LimitReached = true; break; }
-                    if (!finish) await Task.Delay((int)Math.Max(1, 100 - (clock.ElapsedMilliseconds - at)), token).ConfigureAwait(false);
+                    nextFrame = Math.Max(nextFrame + interval, clock.Elapsed.TotalMilliseconds);
+                    if (!finish) await Task.Delay((int)Math.Max(1, Math.Ceiling(nextFrame - clock.Elapsed.TotalMilliseconds)), token).ConfigureAwait(false);
                 } while (!finish);
                 token.ThrowIfCancellationRequested();
                 clip.Duration = Math.Max(clip.Frames[clip.Frames.Count - 1].Time + 20, (int)clock.ElapsedMilliseconds);

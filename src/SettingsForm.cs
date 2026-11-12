@@ -28,6 +28,7 @@ namespace ShotInk
         private readonly TextBox folder;
         private readonly CheckBox ask;
         private readonly CheckBox startup;
+        private readonly NumericUpDown gifFps;
         private readonly Label error;
         private readonly Label[] shortcutStatus = new Label[6];
         private readonly Timer statusTimer;
@@ -41,12 +42,12 @@ namespace ShotInk
             this.shortcutAvailable = shortcutAvailable ?? delegate(Keys keys) { return Native.ShortcutAvailable(Handle, keys); };
             original = current; Text = "设置 · ShotInk"; AutoScaleMode = AutoScaleMode.Dpi;
             MainForm.UseAppIcon(this);
-            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(680, 698); MinimumSize = new Size(690, 726);
+            Font = new Font("Microsoft YaHei UI", 9); ClientSize = new Size(680, 732); MinimumSize = new Size(690, 760);
             StartPosition = FormStartPosition.CenterParent; MinimizeBox = false; MaximizeBox = false; FormBorderStyle = FormBorderStyle.FixedDialog;
             BackColor = Color.White;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 3, RowCount = 17 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-            foreach (int height in new[] { 38, 38, 38, 38, 38, 38, 35, 42, 34, 35, 34, 36, 0, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (int height in new[] { 38, 38, 38, 38, 38, 38, 35, 42, 34, 35, 34, 36, 34, 36, 34, 42, 50 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             capture = AddShortcut(layout, "区域截图", 0, current.CaptureShortcut);
             pin = AddShortcut(layout, "剪贴板贴图", 1, current.PinShortcut);
             scroll = AddShortcut(layout, "滚动长截图", 2, current.ScrollShortcut);
@@ -68,6 +69,10 @@ namespace ShotInk
             layout.Controls.Add(startup, 0, 10); layout.SetColumnSpan(startup, 3);
             var startupHint = new Label { Text = "登录 Windows 后自动启动并驻留托盘。移动程序后，请重新保存此设置。", Dock = DockStyle.Fill, ForeColor = Theme.Muted };
             layout.Controls.Add(startupHint, 0, 11); layout.SetColumnSpan(startupHint, 3);
+            layout.Controls.Add(new Label { Text = "GIF 默认每秒帧数", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 12);
+            gifFps = new NumericUpDown { Name = "gif-fps", Minimum = 1, Maximum = 50, Value = current.GifFramesPerSecond, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 3) };
+            layout.Controls.Add(gifFps, 1, 12);
+            layout.Controls.Add(new Label { Text = "1～50 帧 / 秒", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 2, 12);
             var version = new Label { Text = "当前版本 " + Application.ProductVersion + (BuildFeatures.Ocr ? " · 完整版" : " · 轻量版"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(version, 0, 13); layout.SetColumnSpan(version, 2);
             updateCheck = new Button { Name = "check-version", Text = "检查更新", Dock = DockStyle.Fill, Enabled = updates != null };
@@ -146,6 +151,7 @@ namespace ShotInk
         {
             var candidate = original.Clone(); candidate.CaptureShortcut = capture.ShortcutValue; candidate.PinShortcut = pin.ShortcutValue; candidate.ScrollShortcut = scroll.ShortcutValue;
             candidate.QuickCopyShortcut = quickCopy.ShortcutValue; candidate.QuickEditShortcut = quickEdit.ShortcutValue; candidate.FullScreenShortcut = fullScreen.ShortcutValue;
+            candidate.GifFramesPerSecond = (int)gifFps.Value;
             candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.Validate(); return candidate;
         }
     }
