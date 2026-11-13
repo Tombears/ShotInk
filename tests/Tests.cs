@@ -19,6 +19,7 @@ namespace ShotInk
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                System.Threading.Tasks.Task.Run(new Action(UpdatePartsTests.Run)).GetAwaiter().GetResult();
                 if (args.Length == 1 && args[0] == "--slider-tests")
                 { Run("expanded slider thumbs stay under the pointer with clean rounded corners", TestOvalSlider); return 0; }
                 if (args.Length == 1 && args[0] == "--stitch-tests")

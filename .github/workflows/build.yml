@@ -24,6 +24,8 @@ jobs:
       - name: Build and test
         shell: powershell
         run: ./build.ps1 -Test
+      - name: Check segmented package publishing
+        run: python tests/PublishGitee.Tests.py
       - name: Check real OCR and character coordinates
         run: python tests/ocr-benchmark.py --host dist/ocr/ShotInk.OcrHost.exe
       - name: Extract ZIP and check packaged OCR

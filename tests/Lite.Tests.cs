@@ -14,6 +14,7 @@ namespace ShotInk
             try
             {
                 Native.EnableDpiAwareness(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+                System.Threading.Tasks.Task.Run(new Action(UpdatePartsTests.Run)).GetAwaiter().GetResult();
                 if (args.Length == 2 && args[0] == "--update-live")
                 {
                     var info = UpdateService.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();

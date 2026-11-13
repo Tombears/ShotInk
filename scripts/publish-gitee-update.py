@@ -8,6 +8,7 @@ import argparse, base64, ctypes, hashlib, json, os, pathlib, re, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPOSITORY = 'clear_wind_and_rain/ShotInk'
 API = 'https://gitee.com/api/v5/repos/' + REPOSITORY
+MAX_ATTACHMENT_SIZE = 99_000_000
 
 def saved_token():
     token = os.environ.get('GITEE_TOKEN')
@@ -94,7 +95,20 @@ def package_info(path, flavor, version, notes):
     digest = hashlib.sha256(raw).hexdigest()
     url = 'https://gitee.com/' + REPOSITORY + '/releases/download/v' + version + '/' + name
     index = dict(version=version, revision=revision, sha256=digest, size=len(raw), url=url, notes=notes)
-    return dict(name=name, raw=raw, index=index, index_name='latest-lite.json' if flavor == 'lite' else 'latest.json')
+    attachments = [dict(name=name, raw=raw, index=index, package=name)]
+    if len(raw) > MAX_ATTACHMENT_SIZE:
+        middle = (len(raw) + 1) // 2
+        if middle > MAX_ATTACHMENT_SIZE:
+            raise RuntimeError('The portable ZIP exceeds the capacity of two Gitee parts.')
+        attachments = []
+        index['parts'] = []
+        for number, chunk in enumerate((raw[:middle], raw[middle:]), 1):
+            suffix = '.' + str(number).zfill(3)
+            part = dict(url=url + suffix, size=len(chunk), sha256=hashlib.sha256(chunk).hexdigest())
+            pathlib.Path(path).with_name(name + suffix).write_bytes(chunk)
+            index['parts'].append(part)
+            attachments.append(dict(name=name + suffix, raw=chunk, index=part, package=name))
+    return dict(name=name, index=index, attachments=attachments, index_name='latest-lite.json' if flavor == 'lite' else 'latest.json')
 
 def main():
     parser = argparse.ArgumentParser()
@@ -105,6 +119,7 @@ def main():
     tag = 'v' + version
     notes = (ROOT / 'releases' / (tag + '.md')).read_text(encoding='utf-8')
     packages = [package_info(args.archive, 'ocr', version, notes), package_info(args.lite_archive, 'lite', version, notes)]
+    attachments = [attachment for package in packages for attachment in package['attachments']]
     token = saved_token()
     release = request('/releases/tags/' + tag, token)
     metadata = {'tag_name': tag, 'name': version, 'body': notes, 'prerelease': 'false'}
@@ -114,13 +129,14 @@ def main():
     files_path = '/releases/' + str(release['id']) + '/attach_files'
     assets = request(files_path + '?per_page=100', token) or []
     backups, changed = {}, []
-    for package in packages:
+    for package in attachments:
         existing = next((asset for asset in assets if asset['name'] == package['name']), None)
         previous = request(package['index']['url'], binary=True) if existing else None
         if existing and previous is None: raise RuntimeError('Cannot back up the existing Gitee package.')
         backups[package['name']] = (existing, previous)
     try:
-        for package in packages:
+        verified = {package['name']: hashlib.sha256() for package in packages}
+        for package in attachments:
             name, index = package['name'], package['index']
             existing, previous = backups[name]
             if previous is None or hashlib.sha256(previous).hexdigest() != index['sha256']:
@@ -132,6 +148,10 @@ def main():
             check = request(index['url'] + '?verify=' + uuid.uuid4().hex, binary=True)
             if check is None or hashlib.sha256(check).hexdigest() != index['sha256']:
                 raise RuntimeError('Anonymous Gitee download checksum mismatch: ' + name)
+            verified[package['package']].update(check)
+        for package in packages:
+            if verified[package['name']].hexdigest() != package['index']['sha256']:
+                raise RuntimeError('Reassembled Gitee package checksum mismatch: ' + package['name'])
         form('/releases/' + str(release['id']), token, 'PATCH', metadata)
     except Exception:
         for package in reversed(changed):

@@ -88,7 +88,8 @@ namespace ShotInk
                 finally { if (!IsDisposed) { busy = false; action.Enabled = check.Enabled = true; } }
                 return;
             }
-            busy = true; check.Enabled = action.Enabled = false; progress.Visible = true; progress.Value = 0; status.Text = "正在下载并校验更新包…";
+            busy = true; check.Enabled = action.Enabled = false; progress.Visible = true; progress.Value = 0;
+            status.Text = info.Parts == null ? "正在下载并校验更新包…" : "正在分段下载、合并并校验更新包…";
             try
             {
                 var downloadProgress = new Progress<int>(delegate(int value) { if (!IsDisposed) progress.Value = value; });

@@ -26,6 +26,7 @@ namespace ShotInk
         [DataMember(Name = "size")] internal long Size;
         [DataMember(Name = "url")] internal string Url;
         [DataMember(Name = "notes")] internal string Notes;
+        [DataMember(Name = "parts", EmitDefaultValue = false)] internal UpdatePart[] Parts;
         internal void Validate()
         {
             System.Version version;
@@ -35,6 +36,20 @@ namespace ShotInk
             if (!Uri.TryCreate(Url, UriKind.Absolute, out uri) || uri.Scheme != "https" || uri.Host != "gitee.com" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 ||
                 !uri.AbsolutePath.StartsWith("/clear_wind_and_rain/ShotInk/releases/download/", StringComparison.Ordinal) || !uri.AbsolutePath.EndsWith("/" + BuildFeatures.Archive, StringComparison.Ordinal))
                 throw new InvalidDataException("更新下载地址不是受信任的 ShotInk 便携包。");
+            if (Parts != null)
+            {
+                if (Parts.Length < 2 || Parts.Length > 16) throw new InvalidDataException("更新分段数量无效。");
+                long total = 0;
+                for (int index = 0; index < Parts.Length; index++)
+                {
+                    var part = Parts[index];
+                    if (part == null || part.Size < 1 || part.Size > 100L * 1024 * 1024 || !Hash(part.Sha256) ||
+                        part.Url != Url + "." + (index + 1).ToString("000", System.Globalization.CultureInfo.InvariantCulture))
+                        throw new InvalidDataException("更新分段信息无效。");
+                    total += part.Size;
+                }
+                if (total != Size) throw new InvalidDataException("更新分段总大小不一致。");
+            }
         }
         private static bool Hash(string value) { return value != null && value.Length == 64 && value.All(Uri.IsHexDigit); }
         internal bool IsNewer(string installedVersion, string installedRevision)
@@ -64,7 +79,7 @@ namespace ShotInk
         internal string Folder, PlanPath, HelperPath;
         internal UpdateInfo Info;
     }
-    internal static class UpdateService
+    internal static partial class UpdateService
     {
         internal const string IndexUrl = "https://gitee.com/api/v5/repos/clear_wind_and_rain/ShotInk/contents/updates/" + BuildFeatures.Index + "?ref=main";
         internal static string CacheRoot { get { return Directory.Exists(@"E:\DevData") ? @"E:\DevData\ShotInk\updates" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShotInk-updates"); } }
@@ -165,8 +180,11 @@ namespace ShotInk
             string archive = Path.Combine(folder, "ShotInk-portable.zip");
             try
             {
-                using (var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
-                    await FetchAsync(info.Url, output, info.Size, token, progress).ConfigureAwait(false);
+                await DownloadArchiveAsync(info, archive, token, progress, async delegate(UpdatePart part, string path, IProgress<int> partProgress)
+                {
+                    using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
+                        await FetchAsync(part.Url, output, part.Size, token, partProgress).ConfigureAwait(false);
+                }).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token).ConfigureAwait(false);
             }
@@ -178,7 +196,11 @@ namespace ShotInk
             string archive = Path.Combine(folder, "ShotInk-portable.zip");
             try
             {
-                using (var browser = new GiteeBrowserForm(info, archive, progress)) await browser.RunAsync(owner, token);
+                await DownloadArchiveAsync(info, archive, token, progress, async delegate(UpdatePart part, string path, IProgress<int> partProgress)
+                {
+                    var download = new UpdateInfo { Url = part.Url, Size = part.Size };
+                    using (var browser = new GiteeBrowserForm(download, path, partProgress)) await browser.RunAsync(owner, token);
+                });
                 token.ThrowIfCancellationRequested();
                 return await Task.Run(delegate { return Prepare(archive, info, target, folder, System.Diagnostics.Process.GetCurrentProcess().Id, token); }, token);
             }
@@ -191,6 +213,9 @@ namespace ShotInk
             {
                 string root = Path.GetFullPath(folder);
                 File.Delete(SafePath(root, "ShotInk-portable.zip"));
+                if (Directory.Exists(root))
+                    foreach (string part in Directory.GetFiles(root, "ShotInk-portable.zip.???"))
+                        if (System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(part), @"^ShotInk-portable\.zip\.\d{3}$")) File.Delete(part);
                 string payload = SafePath(root, "payload");
                 if (Directory.Exists(payload)) Directory.Delete(payload, true);
             }
