@@ -102,7 +102,7 @@ namespace ShotInk
             using (var image = ToolAppearance.RenderSmooth(new Size(160, 160), delegate(Graphics circle)
             {
                 using (var fill = new SolidBrush(Color.FromArgb(102, 18, 20, 25))) circle.FillEllipse(fill, 1, 1, 158, 158);
-                using (var font = new Font(Font.FontFamily, 64, FontStyle.Bold))
+                using (var font = new Font(ToolAppearance.Font.FontFamily, 64, FontStyle.Bold))
                 using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                     circle.DrawString(recordingCountdownValue.ToString(), font, Brushes.White, new RectangleF(0, 0, 160, 160), format);
             })) graphics.DrawImageUnscaled(image, at);
