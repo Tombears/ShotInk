@@ -12,7 +12,7 @@ namespace ShotInk
         private bool recordingOptionsPlaced;
         private int recordingCountdownValue;
         private ToolOptionButton recordMicrophone, recordSpeaker, recordPointer;
-        private readonly ToolTip recordingTip = new ToolTip { IsBalloon = true, ToolTipTitle = "录屏设置" };
+        private readonly ToolTip recordingTip = new ToolTip();
         private async void StartVideoFromKey() { await CaptureVideoAsync(); }
         private void PrepareVideoCapture()
         {
@@ -20,12 +20,12 @@ namespace ShotInk
             videoMode = true; toolbar.SelectTool(DrawTool.None); toolbar.Hide();
             if (recordingOptions == null)
             {
-                recordingOptions = new RecordingSurface { Name = "recording-options", Size = new Size(276, 44) };
+                recordingOptions = new RecordingSurface { Name = "recording-options", Size = new Size(204, 30) };
                 AddRecordingDragHandle(recordingOptions, delegate { recordingOptionsPlaced = true; });
-                recordMicrophone = RecordingSwitch("microphone", "麦克风", 30, settings.RecordMicrophone);
-                recordSpeaker = RecordingSwitch("speaker", "系统声音", 68, settings.RecordSpeaker);
-                recordPointer = RecordingSwitch("pointer", "鼠标指针", 106, settings.RecordPointer);
-                var start = new ToolOptionButton { Text = "开始录屏", Location = new Point(148, 6), Size = new Size(122, 32),
+                recordMicrophone = RecordingSwitch("microphone", "麦克风", 18, settings.RecordMicrophone);
+                recordSpeaker = RecordingSwitch("speaker", "系统声音", 46, settings.RecordSpeaker);
+                recordPointer = RecordingSwitch("pointer", "鼠标指针", 74, settings.RecordPointer);
+                var start = new ToolOptionButton { Text = "开始录屏", Location = new Point(106, 2), Size = new Size(96, 26),
                     AccentColor = ToolAppearance.Accent("video"), Selected = true };
                 start.Click += async delegate { await CaptureVideoAsync(); };
                 recordingOptions.Controls.Add(start); Controls.Add(recordingOptions);
@@ -36,7 +36,7 @@ namespace ShotInk
         {
             var toggle = new ToolOptionButton {
                 Name = "record-" + icon, IconName = icon, Selected = value,
-                Location = new Point(left, 6), Size = new Size(32, 32),
+                Location = new Point(left, 2), Size = new Size(26, 26),
                 AccentColor = value ? ToolAppearance.Accent("copy") : ToolAppearance.Muted,
                 AccessibleName = label, AccessibleRole = AccessibleRole.CheckButton,
                 AccessibleDescription = value ? "已开启" : "已关闭"
@@ -59,7 +59,7 @@ namespace ShotInk
             for (int index = 0; index < controls.Length; index++)
             {
                 if (IsDisposed || videoStarting || !videoMode) { recordingGuideRunning = false; return; }
-                recordingTip.Show(messages[index], controls[index], 0, -54, 2800); await Task.Delay(2900);
+                recordingTip.Show(messages[index], controls[index], 0, controls[index].Height + 4, 2800); await Task.Delay(2900);
             }
             if (IsDisposed) return;
             settings.RecordingGuideSeen = true; recordingGuideRunning = false; settings.NotifyChanged();
@@ -78,7 +78,7 @@ namespace ShotInk
         {
             var image = ToolbarIcons.Create("grip");
             var grip = new Label { Name = "recording-drag", Image = image,
-                BackColor = Color.White, Cursor = Cursors.SizeAll, Location = new Point(5, 9), Size = new Size(20, 26), AccessibleName = "拖动录屏功能条" };
+                BackColor = Color.White, Cursor = Cursors.SizeAll, Location = new Point(1, 2), Size = new Size(14, 26), AccessibleName = "拖动录屏功能条" };
             Point anchor = Point.Empty;
             grip.MouseDown += delegate(object sender, MouseEventArgs args) {
                 if (args.Button != MouseButtons.Left) return;
@@ -127,14 +127,16 @@ namespace ShotInk
                     await Task.Delay(1000); if (IsDisposed) return;
                 }
                 recordingCountdownValue = 0; Invalidate(); Update();
-                recordingNavigation = new RecordingSurface { Name = "recording-navigation", Size = new Size(314, 46) };
+                recordingNavigation = new RecordingSurface { Name = "recording-navigation", Size = new Size(276, 30) };
                 AddRecordingDragHandle(recordingNavigation, UpdateRecordingRegion);
                 var pause = new ToolOptionButton { IconName = "pause", AccessibleName = "暂停录屏",
-                    AccentColor = ToolAppearance.Accent("copy"), Location = new Point(28, 7), Size = new Size(32, 32) };
-                var time = new Label { Text = "00:00:00 / 00:01:00", ForeColor = ToolAppearance.Accent("copy"), BackColor = Color.White, Location = new Point(68, 15), AutoSize = true };
-                var stop = new ToolOptionButton { Text = "结束录制", Location = new Point(218, 7), Size = new Size(88, 32),
+                    AccentColor = ToolAppearance.Accent("copy"), Location = new Point(18, 2), Size = new Size(26, 26) };
+                var time = new Label { Text = "00:00:00 / 00:01:00", ForeColor = ToolAppearance.Accent("copy"), BackColor = Color.White, Location = new Point(48, 7), AutoSize = true };
+                var stop = new ToolOptionButton { Text = "结束录制", Location = new Point(192, 2), Size = new Size(82, 26),
                     AccentColor = ToolAppearance.Accent("video"), Selected = true };
                 bool paused = false;
+                recordingTip.SetToolTip(pause, "暂停 / 继续录屏");
+                recordingTip.SetToolTip(stop, "结束录制 (Esc)");
                 pause.Click += delegate { paused = !paused; session.SetPaused(paused); pause.IconName = paused ? "play" : "pause"; pause.Invalidate(); pause.AccessibleName = paused ? "继续录屏" : "暂停录屏"; };
                 stop.Click += delegate { pause.Enabled = stop.Enabled = false; session.Finish(); };
                 recordingNavigation.Controls.AddRange(new Control[] { pause, time, stop }); Controls.Add(recordingNavigation);

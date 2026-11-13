@@ -93,6 +93,19 @@ namespace ShotInk
         }
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == 0x000F)
+            {
+                // Keep disjoint crosshair strips separate through buffering and the final blit.
+                // Their bounding rectangle can cover every monitor on each mouse move.
+                var previous = paintDamage;
+                using (var damage = CapturePaintDamage())
+                {
+                    paintDamage = damage;
+                    try { base.WndProc(ref message); }
+                    finally { paintDamage = previous; }
+                }
+                return;
+            }
             if (message.Msg == 0x020A && scrollWheel != null)
             { scrollWheel.QueueWheel(unchecked((short)(message.WParam.ToInt64() >> 16))); return; }
             if (message.Msg == Native.HotKeyMessage && message.WParam.ToInt32() == 1001 && (scrollSession != null || gifSession != null)) { Close(); return; }

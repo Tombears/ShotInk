@@ -12,7 +12,7 @@ namespace ShotInk
                 ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Color.Transparent;
             Font = ToolAppearance.Font;
-            Padding = new Padding(6);
+            Padding = new Padding(2);
         }
         protected override void OnPaintBackground(PaintEventArgs e)
         {
@@ -27,7 +27,7 @@ namespace ShotInk
             }
             ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics)
             {
-                using (var path = ToolAppearance.Rounded(new RectangleF(.5F, .5F, Width - 1, Height - 1), 9))
+                using (var path = ToolAppearance.Rounded(new RectangleF(.5F, .5F, Width - 1, Height - 1), 6))
                 using (var fill = new SolidBrush(Color.White))
                 using (var border = new Pen(ToolAppearance.Border))
                 {

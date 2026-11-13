@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace ShotInk
 {
@@ -11,6 +13,31 @@ namespace ShotInk
         private Font pointerHintFont;
         private SizeF pointerHintSize;
         private long lastPointerPaint;
+        private Region paintDamage;
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr handle);
+        [DllImport("user32.dll")] private static extern int GetUpdateRgn(IntPtr window, IntPtr region, bool erase);
+        private Region CapturePaintDamage()
+        {
+            var handle = CreateRectRgn(0, 0, 0, 0);
+            if (handle == IntPtr.Zero) return null;
+            try { return GetUpdateRgn(Handle, handle, false) > 1 ? Region.FromHrgn(handle) : null; }
+            finally { DeleteObject(handle); }
+        }
+        private readonly Dictionary<string, Bitmap> pointerHints = new Dictionary<string, Bitmap>();
+        private Bitmap PointerHintImage(string text)
+        {
+            Bitmap image;
+            if (pointerHints.TryGetValue(text, out image)) return image;
+            image = new Bitmap(PointerHintBounds(Point.Empty).Width, PointerHintBounds(Point.Empty).Height, PixelFormat.Format32bppPArgb);
+            using (var graphics = Graphics.FromImage(image))
+            {
+                graphics.Clear(Color.FromArgb(235, 26, 34, 51));
+                graphics.DrawString(text, pointerHintFont, Brushes.White, 10, 6);
+            }
+            pointerHints.Add(text, image);
+            return image;
+        }
         private void EnsurePaintCache()
         {
             if (shadedDesktop != null) return;
@@ -43,11 +70,19 @@ namespace ShotInk
             dirty.Union(new Rectangle(0, at.Y - 2, Width, 5));
             dirty.Union(PointerHintBounds(new Point(at.X + 18, at.Y + 24)));
         }
-        private void InvalidatePointer(Point previous)
+        private void InvalidatePointer(Point previous, Rectangle previousSelection)
         {
             EnsurePaintCache();
             using (var dirty = new Region(Rectangle.Empty))
-            { AddPointerDamage(dirty, previous); AddPointerDamage(dirty, pointer); Invalidate(dirty, false); }
+            {
+                AddPointerDamage(dirty, previous); AddPointerDamage(dirty, pointer);
+                if (previousSelection != selection)
+                {
+                    using (var changed = new Region(previousSelection)) { changed.Xor(selection); dirty.Union(changed); }
+                    AddSelectionBorder(dirty, previousSelection); AddSelectionBorder(dirty, selection);
+                }
+                Invalidate(dirty, false);
+            }
             PaintPointerFrame();
         }
         private static void AddSelectionBorder(Region dirty, Rectangle bounds)
@@ -85,6 +120,8 @@ namespace ShotInk
         {
             if (shadedDesktop != null) { shadedDesktop.Dispose(); shadedDesktop = null; }
             if (pointerHintFont != null) { pointerHintFont.Dispose(); pointerHintFont = null; }
+            foreach (var image in pointerHints.Values) image.Dispose();
+            pointerHints.Clear();
         }
     }
 }

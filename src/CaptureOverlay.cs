@@ -58,8 +58,7 @@ namespace ShotInk
             Bounds = screenBounds;
             TopMost = true;
             ShowInTaskbar = false;
-            DoubleBuffered = true;
-            SetStyle(ControlStyles.Opaque, true);
+            SetStyle(ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
             KeyPreview = true;
             Cursor = Cursors.Cross;
             sizeHint = new Label { AutoSize = true, ForeColor = Color.White, BackColor = Color.FromArgb(25, 28, 33),
@@ -100,16 +99,32 @@ namespace ShotInk
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            var g = e.Graphics;
+            if (paintDamage == null) { PaintOverlay(e.Graphics); return; }
+            using (var transform = new Matrix())
+            foreach (var scan in paintDamage.GetRegionScans(transform))
+            {
+                var bounds = Rectangle.Intersect(Rectangle.Ceiling(scan), e.ClipRectangle);
+                if (bounds.IsEmpty) continue;
+                using (var buffer = BufferedGraphicsManager.Current.Allocate(e.Graphics, bounds))
+                {
+                    buffer.Graphics.SetClip(bounds);
+                    PaintOverlay(buffer.Graphics);
+                    buffer.Render();
+                }
+            }
+        }
+        private void PaintOverlay(Graphics g)
+        {
             EnsurePaintCache();
-            g.DrawImage(shadedDesktop, e.ClipRectangle, e.ClipRectangle, GraphicsUnit.Pixel);
+            g.DrawImageUnscaled(shadedDesktop, Point.Empty);
             if (dragging && dragMode == -3) { PaintFreeStroke(g); return; }
             if (selection.Width > 0 && selection.Height > 0)
             {
                 var surfaceState = g.Save();
                 if (selectionOutline != null)
                     using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) g.SetClip(outline, CombineMode.Intersect);
-                g.DrawImage(desktop, selection, selection, GraphicsUnit.Pixel);
+                g.SetClip(selection, CombineMode.Intersect);
+                g.DrawImageUnscaled(desktop, Point.Empty);
                 if (dragging && longDragPreview != null) g.DrawImageUnscaled(longDragPreview, selection.Location);
                 if (dragging && ready && canvas != null && longViewport == null)
                 {
@@ -150,8 +165,7 @@ namespace ShotInk
         private void DrawHint(Graphics g, string text, Point at)
         {
             var hint = PointerHintBounds(at);
-            using (var brush = new SolidBrush(Color.FromArgb(235, 26, 34, 51))) g.FillRectangle(brush, hint);
-            g.DrawString(text, pointerHintFont, Brushes.White, hint.X + 10, hint.Y + 6);
+            g.DrawImageUnscaled(PointerHintImage(text), hint.Location);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -228,8 +242,7 @@ namespace ShotInk
             else if (!ready && previousPointer != pointer)
             {
                 selection = scrolling || freeSelectionMode ? Rectangle.Empty : WindowSelectionAt(pointer);
-                if (previousSelection != selection) Invalidate();
-                InvalidatePointer(previousPointer);
+                InvalidatePointer(previousPointer, previousSelection);
             }
         }
 

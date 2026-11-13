@@ -133,6 +133,7 @@ namespace ShotInk
         }
         private static void TestVideoTools()
         {
+            TestAudioTrack();
             Assert(File.Exists(VideoExport.EncoderPath), "Recording encoder was omitted from the test output.");
             var settings = new AppSettings { RecordSpeaker = false, RecordingGuideSeen = true };
             var desktop = new Bitmap(640, 480);
@@ -147,6 +148,11 @@ namespace ShotInk
                 Assert(!Field<bool>(overlay, "ready"), "Recording must allow a fresh region selection.");
                 overlay.SelectRegion(new Rectangle(40, 80, 320, 180)); Application.DoEvents();
                 Assert(Field<Panel>(overlay, "recordingOptions").Visible && !Field<CaptureToolbar>(overlay, "toolbar").Visible, "Recording selection controls are missing.");
+                Assert(Field<Panel>(overlay, "recordingOptions").Height == bar.Height, "Recording toolbar height differs from the capture toolbar.");
+                var tips = Field<ToolTip>(overlay, "recordingTip");
+                Assert(!tips.IsBalloon && tips.ToolTipTitle.Length == 0, "Recording tips must use the standard tooltip style.");
+                foreach (Control control in Field<Panel>(overlay, "recordingOptions").Controls)
+                    Assert(control.Bounds.Bottom <= 30 && control.Bounds.Right <= 204, "Recording controls overflow their compact toolbar.");
                 Assert(Field<Panel>(overlay, "recordingOptions").Top > 260 && overlay.Controls.Find("recording-drag", true).Length == 1, "Recording options should start below the region and provide a drag handle.");
                 Field<AnnotationCanvas>(overlay, "canvas").Hide();
                 overlay.GetType().GetField("recordingCountdownValue", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(overlay, 3);
@@ -165,6 +171,13 @@ namespace ShotInk
                     stop.Tick += delegate
                     {
                         var session = Field<GifCaptureSession>(overlay, "gifSession");
+                        var navigation = Field<Panel>(overlay, "recordingNavigation");
+                        if (navigation != null)
+                        {
+                            Assert(navigation.Height == 30, "Recording navigation must match the capture toolbar height.");
+                            foreach (Control control in navigation.Controls)
+                                Assert(control.Bounds.Bottom <= navigation.Height && control.Bounds.Right <= navigation.Width, "Recording navigation controls overlap the edge.");
+                        }
                         if (session != null && session.Elapsed > 200) { stop.Stop(); session.Finish(); }
                     };
                     stop.Start(); var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -201,6 +214,35 @@ namespace ShotInk
                 editor.Close();
             }
             Console.WriteLine("PASS video entry, selection, pause timing, audio-aware segment deletion, MP4 export and undo");
+        }
+        private sealed class TestAudioInput : NAudio.Wave.IWaveIn
+        {
+            public NAudio.Wave.WaveFormat WaveFormat { get; set; }
+            public event EventHandler<NAudio.Wave.WaveInEventArgs> DataAvailable;
+            public event EventHandler<NAudio.Wave.StoppedEventArgs> RecordingStopped;
+            internal byte[] Samples;
+            internal bool Disposed;
+            public void StartRecording() { DataAvailable(this, new NAudio.Wave.WaveInEventArgs(Samples, Samples.Length)); }
+            public void StopRecording() { RecordingStopped(this, new NAudio.Wave.StoppedEventArgs()); }
+            public void Dispose() { Disposed = true; }
+        }
+        private static void TestAudioTrack()
+        {
+            foreach (var format in new[] { new NAudio.Wave.WaveFormat(16000, 16, 1), NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2) })
+            using (var media = new RecordingMedia())
+            {
+                var device = new TestAudioInput { WaveFormat = format, Samples = new byte[format.AverageBytesPerSecond / 5] };
+                for (int index = 0; index < device.Samples.Length; index++) device.Samples[index] = (byte)(index % 127);
+                typeof(RecordingMedia).GetMethod("AddTrack", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(media, new object[] { device, "input.wav" });
+                Wait(media.StopAudio());
+                using (var reader = new NAudio.Wave.WaveFileReader(media.AudioPaths.Single()))
+                {
+                    Assert(reader.WaveFormat.SampleRate == format.SampleRate && reader.WaveFormat.Channels == format.Channels && reader.WaveFormat.Encoding == format.Encoding, "Capture changed the native input format.");
+                    var captured = new byte[device.Samples.Length];
+                    Assert(reader.Read(captured, 0, captured.Length) == captured.Length && captured.SequenceEqual(device.Samples), "Captured microphone packets were lost or altered.");
+                }
+                Assert(device.Disposed, "Stopped audio input was not released.");
+            }
         }
         internal static void Run()
         {

@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using NAudio.Wave;
+using NAudio.CoreAudioApi;
 
 namespace ShotInk
 {
@@ -28,7 +29,7 @@ namespace ShotInk
             {
                 if (microphone)
                 {
-                    try { AddTrack(new WaveInEvent { WaveFormat = new WaveFormat(48000, 16, 1), BufferMilliseconds = 20 }, "microphone.wav"); }
+                    try { AddTrack(new WasapiCapture(), "microphone.wav"); }
                     catch (Exception error) { throw new InvalidOperationException("无法打开麦克风，请检查 Windows 默认输入设备及麦克风权限，或关闭麦克风开关后重试。", error); }
                 }
                 if (speaker)
@@ -36,14 +37,16 @@ namespace ShotInk
                     try { AddTrack(new WasapiLoopbackCapture(), "speaker.wav"); }
                     catch (Exception error) { throw new InvalidOperationException("无法打开系统声音，请检查 Windows 默认输出设备，或关闭扬声器开关后重试。", error); }
                 }
-                foreach (var track in tracks) track.Start();
             }
             catch { Dispose(); throw; }
         }
         private void AddTrack(IWaveIn device, string name)
         {
             string path = Path.Combine(DirectoryPath, name);
-            tracks.Add(new AudioTrack(device, path)); AudioPaths.Add(path);
+            var track = new AudioTrack(device, path);
+            tracks.Add(track);
+            track.Start();
+            AudioPaths.Add(path);
         }
         internal async Task StopAudio()
         { foreach (var track in tracks) { await track.Stop(); track.Dispose(); } tracks.Clear(); }

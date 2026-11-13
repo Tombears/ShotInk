@@ -328,11 +328,11 @@ namespace ShotInk
                     Check(feedback != null && feedback.Visible, "Quick copy omitted success feedback");
                     Check(Native.GetForegroundWindow() != feedback.Handle && !feedback.ContainsFocus, "Success feedback stole focus: foreground=" + Native.GetForegroundWindow() + " toast=" + feedback.Handle + " focused=" + feedback.ContainsFocus);
                     Wait(delegate { return feedback.IsDisposed; });
-                    Call(home, "BeginQuickCapture", false); Wait(delegate { return Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay && f.Visible); });
+                    Call(home, "BeginQuickCapture", false); Wait(delegate { return Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Any(f => f.Visible && Field<bool>(f, "ready")); });
                     var editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
                     Check(Field<bool>(editor, "ready") && Field<Rectangle>(editor, "selection").Size == region.Size, "Quick edit did not open the previous selection");
                     editor.Close();
-                    Call(home, "BeginFullScreenCapture"); Wait(delegate { return Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay && f.Visible); });
+                    Call(home, "BeginFullScreenCapture"); Wait(delegate { return Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Any(f => f.Visible && Field<bool>(f, "ready")); });
                     editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
                     Check(Field<Rectangle>(editor, "selection") == new Rectangle(Point.Empty, screen.Size), "Full screen did not include every display: " + Field<Rectangle>(editor, "selection") + " expected " + screen);
                     editor.Close();

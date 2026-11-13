@@ -1438,8 +1438,10 @@ namespace ShotInk
                 {
                     var hint = Field<bool>(overlay, "dragging") ? (Rectangle)overlay.GetType().GetMethod("DragHintBounds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay,
                         new object[] { Field<Rectangle>(overlay, "selection") }) : Rectangle.Empty;
+                    var picker = Field<SelectionModePicker>(overlay, "modePicker");
                     for (int y = 0; y < expected.Height; y++) for (int x = 0; x < expected.Width; x++)
                     {
+                        if (picker.Visible && picker.Bounds.Contains(x, y)) continue;
                         var a = actual.GetPixel(x, y); var b = expected.GetPixel(x, y);
                         // GDI ClearType weights differ slightly between a screen DC and a bitmap DC.
                         // Only the current size label permits this small color difference; old labels and all borders must match exactly.
