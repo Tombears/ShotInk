@@ -289,7 +289,16 @@ namespace ShotInk
         {
             internal ToolbarGrip() { SetStyle(ControlStyles.SupportsTransparentBackColor, true); BackColor = Color.Transparent; }
             protected override void OnPaint(PaintEventArgs e)
-            { ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics) { using (var brush = new SolidBrush(ToolAppearance.Muted)) for (int x = 4; x <= 10; x += 6) for (int y = 6; y <= 22; y += 5) graphics.FillEllipse(brush, x, y, 2, 2); }); }
+            {
+                if (Skins.Current.Kind != SkinKind.Classic)
+                {
+                    using (var image = ToolbarIcons.Create("grip"))
+                        e.Graphics.DrawImageUnscaled(image, (Width - image.Width) / 2, (Height - image.Height) / 2);
+                    return;
+                }
+                ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics)
+                { using (var brush = new SolidBrush(ToolAppearance.Muted)) for (int x = 4; x <= 10; x += 6) for (int y = 6; y <= 22; y += 5) graphics.FillEllipse(brush, x, y, 2, 2); });
+            }
         }
         private sealed class ToolbarRenderer : ToolStripProfessionalRenderer
         {
