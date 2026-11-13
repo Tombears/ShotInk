@@ -24,7 +24,6 @@ namespace ShotInk
                 if (args.Length == 1 && args[0] == "--text-tests") { TestTransparentTextInput(); return 0; }
                 if (args.Length == 1 && args[0] == "--skin-tests") { SkinTests.Run(); return 0; }
                 if (args.Length == 2 && args[0] == "--skin-previews") { SkinTests.Previews(args[1]); return 0; }
-                SkinTests.Run();
                 if (args.Length == 1 && args[0] == "--slider-tests")
                 { Run("expanded slider thumbs stay under the pointer with clean rounded corners", TestOvalSlider); return 0; }
                 if (args.Length == 1 && args[0] == "--stitch-tests")
@@ -78,6 +77,7 @@ namespace ShotInk
                     return 0;
                 }
                 if (args.Length == 1 && args[0] == "--capture-tests") { CaptureWorkflowTests.Run(); return 0; }
+                SkinTests.Run();
                 CaptureWorkflowTests.Run();
                 Run("renamed app preserves existing history and settings", TestDataRoot);
                 Run("several scroll offsets reconstruct the original pixels", TestStitch);
