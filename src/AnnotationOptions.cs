@@ -31,7 +31,7 @@ namespace ShotInk
             WrapContents = false;
             Margin = Padding.Empty;
             Padding = new Padding(7, 3, 7, 3);
-            BackColor = Color.White;
+            BackColor = Skins.Current.Surface;
             Font = ToolAppearance.Font;
             ForeColor = ToolAppearance.Ink;
         }
@@ -164,7 +164,7 @@ namespace ShotInk
         private FlowLayoutPanel Row()
         {
             var row = new FlowLayoutPanel { Height = 28, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                WrapContents = false, Margin = new Padding(0, 0, 3, 0), Padding = Padding.Empty, BackColor = Color.White };
+                WrapContents = false, Margin = new Padding(0, 0, 3, 0), Padding = Padding.Empty, BackColor = Skins.Current.Surface };
             if (currentTool == DrawTool.Mosaic || currentTool == DrawTool.Eraser) row.Padding = new Padding(0, 5, 0, 0);
             Controls.Add(row); return row;
         }

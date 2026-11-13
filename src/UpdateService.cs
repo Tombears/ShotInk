@@ -245,20 +245,50 @@ namespace ShotInk
             info.Validate();
             if (new FileInfo(archive).Length != info.Size || !string.Equals(Digest(archive), info.Sha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("更新包校验失败，请重新下载。");
             string payload = Path.Combine(folder, "payload"); Directory.CreateDirectory(payload);
-            var files = new List<UpdateFile>(); var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); long expanded = 0;
-            using (var zip = ZipFile.OpenRead(archive)) foreach (var entry in zip.Entries)
+            var files = new List<UpdateFile>(); var indexes = new List<int>();
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); long expanded = 0;
+            using (var zip = ZipFile.OpenRead(archive))
+            for (int index = 0; index < zip.Entries.Count; index++)
             {
-                token.ThrowIfCancellationRequested(); string name = entry.FullName.Replace('\\', '/'); string destination = SafePath(payload, name);
+                var entry = zip.Entries[index];
+                token.ThrowIfCancellationRequested(); string name = entry.FullName.Replace('\\', '/'); SafePath(payload, name);
                 if ((entry.ExternalAttributes & 0xF0000000) == 0xA0000000) throw new InvalidDataException("更新包不能包含符号链接。");
                 if (name.EndsWith("/", StringComparison.Ordinal)) continue;
                 if (!names.Add(name) || names.Count > 6000 || (expanded += entry.Length) > 1536L * 1024 * 1024) throw new InvalidDataException("更新包内容异常。");
                 string lower = name.ToLowerInvariant();
                 if (!BuildFeatures.Ocr && lower.StartsWith("ocr/")) throw new InvalidDataException("轻量版更新包不能包含 OCR 组件。");
                 if (lower.Contains("settings.ini") || lower.StartsWith("captures/") || lower.StartsWith("updates/")) throw new InvalidDataException("更新包不能覆盖用户设置或历史。");
-                Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                using (var input = entry.Open()) using (var output = new FileStream(destination, FileMode.CreateNew)) input.CopyTo(output);
-                files.Add(new UpdateFile { Path = name, Sha256 = Digest(destination) });
+                files.Add(new UpdateFile { Path = name }); indexes.Add(index);
             }
+            var options = new ParallelOptions { CancellationToken = token, MaxDegreeOfParallelism = Math.Min(4, Math.Max(1, Environment.ProcessorCount)) };
+            try
+            {
+                // ZipArchive streams are thread-affine. Each worker owns its reader.
+                Parallel.For(0, files.Count, options, delegate { return ZipFile.OpenRead(archive); },
+                    delegate(int index, ParallelLoopState state, ZipArchive zip)
+                    {
+                        var file = files[index]; var entry = zip.Entries[indexes[index]];
+                        string destination = SafePath(payload, file.Path);
+                        Directory.CreateDirectory(Path.GetDirectoryName(destination));
+                        using (var input = entry.Open())
+                        using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 131072, FileOptions.SequentialScan))
+                        using (var hash = SHA256.Create())
+                        {
+                            var buffer = new byte[131072]; int count; long written = 0;
+                            while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                token.ThrowIfCancellationRequested(); written += count;
+                                if (written > entry.Length) throw new InvalidDataException("更新包文件长度异常。");
+                                output.Write(buffer, 0, count); hash.TransformBlock(buffer, 0, count, buffer, 0);
+                            }
+                            if (written != entry.Length) throw new InvalidDataException("更新包文件未完整解压。");
+                            hash.TransformFinalBlock(new byte[0], 0, 0);
+                            file.Sha256 = BitConverter.ToString(hash.Hash).Replace("-", "");
+                        }
+                        return zip;
+                    }, delegate(ZipArchive zip) { zip.Dispose(); });
+            }
+            catch (AggregateException error) { throw error.Flatten().InnerExceptions[0]; }
             var requiredFiles = new List<string> { "ShotInk.exe", "ShotInk.build.sha256", "ShotInk.flavor", "update-portable.ps1", "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll" };
             if (BuildFeatures.Ocr) requiredFiles.Add("ocr/ShotInk.OcrHost.exe");
             foreach (string required in requiredFiles)

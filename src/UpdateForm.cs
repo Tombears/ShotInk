@@ -39,8 +39,8 @@ namespace ShotInk
             notesPanel.SizeChanged += delegate { notes.MaximumSize = new Size(Math.Max(80, notesPanel.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4), 0); };
             progress = new ProgressBar { Dock = DockStyle.Fill, Visible = false }; layout.Controls.Add(progress, 0, 3);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            check = new Button { Text = "检查更新", Width = 100, Height = 32 }; check.Click += async delegate { await CheckAsync(); };
-            action = new Button { Text = "下载更新", Width = 170, Height = 32, Enabled = false }; action.Click += async delegate { await ActAsync(); };
+            check = new SkinButton { Text = "检查更新", Width = 100, Height = 32 }; check.Click += async delegate { await CheckAsync(); };
+            action = new SkinButton { Text = "下载更新", Width = 170, Height = 32, Enabled = false }; action.Click += async delegate { await ActAsync(); };
             buttons.Controls.Add(check); buttons.Controls.Add(action); layout.Controls.Add(buttons, 0, 4);
             layout.Controls.Add(new Label { Text = "校验下载包后再确认更新并重启，保留保存目录、快捷键和截图历史。", ForeColor = Color.DimGray, Dock = DockStyle.Fill }, 0, 5);
             Controls.Add(layout);
@@ -72,7 +72,7 @@ namespace ShotInk
             if (busy || info == null) return;
             if (prepared != null)
             {
-                busy = true; action.Enabled = check.Enabled = false; status.ForeColor = Color.Black; status.Text = "正在结束截图、关闭贴图及编辑窗口并准备重启…";
+                busy = true; action.Enabled = check.Enabled = false; status.ForeColor = Skins.Current.Ink; status.Text = "正在结束截图、关闭贴图及编辑窗口并准备重启…";
                 try
                 {
                     string error = await install(prepared, cancellation.Token);

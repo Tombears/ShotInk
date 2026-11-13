@@ -20,6 +20,11 @@ namespace ShotInk
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 System.Threading.Tasks.Task.Run(new Action(UpdatePartsTests.Run)).GetAwaiter().GetResult();
+                if (args.Length == 1 && args[0] == "--toolbar-tests") { TestToolbarDrag(); return 0; }
+                if (args.Length == 1 && args[0] == "--text-tests") { TestTransparentTextInput(); return 0; }
+                if (args.Length == 1 && args[0] == "--skin-tests") { SkinTests.Run(); return 0; }
+                if (args.Length == 2 && args[0] == "--skin-previews") { SkinTests.Previews(args[1]); return 0; }
+                SkinTests.Run();
                 if (args.Length == 1 && args[0] == "--slider-tests")
                 { Run("expanded slider thumbs stay under the pointer with clean rounded corners", TestOvalSlider); return 0; }
                 if (args.Length == 1 && args[0] == "--stitch-tests")
@@ -887,7 +892,7 @@ namespace ShotInk
                     Cursor.Position = new Point(cursor.X + 30, cursor.Y - 50); Mouse(grip, "OnMouseMove", MouseButtons.Left, 30, 0); Mouse(grip, "OnMouseUp", MouseButtons.Left, 30, 0);
                     Assert(toolbar.UserPlaced && toolbar.Location != before && Field<Rectangle>(overlay, "selection") == selection, "Dragging the toolbar moved the screenshot or failed to move.");
                     var moved = toolbar.Location; toolbar.SelectTool(DrawTool.Pen);
-                    Assert(toolbar.Location == moved, "Changing tools reset the dragged toolbar location.");
+                    Assert(toolbar.Location == moved, "Changing tools reset the dragged toolbar location: " + moved + " -> " + toolbar.Location + " / " + toolbar.Size);
                     ToolPreview(overlay, "compact-toolbar");
                     Application.DoEvents(); Native.FlushDesktop();
                     using (var screen = Native.Capture(overlay.RectangleToScreen(overlay.ClientRectangle))) screen.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-compact-toolbar-live.png"));
@@ -1759,7 +1764,7 @@ namespace ShotInk
                 foreach (char character in "中文  Abc") SendMessage(input.Handle, 0x102, new IntPtr(character), new IntPtr(1));
                 Application.DoEvents();
                 var mark = canvas.Marks[0];
-                Assert(mark.Text == "中文  Abc", "Native character input was lost or duplicated.");
+                Assert(mark.Text == "中文  Abc", "Native character input was lost or duplicated: [" + mark.Text + "] / [" + input.Text + "]");
                 var expectedCaret = TextGeometry.World(mark, TextGeometry.Caret(mark, mark.Text.Length));
                 Assert(Math.Abs(input.Left - expectedCaret.X * zoom) <= 1 && Math.Abs(input.Top - expectedCaret.Y * zoom) <= 1,
                     "IME anchor moved to the canvas origin instead of following the visible caret.");

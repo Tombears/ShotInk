@@ -10,9 +10,11 @@ namespace ShotInk
         internal static float TrackY(int height) { return height / 2F; }
         internal static void Track(Graphics g, float left, float right, float y, float first, float last, Color accent, bool enabled)
         {
-            using (var pen = new Pen(Color.FromArgb(223, 225, 234), 6))
+            accent = Skins.Accent(accent);
+            using (var pen = new Pen(Skins.Current.Kind == SkinKind.Classic ? Color.FromArgb(223, 225, 234) : Skins.Current.Border, 6))
             {
                 pen.StartCap = pen.EndCap = LineCap.Round;
+                if (Skins.Current.Kind == SkinKind.Pixel) pen.StartCap = pen.EndCap = LineCap.Square;
                 g.DrawLine(pen, left, y, right, y);
                 pen.Color = enabled ? accent : Color.FromArgb(177, 181, 197);
                 if (last > first) g.DrawLine(pen, first, y, last, y);
@@ -20,6 +22,14 @@ namespace ShotInk
         }
         internal static void Thumb(Graphics g, float x, float y, Color accent, bool enabled, bool hot, bool focused, bool dragging)
         {
+            accent = Skins.Accent(accent);
+            if (Skins.Current.Kind != SkinKind.Classic)
+            {
+                SkinPainter.Button(g, new RectangleF(x - 9, y - 9, 18, 18), enabled ? accent : Skins.Current.Muted,
+                    dragging, enabled && hot, enabled && dragging, enabled && focused, dragging ? 1 : .3F);
+                using (var dot = new SolidBrush(enabled ? accent : Skins.Current.Muted)) g.FillEllipse(dot, x - 3, y - 3, 6, 6);
+                return;
+            }
             var color = enabled ? accent : Color.FromArgb(180, 184, 201);
             float radius = dragging ? 10 : 9;
             if (enabled && (hot || focused || dragging))

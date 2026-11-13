@@ -16,7 +16,7 @@ namespace ShotInk
 
         internal OcrSearchPanel()
         {
-            Name = "ocr-search"; Size = new Size(326, 34); BackColor = Color.White; Font = ToolAppearance.Font;
+            Name = "ocr-search"; Size = new Size(326, 34); BackColor = Skins.Current.Surface; Font = ToolAppearance.Font;
             AutoScaleMode = AutoScaleMode.None; Visible = false;
             var searchIcon = new ToolOptionButton { IconName = "search", AccessibleName = "搜索识别文字 (Ctrl+F)", Bounds = new Rectangle(3, 4, 26, 26), TabStop = false, AccentColor = ToolAppearance.Accent("ocr") };
             searchIcon.Click += delegate { OpenSearch(); }; hints.SetToolTip(searchIcon, searchIcon.AccessibleName); Controls.Add(searchIcon);

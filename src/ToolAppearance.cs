@@ -8,14 +8,14 @@ namespace ShotInk
 {
     internal static class ToolAppearance
     {
-        internal static readonly Color Ink = Color.FromArgb(49, 57, 72);
-        internal static readonly Color Muted = Color.FromArgb(112, 121, 137);
-        internal static readonly Color Border = Color.FromArgb(226, 230, 237);
+        internal static Color Ink { get { return Skins.Current.Ink; } }
+        internal static Color Muted { get { return Skins.Current.Muted; } }
+        internal static Color Border { get { return Skins.Current.Border; } }
         internal static readonly Font Font = new Font("Microsoft YaHei UI", 9F);
         internal static readonly Font HeadingFont = new Font(Font, FontStyle.Bold);
         internal static Bitmap RenderSmooth(Size size, Action<Graphics> paint)
         {
-            const int scale = 3;
+            const int scale = 4;
             using (var large = new Bitmap(size.Width * scale, size.Height * scale, PixelFormat.Format32bppPArgb))
             {
                 using (var graphics = Graphics.FromImage(large))
@@ -61,6 +61,10 @@ namespace ShotInk
         }
         internal static Color Accent(string name)
         {
+            return SkinIcons.Accent(name, ClassicAccent(name));
+        }
+        private static Color ClassicAccent(string name)
+        {
             switch (name)
             {
                 case "shape": case "copy": return Color.FromArgb(47, 111, 220);
@@ -102,19 +106,19 @@ namespace ShotInk
         internal string IconName;
         private Bitmap glyph;
         private Color glyphColor;
-        private bool hovering;
+        private readonly SkinInteraction interaction;
+        private SkinKind glyphSkin;
         internal ToolOptionButton()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
             FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0;
-            Cursor = Cursors.Hand; Font = ToolAppearance.Font; BackColor = Color.White;
+            Cursor = Cursors.Hand; Font = ToolAppearance.Font; BackColor = Skins.Current.Surface;
+            interaction = new SkinInteraction(this);
         }
-        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); hovering = true; Invalidate(); }
-        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hovering = false; Invalidate(); }
         protected override void OnPaint(PaintEventArgs e)
         {
-            var background = Parent == null ? Color.White : Parent.BackColor;
-            if (background.A == 0) background = Color.White;
+            var background = Parent == null ? Skins.Current.Surface : Parent.BackColor;
+            if (background.A == 0) background = Skins.Current.Surface;
             e.Graphics.Clear(background);
             ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
             {
@@ -123,7 +127,7 @@ namespace ShotInk
                 var circle = new RectangleF(Width / 2F - 7, Height / 2F - 7, 14, 14);
                 using (var fill = new SolidBrush(BackColor)) g.FillEllipse(fill, circle);
                 using (var border = new Pen(Color.FromArgb(180, 187, 198))) g.DrawEllipse(border, circle);
-                if (Selected || hovering)
+                if (Selected || interaction.Hot)
                 {
                     circle.Inflate(3, 3);
                     using (var ring = new Pen(Selected ? AccentColor : ToolAppearance.Border, Selected ? 2 : 1)) g.DrawEllipse(ring, circle);
@@ -132,24 +136,22 @@ namespace ShotInk
             else
             {
                 Color accent = Enabled ? AccentColor : ToolAppearance.Muted;
-                using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 6))
-                using (var fill = new SolidBrush(Selected ? ToolAppearance.Tint(accent, 0.90F) : hovering ? Color.FromArgb(246, 248, 251) : Color.White))
-                using (var border = new Pen(Selected ? accent : ToolAppearance.Border))
-                { g.FillPath(fill, path); g.DrawPath(border, path); }
+                SkinPainter.Button(g, new RectangleF(.5F, .5F, Width - 1, Height - 1), accent, Selected,
+                    Enabled && interaction.Hot, Enabled && interaction.Pressed, Focused && ShowFocusCues, interaction.Pulse);
             }
             });
             if (IconName != null)
             {
                 var color = Enabled ? AccentColor : ToolAppearance.Muted;
-                if (glyph == null || glyphColor != color)
+                if (glyph == null || glyphColor != color || glyphSkin != Skins.Current.Kind)
                 {
                     if (glyph != null) glyph.Dispose();
-                    glyph = ToolbarIcons.Create(IconName, color); glyphColor = color;
+                    glyph = ToolbarIcons.Create(IconName, color); glyphColor = color; glyphSkin = Skins.Current.Kind;
                 }
-                e.Graphics.DrawImageUnscaled(glyph, (Width - glyph.Width) / 2, (Height - glyph.Height) / 2);
+                e.Graphics.DrawImageUnscaled(glyph, (Width - glyph.Width) / 2, (Height - glyph.Height) / 2 + SkinPainter.PressOffset(interaction.Pressed));
             }
             else if (!IsSwatch)
-                TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, !Enabled ? SystemColors.GrayText : Selected ? AccentColor : ToolAppearance.Ink,
+                TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, !Enabled ? ToolAppearance.Muted : Selected ? Skins.Accent(AccentColor) : ToolAppearance.Ink,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             if (Focused && ShowFocusCues)
             { var focus = ClientRectangle; focus.Inflate(-4, -4); ControlPaint.DrawFocusRectangle(e.Graphics, focus); }

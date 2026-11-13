@@ -134,6 +134,7 @@ namespace ShotInk
         private static void TestVideoTools()
         {
             TestAudioTrack();
+            TestMicrophoneEnhancement(); TestRecordingPlacement();
             Assert(File.Exists(VideoExport.EncoderPath), "Recording encoder was omitted from the test output.");
             var settings = new AppSettings { RecordSpeaker = false, RecordingGuideSeen = true };
             var desktop = new Bitmap(640, 480);
@@ -230,6 +231,39 @@ namespace ShotInk
             public void StartRecording() { DataAvailable(this, new NAudio.Wave.WaveInEventArgs(Samples, Samples.Length)); }
             public void StopRecording() { RecordingStopped(this, new NAudio.Wave.StoppedEventArgs()); }
             public void Dispose() { Disposed = true; }
+        }
+        private static void TestMicrophoneEnhancement()
+        {
+            using (var media = new RecordingMedia())
+            {
+                string path = Path.Combine(media.DirectoryPath, "microphone.wav");
+                using (var writer = new NAudio.Wave.WaveFileWriter(path, new NAudio.Wave.WaveFormat(48000, 16, 1)))
+                    for (int sample = 0; sample < 48000; sample++) writer.WriteSample((float)(Math.Sin(sample * 2 * Math.PI * 440 / 48000) * .015));
+                float before = RecordingMedia.Peak(path);
+                Wait(RecordingMedia.EnhanceMicrophone(path, 200));
+                float after = RecordingMedia.Peak(path);
+                Assert(after > before * 2 && after <= .96F, "Microphone enhancement failed to raise quiet speech safely.");
+                using (var reader = new NAudio.Wave.WaveFileReader(path)) Assert(Math.Abs(reader.TotalTime.TotalMilliseconds - 1000) < 5, "Microphone enhancement shifted the audio timeline.");
+                Assert(!File.Exists(path + ".enhanced.wav"), "Microphone processing retained an intermediate file.");
+            }
+        }
+        private static void TestRecordingPlacement()
+        {
+            var bounds = SystemInformation.VirtualScreen;
+            using (var image = new Bitmap(bounds.Width, bounds.Height))
+            using (var overlay = new CaptureOverlay(false, (Bitmap)image.Clone(), bounds, new AppSettings { RecordingGuideSeen = true, RecordSpeaker = false }))
+            {
+                overlay.Show();
+                var work = Screen.PrimaryScreen.WorkingArea;
+                var region = new Rectangle(work.Left + 20, work.Bottom - 140, Math.Min(320, work.Width - 40), 130);
+                overlay.SelectRegion(region);
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar"); Field<ToolStripButton>(toolbar, "video").PerformClick();
+                var options = Field<Panel>(overlay, "recordingOptions");
+                var global = options.RectangleToScreen(options.ClientRectangle);
+                Assert(options.Visible && work.Contains(global) && global.Bottom < region.Top, "Bottom-edge recording toolbar left the current monitor working area.");
+                Assert(overlay.GetChildAtPoint(options.Location + new Size(options.Width - 20, options.Height / 2)) == options, "Recording controls were covered by another overlay child.");
+                overlay.Close();
+            }
         }
         private static void TestAudioTrack()
         {

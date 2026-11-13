@@ -182,7 +182,7 @@ namespace ShotInk
                 ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
                 {
                     using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 8))
-                    using (var fill = new SolidBrush(Color.White))
+                    using (var fill = new SolidBrush(Skins.Current.Surface))
                     using (var border = new Pen(ToolAppearance.Border)) { g.FillPath(fill, path); g.DrawPath(border, path); }
                 });
             }

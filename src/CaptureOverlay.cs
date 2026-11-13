@@ -72,6 +72,7 @@ namespace ShotInk
                 if (dragging && !ready && dragMode == -2 && !manualSelection) { manualSelection = true; selection = Rectangle.Empty; Invalidate(); }
             };
             pointer = new Point(Cursor.Position.X - bounds.X, Cursor.Position.Y - bounds.Y);
+            Skins.Attach(this);
             SetupSelectionModes();
             for (int i = 0; i < edgeTargets.Length; i++)
             {
@@ -358,13 +359,18 @@ namespace ShotInk
                 System.Threading.SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         }
         private void SyncSettings() { toolbar.ApplyTo(canvas); }
-        private void PositionToolbar()
+        private Rectangle ToolbarWorkArea()
         {
-            if (toolbar == null) return;
             var global = selection; global.Offset(screenBounds.Location);
             var work = Screen.FromRectangle(global).WorkingArea;
             work.Offset(-screenBounds.X, -screenBounds.Y);
             work = Rectangle.Intersect(work, ClientRectangle);
+            return work.IsEmpty ? ClientRectangle : work;
+        }
+        private void PositionToolbar()
+        {
+            if (toolbar == null) return;
+            var work = ToolbarWorkArea();
             toolbar.Location = toolbar.UserPlaced ? CaptureToolbar.Clamp(toolbar.Location, work, toolbar.Size) : CaptureToolbar.Place(selection, work, toolbar.Size);
             toolbar.BringToFront();
             if (videoMode) { toolbar.Hide(); PositionVideoOptions(); }

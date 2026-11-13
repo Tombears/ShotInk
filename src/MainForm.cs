@@ -47,6 +47,7 @@ namespace ShotInk
             this.startup = startup ?? (integrateDesktop ? new StartupRegistration(Application.ExecutablePath) : null);
             dataRoot = storageRoot ?? ResolveDataRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             settings = AppSettings.Load(SettingsPath);
+            Skins.Select(settings.Skin); Skins.Attach(this);
             if (this.startup != null) settings.StartWithWindows = this.startup.IsEnabled;
             settingsTimer = new Timer { Interval = 350 };
             settingsTimer.Tick += delegate { settingsTimer.Stop(); PersistSettings(); };
@@ -65,7 +66,7 @@ namespace ShotInk
             BackColor = Theme.Background;
             appIcon = CreateIcon(); Icon = appIcon;
 
-            var sidebar = new Panel { Dock = DockStyle.Left, Width = 202, BackColor = Color.FromArgb(24, 32, 53), Padding = new Padding(22) };
+            var sidebar = new Panel { Name = "skin-sidebar", Dock = DockStyle.Left, Width = 202, BackColor = Color.FromArgb(24, 32, 53), Padding = new Padding(22) };
             var brand = Theme.Label("▣  ShotInk", 20, Color.White); brand.Location = new Point(20, 30); sidebar.Controls.Add(brand);
             var edition = Theme.Label("S H O T I N K   /   W I N D O W S", 8, Color.FromArgb(149, 163, 194)); edition.Location = new Point(27, 75); sidebar.Controls.Add(edition);
             var nav = Theme.Label("●   截图工作台", 11, Color.FromArgb(170, 181, 255)); nav.Location = new Point(25, 145); sidebar.Controls.Add(nav);
@@ -185,6 +186,7 @@ namespace ShotInk
             }
             else try { persist(); } catch (Exception ex) { return "设置未保存：" + ex.Message; }
             settings.CopyFrom(candidate); settingsDirty = false; settingsTimer.Stop();
+            Skins.Select(settings.Skin);
             RefreshShortcutLabels(); if (notice != null) notice.Text = "设置已保存并立即生效。"; return null;
         }
         private void RefreshShortcutLabels()
@@ -487,7 +489,7 @@ namespace ShotInk
             }
         }
         internal static void UseAppIcon(Form form)
-        { var icon = CreateIcon(); form.Icon = icon; form.Disposed += delegate { icon.Dispose(); }; }
+        { var icon = CreateIcon(); form.Icon = icon; form.Disposed += delegate { icon.Dispose(); }; Skins.Attach(form); }
     }
 
     internal sealed class HeroPanel : Panel
@@ -495,7 +497,7 @@ namespace ShotInk
         internal HeroPanel() { DoubleBuffered = true; }
         protected override void OnPaintBackground(PaintEventArgs e)
         {
-            using (var gradient = new LinearGradientBrush(ClientRectangle, Color.FromArgb(83, 96, 236), Color.FromArgb(117, 102, 230), 15)) e.Graphics.FillRectangle(gradient, ClientRectangle);
+            using (var gradient = new LinearGradientBrush(ClientRectangle, Skins.Current.Accent, Skins.Current.Secondary, 15)) e.Graphics.FillRectangle(gradient, ClientRectangle);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var pen = new Pen(Color.FromArgb(45, Color.White), 2))
             { e.Graphics.DrawEllipse(pen, Width - 200, -85, 240, 240); e.Graphics.DrawEllipse(pen, Width - 170, -55, 180, 180); }

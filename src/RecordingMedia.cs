@@ -18,19 +18,36 @@ namespace ShotInk
         internal readonly string DirectoryPath;
         internal readonly List<string> AudioPaths = new List<string>();
         private readonly List<AudioTrack> tracks = new List<AudioTrack>();
+        private readonly List<MMDevice> endpoints = new List<MMDevice>();
+        private string microphonePath;
+        private int microphoneGain;
+        internal string AudioNotice { get; private set; }
         internal RecordingMedia()
         {
             DirectoryPath = Path.Combine(GifExport.CacheDirectory, "video-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(DirectoryPath);
         }
         internal void StartAudio(bool microphone, bool speaker)
+        { StartAudio(microphone, speaker, "", 200); }
+        internal void StartAudio(bool microphone, bool speaker, string microphoneDevice, int gain)
         {
             try
             {
                 if (microphone)
                 {
-                    try { AddTrack(new WasapiCapture(), "microphone.wav"); }
-                    catch (Exception error) { throw new InvalidOperationException("无法打开麦克风，请检查 Windows 默认输入设备及麦克风权限，或关闭麦克风开关后重试。", error); }
+                    try
+                    {
+                        using (var devices = new MMDeviceEnumerator())
+                        {
+                            var endpoint = string.IsNullOrEmpty(microphoneDevice) ? devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console) : devices.GetDevice(microphoneDevice);
+                            endpoints.Add(endpoint);
+                            if (endpoint.AudioEndpointVolume.Mute || endpoint.AudioEndpointVolume.MasterVolumeLevelScalar <= 0)
+                                throw new InvalidOperationException("所选麦克风已静音，请在 Windows 声音设置中取消静音或提高输入音量。");
+                            AddTrack(new WasapiCapture(endpoint), "microphone.wav");
+                            microphonePath = Path.Combine(DirectoryPath, "microphone.wav"); microphoneGain = Math.Max(100, Math.Min(400, gain));
+                        }
+                    }
+                    catch (Exception error) { throw new InvalidOperationException("无法录入麦克风。请在「设置 → 录屏」选择正确的输入设备，并检查 Windows 麦克风权限。" + error.Message, error); }
                 }
                 if (speaker)
                 {
@@ -49,10 +66,43 @@ namespace ShotInk
             AudioPaths.Add(path);
         }
         internal async Task StopAudio()
-        { foreach (var track in tracks) { await track.Stop(); track.Dispose(); } tracks.Clear(); }
+        {
+            try { foreach (var track in tracks) { await track.Stop(); track.Dispose(); } }
+            finally { foreach (var track in tracks) track.Dispose(); tracks.Clear(); foreach (var endpoint in endpoints) endpoint.Dispose(); endpoints.Clear(); }
+            if (microphonePath == null) return;
+            try
+            {
+                if (Peak(microphonePath) < .00001F) AudioNotice = "麦克风未检测到声音。请检查所选设备、静音开关和 Windows 输入音量。";
+                await EnhanceMicrophone(microphonePath, microphoneGain);
+            }
+            catch (Exception) { AudioNotice = "麦克风音量增强未完成，已保留原始录音。"; }
+        }
+        internal static float Peak(string path)
+        {
+            float peak = 0;
+            using (var reader = new AudioFileReader(path))
+            {
+                var buffer = new float[4096]; int count;
+                while ((count = reader.Read(buffer, 0, buffer.Length)) > 0)
+                    for (int index = 0; index < count; index++) peak = Math.Max(peak, Math.Abs(buffer[index]));
+            }
+            return peak;
+        }
+        internal static async Task EnhanceMicrophone(string path, int gain)
+        {
+            string enhanced = path + ".enhanced.wav";
+            string filter = "volume=" + (gain / 100.0).ToString("0.00", CultureInfo.InvariantCulture) + ",dynaudnorm=f=150:g=7:p=0.85:m=6:r=0.12:n=0:b=1,alimiter=limit=0.95:level=0:latency=1";
+            try
+            {
+                await VideoExport.RunEncoder("-i " + VideoExport.Quote(path) + " -af " + VideoExport.Quote(filter) + " -c:a pcm_s16le " + VideoExport.Quote(enhanced), CancellationToken.None);
+                File.Replace(enhanced, path, null);
+            }
+            finally { if (File.Exists(enhanced)) File.Delete(enhanced); }
+        }
         public void Dispose()
         {
             foreach (var track in tracks) track.Dispose(); tracks.Clear();
+            foreach (var endpoint in endpoints) endpoint.Dispose(); endpoints.Clear();
             try { if (Directory.Exists(DirectoryPath)) Directory.Delete(DirectoryPath, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         private sealed class AudioTrack : IDisposable
@@ -160,7 +210,7 @@ namespace ShotInk
                         filter.AppendFormat("concat=n={0}:v=0:a=1[a{1}];", segment, track);
                     }
                     for (int track = 0; track < count; track++) filter.Append("[a" + track + "]");
-                    filter.Append("amix=inputs=" + count + ":duration=longest:normalize=0[audio]");
+                    filter.Append("amix=inputs=" + count + ":duration=longest:normalize=0,alimiter=limit=0.95:level=0:latency=1[audio]");
                     string script = Path.Combine(directory, "audio.txt"); File.WriteAllText(script, filter.ToString(), new UTF8Encoding(false));
                     args.Append(" -/filter_complex " + Quote(script) + " -map 0:v -map [audio] -c:a aac -b:a 192k");
                 }

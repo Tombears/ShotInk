@@ -15,6 +15,9 @@ namespace ShotInk
             {
                 Native.EnableDpiAwareness(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
                 System.Threading.Tasks.Task.Run(new Action(UpdatePartsTests.Run)).GetAwaiter().GetResult();
+                if (args.Length == 1 && args[0] == "--skin-tests") { SkinTests.Run(); return 0; }
+                if (args.Length == 2 && args[0] == "--skin-previews") { SkinTests.Previews(args[1]); return 0; }
+                SkinTests.Run();
                 if (args.Length == 2 && args[0] == "--update-live")
                 {
                     var info = UpdateService.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();

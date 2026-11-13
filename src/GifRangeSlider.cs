@@ -25,7 +25,7 @@ namespace ShotInk
         {
             Maximum = maximum; last = maximum; EditingStart = true;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.Selectable, true);
-            TabStop = true; AccessibleName = "GIF 起点与终点区段"; AccessibleRole = AccessibleRole.Slider; Cursor = Cursors.Hand; BackColor = Color.White;
+            TabStop = true; AccessibleName = "GIF 起点与终点区段"; AccessibleRole = AccessibleRole.Slider; Cursor = Cursors.Hand; BackColor = Skins.Current.Surface;
             firstLabel = new Label { Text = "起点", AutoSize = true, Font = ToolAppearance.Font };
             lastLabel = new Label { Text = "终点", AutoSize = true, Font = ToolAppearance.Font };
             firstInput = new SliderValueBox(delegate { return first + 1; }, delegate { return 1; }, delegate { return last + 1; }, delegate(int value) { EditingStart = true; SetRange(value - 1, last); }) { Name = "gif-first-frame", AccessibleName = "起点帧" };
@@ -93,14 +93,14 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            var g = e.Graphics;
-            var state = g.Save(); g.SmoothingMode = SmoothingMode.AntiAlias;
-            float y = TrackY, a = Pixel(first), b = Pixel(last);
-            var color = ToolAppearance.Accent("gif");
-            SliderAppearance.Track(g, 18, Math.Max(18, Width - 18), y, a, b, color, Enabled);
-            SliderAppearance.Thumb(g, a, y, color, Enabled, hoverStart, Focused && EditingStart, dragging && EditingStart);
-            SliderAppearance.Thumb(g, b, y, color, Enabled, hoverEnd, Focused && !EditingStart, dragging && !EditingStart);
-            g.Restore(state);
+            ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics)
+            {
+                float y = TrackY, a = Pixel(first), b = Pixel(last);
+                var color = ToolAppearance.Accent("gif");
+                SliderAppearance.Track(graphics, 18, Math.Max(18, Width - 18), y, a, b, color, Enabled);
+                SliderAppearance.Thumb(graphics, a, y, color, Enabled, hoverStart, Focused && EditingStart, dragging && EditingStart);
+                SliderAppearance.Thumb(graphics, b, y, color, Enabled, hoverEnd, Focused && !EditingStart, dragging && !EditingStart);
+            });
         }
     }
 }

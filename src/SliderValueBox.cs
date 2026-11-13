@@ -13,7 +13,7 @@ namespace ShotInk
         {
             this.read = read; this.minimum = minimum; this.maximum = maximum; this.write = write;
             TextAlign = HorizontalAlignment.Center; BorderStyle = BorderStyle.FixedSingle;
-            Font = ToolAppearance.Font; ForeColor = ToolAppearance.Ink; BackColor = Color.White;
+            Font = ToolAppearance.Font; ForeColor = ToolAppearance.Ink; BackColor = Skins.Current.Surface;
             Width = 44; RefreshValue(true);
         }
         internal void RefreshValue(bool force = false)

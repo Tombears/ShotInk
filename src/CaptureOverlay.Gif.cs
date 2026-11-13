@@ -54,7 +54,7 @@ namespace ShotInk
             if (IsDisposed || (gifSession == null && scrollSession == null)) return;
             Control navigation = recordingNavigation ?? (Control)toolbar;
             if (!captureChromeExcluded && navigation.Bounds.IntersectsWith(selection))
-                navigation.Location = CaptureToolbar.Place(selection, ClientRectangle, navigation.Size);
+                navigation.Location = CaptureToolbar.Place(selection, ToolbarWorkArea(), navigation.Size);
             var surface = new Region(ClientRectangle); var hole = selection; hole.Inflate(5, 5);
             surface.Exclude(hole); surface.Union(navigation.Bounds);
             var previous = Region; Region = surface; if (previous != null) previous.Dispose();

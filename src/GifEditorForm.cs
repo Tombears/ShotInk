@@ -68,7 +68,7 @@ namespace ShotInk
             layout.Controls.Add(buttons, 0, 5); layout.SetColumnSpan(buttons, 2);
             status = new Label { Dock = DockStyle.Fill, ForeColor = ToolAppearance.Muted, Visible = false };
             layout.Controls.Add(status, 0, 6); layout.SetColumnSpan(status, 2); Controls.Add(layout);
-            SetStatus(clip.LimitReached ? "已达到录制上限，已保留内容。" : "");
+            SetStatus(clip.Recording != null && clip.Recording.AudioNotice != null ? clip.Recording.AudioNotice : clip.LimitReached ? "已达到录制上限，已保留内容。" : "");
             playback = new System.Windows.Forms.Timer { Interval = 100 };
             playback.Tick += delegate { ShowFrame(frameIndex >= range.Last ? range.First : frameIndex + 1, false); playback.Interval = FrameDelay(frameIndex); PlayVideoAudio(frameIndex); };
             if (clip.Recording != null) { copy.Text = "复制到剪贴板"; copy.Width = 124; save.Text = "下载 MP4"; }

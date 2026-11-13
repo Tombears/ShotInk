@@ -5,14 +5,14 @@ namespace ShotInk
 {
     internal static class Theme
     {
-        internal static readonly Color Background = Color.FromArgb(245, 247, 251);
-        internal static readonly Color Ink = Color.FromArgb(29, 40, 62);
-        internal static readonly Color Muted = Color.FromArgb(110, 122, 144);
-        internal static readonly Color Accent = Color.FromArgb(82, 95, 239);
+        internal static Color Background { get { return Skins.Current.Background; } }
+        internal static Color Ink { get { return Skins.Current.Kind == SkinKind.Classic ? Color.FromArgb(29, 40, 62) : Skins.Current.Ink; } }
+        internal static Color Muted { get { return Skins.Current.Muted; } }
+        internal static Color Accent { get { return Skins.Current.Accent; } }
 
         internal static Button Button(string text, bool primary, int width)
         {
-            var button = new Button {
+            var button = new SkinButton { Primary = primary,
                 Text = text, Width = width, Height = 38, FlatStyle = FlatStyle.Flat,
                 BackColor = primary ? Accent : Color.White,
                 ForeColor = primary ? Color.White : Ink,

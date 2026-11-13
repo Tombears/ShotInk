@@ -33,9 +33,9 @@ namespace ShotInk
             base.OnPaint(e);
             ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics g)
             {
-                using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Math.Max(1, Width - 1), Math.Max(1, Height - 1)), 6))
+                using (var path = SkinPainter.Shape(new RectangleF(0.5F, 0.5F, Math.Max(1, Width - 1), Math.Max(1, Height - 1)), 6))
                 using (var fill = new SolidBrush(input.BackColor))
-                using (var border = new Pen(ContainsFocus ? AccentColor : ToolAppearance.Border, ContainsFocus ? 1.5F : 1))
+                using (var border = new Pen(ContainsFocus ? Skins.Accent(AccentColor) : ToolAppearance.Border, ContainsFocus ? 1.5F : 1))
                 { g.FillPath(fill, path); g.DrawPath(border, path); }
             });
         }

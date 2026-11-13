@@ -24,6 +24,8 @@ $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording\NAudio.dll') -Destination $buildRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording\NAudio.dll') -Destination $distRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording') -Destination $distRoot -Recurse -Force
+$duplicateAudioLibrary = Join-Path $distRoot 'recording\NAudio.dll'
+if (Test-Path -LiteralPath $duplicateAudioLibrary) { Remove-Item -LiteralPath $duplicateAudioLibrary -Force }
 if ($Lite) { Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording') -Destination $buildRoot -Recurse -Force }
 foreach ($name in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','WebView2-LICENSE.txt')) {
     $dependency=Join-Path $projectRoot ('build\webview2\'+$name)
@@ -33,7 +35,8 @@ foreach ($name in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.Wi
 $references = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', '/r:Accessibility.dll', '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll')
 $references += '/r:' + (Join-Path $buildRoot 'NAudio.dll')
 $references += @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll') | ForEach-Object { '/r:' + (Join-Path $buildRoot $_) }
-$common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references
+$skinResources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'assets\skins') -Filter '*.png' | ForEach-Object { '/resource:' + $_.FullName + ',ShotInk.Skins.' + $_.Name })
+$common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references + $skinResources
 if ($Lite) { $common += '/define:SHOTINK_LITE' }
 $appPath = Join-Path $distRoot 'ShotInk.exe'
 & $compiler @common '/target:winexe' ('/out:' + $appPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/win32icon:' + (Join-Path $projectRoot 'assets\shotink.ico')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources
@@ -44,7 +47,7 @@ if (-not $Lite) { & (Join-Path $projectRoot 'scripts\build-ocr.ps1') }
 if ($Test -or $Preview) {
     $testPath = Join-Path $buildRoot 'ShotInk.Tests.exe'
     $testSource = Join-Path $projectRoot $(if($Lite){'tests\Lite.Tests.cs'}else{'tests\Tests.cs'})
-    $sharedTests = @('tests\GifTools.Tests.cs', 'tests\CaptureWorkflow.Tests.cs', 'tests\UpdateParts.Tests.cs') | ForEach-Object { Join-Path $projectRoot $_ }
+    $sharedTests = @('tests\GifTools.Tests.cs', 'tests\CaptureWorkflow.Tests.cs', 'tests\UpdateParts.Tests.cs', 'tests\Skin.Tests.cs') | ForEach-Object { Join-Path $projectRoot $_ }
     & $compiler @common '/target:exe' '/main:ShotInk.Tests' ('/out:' + $testPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources $testSource @sharedTests
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
     $testArgs = @()

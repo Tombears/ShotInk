@@ -465,6 +465,7 @@ namespace ShotInk
             for (int i = 0; i < toolButtons.Count; i++)
             {
                 bool chosen = i == (int)tool || (tool == DrawTool.Line || tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline) && i == (int)DrawTool.Arrow;
+                ((SkinButton)toolButtons[i]).Primary = chosen;
                 toolButtons[i].BackColor = chosen ? ToolAppearance.Accent((DrawTool)i) : Color.White; toolButtons[i].ForeColor = chosen ? Color.White : Theme.Ink;
             }
             canvas.Focus();

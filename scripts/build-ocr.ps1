@@ -22,8 +22,10 @@ foreach ($model in $manifest.files) {
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 $staging = Join-Path $projectRoot ('build\ocr-' + $Runtime)
+$buildPrefix = [IO.Path]::GetFullPath((Join-Path $projectRoot 'build')).TrimEnd('\') + '\'
+if (-not [IO.Path]::GetFullPath($staging).StartsWith($buildPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'OCR staging directory escaped the build directory.' }
 if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
-& dotnet publish (Join-Path $hostRoot 'ShotInk.OcrHost.csproj') -c Release -r $Runtime --self-contained true --disable-build-servers -p:UseSharedCompilation=false -p:RestoreLockedMode=true -o $staging
+& dotnet publish (Join-Path $hostRoot 'ShotInk.OcrHost.csproj') -c Release -r $Runtime --self-contained true -p:PublishSingleFile=true -p:EnableSingleFileAnalyzer=false -p:IncludeNativeLibrariesForSelfExtract=false -p:EnableCompressionInSingleFile=false -p:DebugType=None -p:DebugSymbols=false --disable-build-servers -p:UseSharedCompilation=false -p:RestoreLockedMode=true -o $staging
 if ($LASTEXITCODE -ne 0) { throw 'OCR component publication failed.' }
 # The package copies its default Latin models too. Only the orientation model
 # is required by InitModels; this host explicitly selects bilingual v6 models.
@@ -31,9 +33,14 @@ foreach ($unused in @('ch_PP-OCRv5_mobile_det.onnx', 'latin_PP-OCRv5_rec_mobile_
     $path = Join-Path $staging ('models\v5\' + $unused)
     if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
 }
+foreach ($unused in @('onnxruntime.lib', 'onnxruntime_providers_shared.lib')) {
+    $importLibrary = Join-Path $staging $unused
+    if (Test-Path -LiteralPath $importLibrary) { Remove-Item -LiteralPath $importLibrary -Force }
+}
 Copy-Item -LiteralPath (Join-Path $hostRoot 'models.lock.json') -Destination $staging -Force
 Copy-Item -LiteralPath (Join-Path $hostRoot 'packages.lock.json') -Destination $staging -Force
 if (Test-Path -LiteralPath $OutputDirectory) { Remove-Item -LiteralPath $OutputDirectory -Recurse -Force }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Copy-Item -Path (Join-Path $staging '*') -Destination $OutputDirectory -Recurse -Force
+Remove-Item -LiteralPath $staging -Recurse -Force
 Write-Host ('OCR component: ' + $OutputDirectory)

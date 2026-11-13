@@ -210,7 +210,7 @@ namespace ShotInk
         internal OcrSelectionActions()
         {
             Height = 34; Width = 440; WrapContents = false; FlowDirection = FlowDirection.LeftToRight;
-            Padding = new Padding(7, 3, 7, 3); BackColor = Color.White; Font = ToolAppearance.Font;
+            Padding = new Padding(7, 3, 7, 3); BackColor = Skins.Current.Surface; Font = ToolAppearance.Font;
             copy = ActionButton("ocr-copy-selected", "复制选中 (Ctrl+C) · 拖选文字，双击选择整行", delegate { if (CopySelected != null) CopySelected(); });
             ((ToolOptionButton)copy).Selected = true;
             ActionButton("ocr-copy-all", "复制全部 · Ctrl+A 全选", delegate { if (CopyAll != null) CopyAll(); });

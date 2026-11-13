@@ -15,6 +15,8 @@ function Get-ShotInkBuildSignature {
     $installerRoot = Join-Path $ProjectRoot 'installer'
     if (Test-Path -LiteralPath $installerRoot) { $inputs += @(Get-ChildItem -LiteralPath $installerRoot -File | ForEach-Object { 'installer\' + $_.Name }) }
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'src') -Filter '*.cs' | ForEach-Object { 'src\' + $_.Name })
+    $skins = Join-Path $ProjectRoot 'assets\skins'
+    if (Test-Path -LiteralPath $skins) { $inputs += @(Get-ChildItem -LiteralPath $skins -Filter '*.png' | ForEach-Object { 'assets\skins\' + $_.Name }) }
     $icon = Join-Path $ProjectRoot 'assets\shotink.ico'
     if (Test-Path -LiteralPath $icon) { $inputs += 'assets\shotink.ico' }
     $hashes = foreach ($relative in ($inputs | Sort-Object)) {

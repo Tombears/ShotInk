@@ -31,7 +31,7 @@ namespace ShotInk
         private DrawTool currentTool = DrawTool.None;
         private bool textSelection;
         private readonly Dictionary<DrawTool, ToolStripItem> tools = new Dictionary<DrawTool, ToolStripItem>();
-        private readonly List<Image> icons = new List<Image>();
+        private readonly Dictionary<ToolStripButton, string> iconNames = new Dictionary<ToolStripButton, string>();
         internal void ApplyTo(AnnotationCanvas canvas) { options.ApplyTo(canvas); }
         internal event Action<DrawTool> ToolChanged;
         internal event Action SettingsChanged;
@@ -58,8 +58,9 @@ namespace ShotInk
             Font = ToolAppearance.Font;
             strip = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.None, AutoSize = false,
                 Location = new Point(15, 1), Height = 28, Padding = new Padding(1, 0, 1, 0), CanOverflow = false,
-                BackColor = Color.White, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
+                BackColor = Skins.Current.Surface, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
             strip.Renderer = new ToolbarRenderer();
+            strip.Tag = new SkinInteraction(strip);
             dragGrip = new ToolbarGrip { Name = "toolbar-drag", Location = new Point(1, 1), Size = new Size(14, 26), Cursor = Cursors.SizeAll };
             dragGrip.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { movingToolbar = true; moveAnchor = MousePosition; moveOrigin = Location; dragGrip.Capture = true; } };
             dragGrip.MouseMove += delegate { if (movingToolbar && Parent != null) { var delta = new Point(MousePosition.X - moveAnchor.X, MousePosition.Y - moveAnchor.Y); Location = Clamp(new Point(moveOrigin.X + delta.X, moveOrigin.Y + delta.Y), Parent.ClientRectangle, Size); UserPlaced = true; if (ToolbarMoved != null) ToolbarMoved(); } };
@@ -123,6 +124,7 @@ namespace ShotInk
                 AccentColor = ToolAppearance.Accent("scroll"), Selected = true };
             finishScroll.Click += delegate { if (ScrollFinishClicked != null) ScrollFinishClicked(); }; Controls.Add(finishScroll);
             Size = new Size(width + 16, 30);
+            Skins.Changed += RefreshSkin;
         }
         internal void SetScrollCapture(bool capturing)
         {
@@ -152,18 +154,36 @@ namespace ShotInk
 
         private ToolStripButton Button(string icon, string hint, Action clicked)
         {
-            var normal = Icon(icon); var active = ToolbarIcons.Create(icon, ToolAppearance.Accent(icon)); icons.Add(active);
-            var button = new ToolStripButton { Image = normal, Tag = ToolAppearance.Accent(icon), ToolTipText = hint, DisplayStyle = ToolStripItemDisplayStyle.Image,
+            var button = new ToolStripButton { Tag = ToolAppearance.Accent(icon), ToolTipText = hint, DisplayStyle = ToolStripItemDisplayStyle.Image,
                 ImageScaling = ToolStripItemImageScaling.None, AutoSize = false, Width = 25, Height = 26, Padding = Padding.Empty, Margin = Padding.Empty };
-            button.CheckedChanged += delegate { button.Image = button.Checked ? active : normal; strip.Invalidate(); };
-            button.MouseEnter += delegate { if (button.Enabled) button.Image = active; };
-            button.MouseLeave += delegate { button.Image = button.Checked ? active : normal; };
+            iconNames.Add(button, icon); UpdateIcon(button, false);
+            button.CheckedChanged += delegate { UpdateIcon(button, button.Selected); strip.Invalidate(); };
+            button.MouseEnter += delegate { UpdateIcon(button, true); };
+            button.MouseLeave += delegate { UpdateIcon(button, false); };
+            button.EnabledChanged += delegate { UpdateIcon(button, false); };
             button.Click += delegate { clicked(); };
             strip.Items.Add(button); return button;
         }
         private void ActivateTool(DrawTool tool) { options.UseDefaultMode(tool); SelectTool(tool); }
         private void AddTool(string icon, string hint, DrawTool tool) { tools.Add(tool, Button(icon, hint, delegate { ActivateTool(tool); })); }
-        private Image Icon(string name) { var image = ToolbarIcons.Create(name); icons.Add(image); return image; }
+        private void UpdateIcon(ToolStripButton button, bool hot)
+        {
+            string name = iconNames[button];
+            Color color = !button.Enabled ? ToolAppearance.Muted : button.Checked || hot ? ToolAppearance.Accent(name) : Skins.Current.Kind == SkinKind.Classic ? Color.FromArgb(65, 68, 74) : ToolAppearance.Accent(name);
+            var previous = button.Image; button.Image = ToolbarIcons.Create(name, color);
+            if (previous != null) previous.Dispose();
+        }
+        private void RefreshSkin()
+        {
+            if (surface != null) { surface.Dispose(); surface = null; }
+            strip.BackColor = Skins.Current.Surface;
+            foreach (var pair in iconNames)
+            {
+                if (pair.Key.IsDisposed) continue;
+                pair.Key.Tag = ToolAppearance.Accent(pair.Value); UpdateIcon(pair.Key, false);
+            }
+            Skins.Apply(options); Skins.Apply(textActions); Invalidate(true);
+        }
         internal void SelectTool(DrawTool tool)
         {
             currentTool = tool; textSelection = false; textActions.Hide(); if (recognize != null) recognize.Checked = false;
@@ -214,9 +234,7 @@ namespace ShotInk
             base.OnPaintBackground(e);
             if (surface == null) surface = ToolAppearance.RenderSmooth(ClientSize, delegate(Graphics graphics)
             {
-                using (var path = ToolAppearance.Rounded(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), 9))
-                using (var fill = new SolidBrush(Color.White))
-                using (var pen = new Pen(ToolAppearance.Border)) { graphics.FillPath(fill, path); graphics.DrawPath(pen, path); }
+                SkinPainter.Surface(graphics, new RectangleF(.5F, .5F, Width - 1, Height - 1), 9);
             });
             e.Graphics.DrawImageUnscaled(surface, Point.Empty);
         }
@@ -248,7 +266,7 @@ namespace ShotInk
         }
         internal static Point Clamp(Point point, Rectangle work, Size size)
         { return new Point(Math.Max(work.Left, Math.Min(point.X, work.Right - size.Width)), Math.Max(work.Top, Math.Min(point.Y, work.Bottom - size.Height))); }
-        protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) { if (surface != null) { surface.Dispose(); surface = null; } foreach (var image in icons) image.Dispose(); } }
+        protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) { Skins.Changed -= RefreshSkin; if (surface != null) { surface.Dispose(); surface = null; } foreach (var button in iconNames.Keys) if (button.Image != null) { button.Image.Dispose(); button.Image = null; } } }
 
         internal static Point Place(Rectangle selection, Rectangle work, Size toolbar)
         {
@@ -260,7 +278,7 @@ namespace ShotInk
         }
         private sealed class ToolbarColors : ProfessionalColorTable
         {
-            public override Color ToolStripGradientBegin { get { return Color.White; } }
+            public override Color ToolStripGradientBegin { get { return Skins.Current.Surface; } }
             public override Color ToolStripGradientMiddle { get { return ToolStripGradientBegin; } }
             public override Color ToolStripGradientEnd { get { return ToolStripGradientBegin; } }
             public override Color ToolStripBorder { get { return ToolStripGradientBegin; } }
@@ -283,14 +301,19 @@ namespace ShotInk
                 Color accent = button.Tag is Color ? (Color)button.Tag : ToolAppearance.Accent(DrawTool.None);
                 ToolAppearance.DrawSmooth(e.Graphics, button.Size, delegate(Graphics graphics)
                 {
-                using (var path = ToolAppearance.Rounded(new RectangleF(1.5F, 1.5F, button.Width - 3, button.Height - 3), 5))
-                using (var fill = new SolidBrush(ToolAppearance.Tint(accent, button.Checked || button.Pressed ? 0.88F : 0.95F)))
-                {
-                    graphics.FillPath(fill, path);
-                    if (button.Checked)
-                        using (var border = new Pen(ToolAppearance.Tint(accent, 0.50F))) graphics.DrawPath(border, path);
-                }
+                SkinPainter.Button(graphics, new RectangleF(1.5F, 1.5F, button.Width - 3, button.Height - 3), accent,
+                    button.Checked, button.Selected, button.Pressed, false, ((SkinInteraction)e.ToolStrip.Tag).Pulse);
                 });
+            }
+            protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
+            {
+                var state = e.Graphics.Save();
+                var button = e.Item as ToolStripButton;
+                if (button != null) e.Graphics.TranslateTransform(0, SkinPainter.PressOffset(button.Pressed));
+                if (Skins.Current.Kind != SkinKind.Classic && e.Image != null)
+                    e.Graphics.DrawImageUnscaled(e.Image, e.ImageRectangle.Location);
+                else base.OnRenderItemImage(e);
+                e.Graphics.Restore(state);
             }
             protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { }
         }
@@ -299,9 +322,12 @@ namespace ShotInk
     internal static class ToolbarIcons
     {
         internal static Bitmap Create(string name)
-        { return Create(name, Color.FromArgb(65, 68, 74)); }
+        { return Create(name, Skins.Current.Kind == SkinKind.Classic ? Color.FromArgb(65, 68, 74) : ToolAppearance.Accent(name)); }
 
         internal static Bitmap Create(string name, Color color)
+        { return SkinIcons.Create(name, color); }
+
+        internal static Bitmap CreateOutline(string name, Color color)
         {
             return ToolAppearance.RenderSmooth(new Size(20, 20), delegate(Graphics g)
             {

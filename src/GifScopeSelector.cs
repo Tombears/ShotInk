@@ -37,18 +37,18 @@ namespace ShotInk
             ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics)
             {
                 using (var path = ToolAppearance.Rounded(new RectangleF(.5F, .5F, Width - 1, Height - 1), 8))
-                using (var fill = new SolidBrush(Color.FromArgb(242, 245, 250)))
+                using (var fill = new SolidBrush(Skins.Current.Surface))
                 using (var border = new Pen(ToolAppearance.Border)) { graphics.FillPath(fill, path); graphics.DrawPath(border, path); }
                 float width = Width / 3F;
                 using (var path = ToolAppearance.Rounded(new RectangleF((int)Value * width + 3, 3, width - 6, Height - 6), 6))
-                using (var fill = new SolidBrush(Enabled ? Color.FromArgb(47, 111, 220) : Color.Gray)) graphics.FillPath(fill, path);
-                using (var pen = new Pen(Color.FromArgb(218, 224, 234)))
+                using (var fill = new SolidBrush(Enabled ? Skins.Current.Accent : Skins.Current.Muted)) graphics.FillPath(fill, path);
+                using (var pen = new Pen(Skins.Current.Border))
                     for (int i = 1; i < 3; i++) graphics.DrawLine(pen, width * i, 9, width * i, Height - 9);
             });
             for (int index = 0; index < 3; index++)
             {
                 var box = new Rectangle(index * Width / 3, 0, Width / 3, Height);
-                TextRenderer.DrawText(e.Graphics, Labels[index], Font, box, Value == (GifEditScope)index ? Color.White : ToolAppearance.Ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(e.Graphics, Labels[index], Font, box, Value == (GifEditScope)index ? Skins.Current.Dark ? Skins.Current.Background : Color.White : ToolAppearance.Ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
             if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(4, 4, Width - 8, Height - 8));
         }

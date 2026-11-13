@@ -47,7 +47,7 @@ namespace ShotInk
                 toggle.AccessibleDescription = toggle.Selected ? "已开启" : "已关闭";
                 toggle.Invalidate();
             };
-            recordingTip.SetToolTip(toggle, label + "开关，蓝色表示开启");
+            recordingTip.SetToolTip(toggle, label + "开关，高亮边框表示开启");
             recordingOptions.Controls.Add(toggle);
             return toggle;
         }
@@ -68,8 +68,8 @@ namespace ShotInk
         {
             if (!videoMode || recordingOptions == null || videoStarting || !ready) return;
             recordingOptions.Location = recordingOptionsPlaced
-                ? CaptureToolbar.Clamp(recordingOptions.Location, ClientRectangle, recordingOptions.Size)
-                : CaptureToolbar.Place(selection, ClientRectangle, recordingOptions.Size);
+                ? CaptureToolbar.Clamp(recordingOptions.Location, ToolbarWorkArea(), recordingOptions.Size)
+                : CaptureToolbar.Place(selection, ToolbarWorkArea(), recordingOptions.Size);
             recordingOptions.Show();
             recordingOptions.BringToFront();
             if (!settings.RecordingGuideSeen && !recordingGuideRunning) ShowRecordingGuide();
@@ -78,7 +78,7 @@ namespace ShotInk
         {
             var image = ToolbarIcons.Create("grip");
             var grip = new Label { Name = "recording-drag", Image = image,
-                BackColor = Color.White, Cursor = Cursors.SizeAll, Location = new Point(1, 2), Size = new Size(14, 26), AccessibleName = "拖动录屏功能条" };
+                BackColor = Skins.Current.Surface, Cursor = Cursors.SizeAll, Location = new Point(1, 2), Size = new Size(14, 26), AccessibleName = "拖动录屏功能条" };
             Point anchor = Point.Empty;
             grip.MouseDown += delegate(object sender, MouseEventArgs args) {
                 if (args.Button != MouseButtons.Left) return;
@@ -87,7 +87,7 @@ namespace ShotInk
             grip.MouseMove += delegate {
                 if (!grip.Capture) return;
                 var pointer = MousePosition;
-                panel.Location = CaptureToolbar.Clamp(new Point(panel.Left + pointer.X - anchor.X, panel.Top + pointer.Y - anchor.Y), ClientRectangle, panel.Size);
+                panel.Location = CaptureToolbar.Clamp(new Point(panel.Left + pointer.X - anchor.X, panel.Top + pointer.Y - anchor.Y), ToolbarWorkArea(), panel.Size);
                 anchor = pointer; moved(); panel.Refresh();
             };
             grip.MouseUp += delegate { grip.Capture = false; };
@@ -131,7 +131,7 @@ namespace ShotInk
                 AddRecordingDragHandle(recordingNavigation, UpdateRecordingRegion);
                 var pause = new ToolOptionButton { IconName = "pause", AccessibleName = "暂停录屏",
                     AccentColor = ToolAppearance.Accent("copy"), Location = new Point(18, 2), Size = new Size(26, 26) };
-                var time = new Label { Text = "00:00:00 / 00:01:00", ForeColor = ToolAppearance.Accent("copy"), BackColor = Color.White, Location = new Point(48, 7), AutoSize = true };
+                var time = new Label { Text = "00:00:00 / 00:01:00", ForeColor = ToolAppearance.Accent("copy"), BackColor = Skins.Current.Surface, Location = new Point(48, 7), AutoSize = true };
                 var stop = new ToolOptionButton { Text = "结束录制", Location = new Point(192, 2), Size = new Size(82, 26),
                     AccentColor = ToolAppearance.Accent("video"), Selected = true };
                 bool paused = false;
@@ -140,13 +140,13 @@ namespace ShotInk
                 pause.Click += delegate { paused = !paused; session.SetPaused(paused); pause.IconName = paused ? "play" : "pause"; pause.Invalidate(); pause.AccessibleName = paused ? "继续录屏" : "暂停录屏"; };
                 stop.Click += delegate { pause.Enabled = stop.Enabled = false; session.Finish(); };
                 recordingNavigation.Controls.AddRange(new Control[] { pause, time, stop }); Controls.Add(recordingNavigation);
-                recordingNavigation.Location = CaptureToolbar.Place(selection, ClientRectangle, recordingNavigation.Size); recordingNavigation.BringToFront();
+                recordingNavigation.Location = CaptureToolbar.Place(selection, ToolbarWorkArea(), recordingNavigation.Size); recordingNavigation.BringToFront();
                 captureChromeExcluded = Native.ExcludeFromCapture(Handle, true);
                 if (!captureChromeExcluded && recordingNavigation.Bounds.IntersectsWith(selection)) throw new InvalidOperationException("请缩小选区，为录制导航留出屏幕空间。");
                 UpdateRecordingRegion(); Capture = false; Native.ReleaseCapture();
                 scrollEscapeRegistered = Native.RegisterHotKey(Handle, 1001, 0x4000, (uint)Keys.Escape);
                 Native.FlushDesktop();
-                media.StartAudio(settings.RecordMicrophone, settings.RecordSpeaker);
+                media.StartAudio(settings.RecordMicrophone, settings.RecordSpeaker, settings.RecordMicrophoneDevice, settings.RecordMicrophoneGain);
                 timer.Tick += delegate { time.Text = TimeSpan.FromMilliseconds(session.Elapsed).ToString(@"hh\:mm\:ss") + " / 00:01:00"; }; timer.Start();
                 var clip = await session.RunAsync(); timer.Stop(); await media.StopAudio();
                 if (IsDisposed) return;

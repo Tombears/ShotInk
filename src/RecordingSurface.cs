@@ -27,13 +27,7 @@ namespace ShotInk
             }
             ToolAppearance.DrawSmooth(e.Graphics, ClientSize, delegate(Graphics graphics)
             {
-                using (var path = ToolAppearance.Rounded(new RectangleF(.5F, .5F, Width - 1, Height - 1), 6))
-                using (var fill = new SolidBrush(Color.White))
-                using (var border = new Pen(ToolAppearance.Border))
-                {
-                    graphics.FillPath(fill, path);
-                    graphics.DrawPath(border, path);
-                }
+                SkinPainter.Surface(graphics, new RectangleF(.5F, .5F, Width - 1, Height - 1), 6);
             });
         }
         protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
