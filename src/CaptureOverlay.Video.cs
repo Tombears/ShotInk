@@ -67,9 +67,10 @@ namespace ShotInk
         private void PositionVideoOptions()
         {
             if (!videoMode || recordingOptions == null || videoStarting || !ready) return;
+            var work = recordingOptionsPlaced ? ToolbarWorkArea(recordingOptions.Bounds) : ToolbarWorkArea();
             recordingOptions.Location = recordingOptionsPlaced
-                ? CaptureToolbar.Clamp(recordingOptions.Location, ToolbarWorkArea(), recordingOptions.Size)
-                : CaptureToolbar.Place(selection, ToolbarWorkArea(), recordingOptions.Size);
+                ? CaptureToolbar.Clamp(recordingOptions.Location, work, recordingOptions.Size)
+                : CaptureToolbar.Place(selection, work, recordingOptions.Size);
             recordingOptions.Show();
             recordingOptions.BringToFront();
             if (!settings.RecordingGuideSeen && !recordingGuideRunning) ShowRecordingGuide();
@@ -87,7 +88,8 @@ namespace ShotInk
             grip.MouseMove += delegate {
                 if (!grip.Capture) return;
                 var pointer = MousePosition;
-                panel.Location = CaptureToolbar.Clamp(new Point(panel.Left + pointer.X - anchor.X, panel.Top + pointer.Y - anchor.Y), ToolbarWorkArea(), panel.Size);
+                var pointerArea = new Rectangle(PointToClient(pointer), new Size(1, 1));
+                panel.Location = CaptureToolbar.Clamp(new Point(panel.Left + pointer.X - anchor.X, panel.Top + pointer.Y - anchor.Y), ToolbarWorkArea(pointerArea), panel.Size);
                 anchor = pointer; moved(); panel.Refresh();
             };
             grip.MouseUp += delegate { grip.Capture = false; };

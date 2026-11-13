@@ -359,9 +359,10 @@ namespace ShotInk
                 System.Threading.SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         }
         private void SyncSettings() { toolbar.ApplyTo(canvas); }
-        private Rectangle ToolbarWorkArea()
+        private Rectangle ToolbarWorkArea() { return ToolbarWorkArea(selection); }
+        private Rectangle ToolbarWorkArea(Rectangle localBounds)
         {
-            var global = selection; global.Offset(screenBounds.Location);
+            var global = localBounds; global.Offset(screenBounds.Location);
             var work = Screen.FromRectangle(global).WorkingArea;
             work.Offset(-screenBounds.X, -screenBounds.Y);
             work = Rectangle.Intersect(work, ClientRectangle);

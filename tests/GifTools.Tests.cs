@@ -262,6 +262,15 @@ namespace ShotInk
                 var global = options.RectangleToScreen(options.ClientRectangle);
                 Assert(options.Visible && work.Contains(global) && global.Bottom < region.Top, "Bottom-edge recording toolbar left the current monitor working area.");
                 Assert(overlay.GetChildAtPoint(options.Location + new Size(options.Width - 20, options.Height / 2)) == options, "Recording controls were covered by another overlay child.");
+                var other = Screen.AllScreens.FirstOrDefault(delegate(Screen screen) { return screen.DeviceName != Screen.PrimaryScreen.DeviceName; });
+                if (other != null)
+                {
+                    options.Location = new Point(other.WorkingArea.Left + 20 - bounds.Left, other.WorkingArea.Top + 30 - bounds.Top);
+                    var placed = options.Location;
+                    overlay.GetType().GetField("recordingOptionsPlaced", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(overlay, true);
+                    overlay.GetType().GetMethod("PositionVideoOptions", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(overlay, null);
+                    Assert(options.Location == placed, "Manually positioned recording controls moved back to the selection monitor.");
+                }
                 overlay.Close();
             }
         }
