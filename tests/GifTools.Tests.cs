@@ -125,8 +125,86 @@ namespace ShotInk
         {
             var mark = new Mark { Tool = DrawTool.Pen, Color = Color.White, Width = 5 }; mark.Points.Add(new PointF(10, y)); mark.Points.Add(new PointF(45, y)); canvas.AddMark(mark);
         }
+        private static void Wait(Task task)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!task.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(5); }
+            Assert(task.IsCompleted, "Recording operation timed out."); task.GetAwaiter().GetResult();
+        }
+        private static void TestVideoTools()
+        {
+            Assert(File.Exists(VideoExport.EncoderPath), "Recording encoder was omitted from the test output.");
+            var settings = new AppSettings { RecordSpeaker = false, RecordingGuideSeen = true };
+            var desktop = new Bitmap(640, 480);
+            using (var graphics = Graphics.FromImage(desktop)) graphics.Clear(Color.White);
+            using (var overlay = new CaptureOverlay(false, desktop, new Rectangle(0, 0, 640, 480), settings))
+            {
+                overlay.Show(); overlay.SelectRegion(new Rectangle(40, 80, 320, 180)); Application.DoEvents();
+                var bar = Field<CaptureToolbar>(overlay, "toolbar");
+                var strip = Field<ToolStrip>(bar, "strip");
+                Assert(strip.Items.IndexOf(Field<ToolStripButton>(bar, "video")) == strip.Items.IndexOf(Field<ToolStripButton>(bar, "gif")) + 1, "Video button must follow GIF.");
+                Field<ToolStripButton>(bar, "video").PerformClick();
+                Assert(!Field<bool>(overlay, "ready"), "Recording must allow a fresh region selection.");
+                overlay.SelectRegion(new Rectangle(40, 80, 320, 180)); Application.DoEvents();
+                Assert(Field<Panel>(overlay, "recordingOptions").Visible && !Field<CaptureToolbar>(overlay, "toolbar").Visible, "Recording selection controls are missing.");
+                Assert(Field<Panel>(overlay, "recordingOptions").Top > 260 && overlay.Controls.Find("recording-drag", true).Length == 1, "Recording options should start below the region and provide a drag handle.");
+                Field<AnnotationCanvas>(overlay, "canvas").Hide();
+                overlay.GetType().GetField("recordingCountdownValue", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(overlay, 3);
+                using (var image = new Bitmap(640, 480))
+                {
+                    overlay.DrawToBitmap(image, new Rectangle(0, 0, 640, 480));
+                    Assert(image.GetPixel(121, 91).ToArgb() == Color.White.ToArgb(), "Countdown retained a rectangular background.");
+                    var fill = image.GetPixel(269, 170);
+                    Assert(fill.R >= 159 && fill.R <= 162, "Countdown background must be 60 percent transparent.");
+                }
+                overlay.GetType().GetField("recordingCountdownValue", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(overlay, 0);
+                Field<AnnotationCanvas>(overlay, "canvas").Show();
+                overlay.CaptureGifFrame = delegate { return new Bitmap(32, 32); };
+                using (var stop = new System.Windows.Forms.Timer { Interval = 50 })
+                {
+                    stop.Tick += delegate
+                    {
+                        var session = Field<GifCaptureSession>(overlay, "gifSession");
+                        if (session != null && session.Elapsed > 200) { stop.Stop(); session.Finish(); }
+                    };
+                    stop.Start(); var clock = System.Diagnostics.Stopwatch.StartNew();
+                    Wait((Task)overlay.GetType().GetMethod("CaptureVideoAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(overlay, null));
+                    Assert(clock.ElapsedMilliseconds >= 3000, "Recording skipped the countdown.");
+                }
+                var videoEditor = Application.OpenForms.Cast<Form>().OfType<GifEditorForm>().Single();
+                Assert(videoEditor.Text.Contains("编辑录屏"), "Recording did not open the video editor."); videoEditor.Close();
+            }
+            using (var capture = new GifCaptureSession(delegate { return new Bitmap(32, 32); }, 10))
+            {
+                var running = capture.RunAsync(); Thread.Sleep(140); capture.SetPaused(true); int elapsed = capture.Elapsed;
+                Thread.Sleep(120); Assert(Math.Abs(capture.Elapsed - elapsed) < 15, "Pause advanced the recording clock.");
+                capture.SetPaused(false); Thread.Sleep(120); capture.Finish(); Wait(running);
+                Assert(running.Result.Frames.Count > 1 && running.Result.Duration < 360, "Pause was included in the output timeline.");
+            }
+            var clip = Fixture(); clip.Recording = new RecordingMedia();
+            for (int index = 0; index < clip.Frames.Count; index++) { clip.Frames[index].SourceTime = index * 100; clip.Frames[index].SourceDuration = 100; }
+            string wav = Path.Combine(clip.Recording.DirectoryPath, "tone.wav");
+            using (var writer = new NAudio.Wave.WaveFileWriter(wav, new NAudio.Wave.WaveFormat(48000, 16, 1)))
+                for (int sample = 0; sample < 14400; sample++) writer.WriteSample((float)(Math.Sin(sample * 2 * Math.PI * 440 / 48000) * .2));
+            clip.Recording.AudioPaths.Add(wav);
+            using (var editor = new GifEditorForm(clip, settings))
+            {
+                editor.Show(); Application.DoEvents();
+                var toolbar = Field<CaptureToolbar>(editor, "toolbar");
+                Assert(!Field<ToolStrip>(toolbar, "strip").Items.Cast<ToolStripItem>().Any(item => item.Name == "recognize-text" || item.Name == "video-capture"), "Unsuitable video editor tools remained visible.");
+                Assert(Field<GifScopeSelector>(editor, "scope").Value == GifEditScope.Selected, "Video annotation scope should start at the selected range.");
+                Field<GifRangeSlider>(editor, "range").SetRange(1, 1); Key(editor, settings.GifDeleteSelectedShortcut);
+                Assert(clip.Frames.Count == 2 && clip.Duration == 200 && clip.Frames[1].SourceTime == 200, "Deletion lost audio source timing.");
+                var export = VideoExport.Encode(clip, 0, 1, CancellationToken.None); Wait(export);
+                Assert(new FileInfo(export.Result).Length > 500, "MP4 export failed.");
+                Key(editor, settings.GifUndoShortcut); Assert(clip.Frames.Count == 3 && clip.Duration == 300, "Video deletion undo failed.");
+                editor.Close();
+            }
+            Console.WriteLine("PASS video entry, selection, pause timing, audio-aware segment deletion, MP4 export and undo");
+        }
         internal static void Run()
         {
+            TestVideoTools();
             TestFrameControls();
             TestDragPreview();
             var clip = Fixture();

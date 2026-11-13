@@ -20,7 +20,7 @@ namespace ShotInk
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 if (args.Length == 1 && args[0] == "--slider-tests")
-                { Run("compact sliders expand centrally with clean rounded corners", TestOvalSlider); return 0; }
+                { Run("expanded slider thumbs stay under the pointer with clean rounded corners", TestOvalSlider); return 0; }
                 if (args.Length == 1 && args[0] == "--stitch-tests")
                 {
                     TestStitch(); TestScrollReversals(); TestDocumentStitch(); TestTextSeams();
@@ -2215,8 +2215,11 @@ namespace ShotInk
                     Mouse(slider, "OnMouseDown", MouseButtons.Left, (int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2));
                     var expanded = Field<OvalSlider>(slider, "expandedSlider"); var panel = Field<Panel>(slider, "expandedPanel");
                     Assert(expanded != null && expanded.Width > slider.Width && panel.Right <= host.ClientSize.Width && panel.Left >= 0 && slider.Value == 14, "Short slider did not expand within the window while preserving its value.");
-                    if (left == 220) Assert(Math.Abs(panel.Left + panel.Width / 2 - slider.Left - slider.Width / 2) <= 1, "Short slider expansion was not centered on the original control.");
-                    Assert(panel.Region != null && !panel.Region.IsVisible(0, 0) && !panel.Region.IsVisible(panel.Width - 1, panel.Height - 1), "Expanded slider corners were not clipped to the rounded surface.");
+                    var pointer = slider.PointToScreen(new Point((int)(thumb.Left + thumb.Width / 2), (int)(thumb.Top + thumb.Height / 2)));
+                    var expandedThumb = expanded.ThumbBounds;
+                    var actual = expanded.PointToScreen(new Point((int)(expandedThumb.Left + expandedThumb.Width / 2), (int)(expandedThumb.Top + expandedThumb.Height / 2)));
+                    Assert(Math.Abs(actual.X - pointer.X) <= 1 && Math.Abs(actual.Y - pointer.Y) <= 1, "Expanded slider thumb moved away from the pointer.");
+                    Assert(panel.Region == null, "Expanded slider should retain smooth transparent corners.");
                     host.Update(); panel.Refresh(); Native.FlushDesktop();
                     using (var image = Native.Capture(panel.RectangleToScreen(panel.ClientRectangle)))
                     {

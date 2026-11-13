@@ -10,7 +10,7 @@ $dist=Join-Path $root $(if($Lite){'dist-lite'}else{'dist'})
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {
     [IO.Compression.ZipFile]::ExtractToDirectory($archive, $fixture)
-    $required=@('ShotInk.exe','ShotInk.flavor','ShotInk.build.sha256','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')
+    $required=@('ShotInk.exe','ShotInk.flavor','ShotInk.build.sha256','update-portable.ps1','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','NAudio.dll','recording\ffmpeg.exe','recording\FFmpeg-LICENSE.txt','recording\NAudio-LICENSE.txt')
     if(-not $Lite){$required+=@('ocr\ShotInk.OcrHost.exe','ocr\coreclr.dll','ocr\onnxruntime.dll','ocr\libSkiaSharp.dll','ocr\models\v6\PP-OCRv6_rec_small.onnx')}
     foreach($file in $required){if(-not(Test-Path -LiteralPath (Join-Path $fixture $file))){throw ('ZIP omitted '+$file)}}
     if(Test-Path -LiteralPath (Join-Path $fixture 'docs')){throw 'Portable ZIP retained docs.'}
@@ -34,7 +34,7 @@ try {
     $probe = Join-Path $fixture 'ShotInk.PackageTests.exe'
     $defines=@();if($Lite){$defines+='/define:SHOTINK_LITE'}
     $testSource=Join-Path $PSScriptRoot $(if($Lite){'Lite.Package.Tests.cs'}else{'Installed.Tests.cs'})
-    & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @defines @sources $testSource
+    & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll ('/r:' + (Join-Path $root 'build\recording\NAudio.dll')) /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @defines @sources $testSource
     if ($LASTEXITCODE -ne 0) { throw 'Packaged OCR probe compilation failed.' }
     & $probe (Join-Path $PSScriptRoot 'fixtures\ocr-mixed.png') $archive
     if ($LASTEXITCODE -ne 0) { throw 'Extracted ZIP cannot find or run its bundled OCR environment.' }

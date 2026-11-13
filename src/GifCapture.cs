@@ -14,10 +14,12 @@ namespace ShotInk
     internal sealed class GifFrame
     {
         internal byte[] Png;
+        internal string PngPath;
         internal int Time;
+        internal int SourceTime, SourceDuration;
         internal List<Mark> Annotations = new List<Mark>();
         internal GifFrameCache Cache;
-        internal Bitmap DecodeOriginal() { using (var stream = new MemoryStream(Png)) using (var image = Image.FromStream(stream)) return new Bitmap(image); }
+        internal Bitmap DecodeOriginal() { using (Stream stream = PngPath == null ? (Stream)new MemoryStream(Png) : File.OpenRead(PngPath)) using (var image = Image.FromStream(stream)) return new Bitmap(image); }
         internal Bitmap Decode()
         {
             var snapshot = Annotations; var cached = Cache == null ? null : Cache.Read(this, snapshot);
@@ -35,6 +37,7 @@ namespace ShotInk
         internal readonly List<GifFrame> Frames = new List<GifFrame>();
         internal int Duration;
         internal bool LimitReached;
+        internal RecordingMedia Recording;
         internal int EndTime(int index) { return index + 1 < Frames.Count ? Frames[index + 1].Time : Duration; }
         internal void DeleteRange(int first, int last)
         {
@@ -53,6 +56,13 @@ namespace ShotInk
         private volatile bool finish;
         private int disposed;
         private readonly double interval;
+        private readonly Stopwatch clock = new Stopwatch();
+        private readonly Stopwatch wallClock = new Stopwatch();
+        private readonly object clockLock = new object();
+        private bool paused;
+        internal string FrameDirectory;
+        internal int Elapsed { get { lock (clockLock) return (int)clock.ElapsedMilliseconds; } }
+        internal void SetPaused(bool value) { lock (clockLock) { paused = value; if (value) clock.Stop(); else clock.Start(); } }
         internal GifCaptureSession(Func<Bitmap> capture, int framesPerSecond = 30)
         {
             if (framesPerSecond < 1 || framesPerSecond > 50) throw new ArgumentOutOfRangeException("framesPerSecond");
@@ -65,18 +75,26 @@ namespace ShotInk
             var token = cancel.Token;
             return Task.Run(async delegate
             {
-                var clip = new GifClip(); var clock = Stopwatch.StartNew(); long bytes = 0; double nextFrame = 0;
+                var clip = new GifClip(); clock.Start(); wallClock.Start(); long bytes = 0; double nextFrame = 0;
                 do
                 {
                     token.ThrowIfCancellationRequested();
-                    int at = (int)clock.ElapsedMilliseconds;
+                    bool waiting; lock (clockLock) waiting = paused;
+                    if (waiting) { await Task.WhenAny(Task.Delay(20, token), finishing.Task).ConfigureAwait(false); continue; }
+                    int at = (int)clock.ElapsedMilliseconds; int sourceTime = (int)wallClock.ElapsedMilliseconds;
                     using (var image = capture()) using (var png = new MemoryStream())
                     {
                         image.Save(png, ImageFormat.Png);
-                        var frame = new GifFrame { Png = png.ToArray(), Time = at };
-                        clip.Frames.Add(frame); bytes += frame.Png.Length;
+                        var frame = new GifFrame { Png = png.ToArray(), Time = at, SourceTime = sourceTime };
+                        bytes += frame.Png.Length;
+                        if (FrameDirectory != null)
+                        {
+                            frame.PngPath = Path.Combine(FrameDirectory, "captured-" + clip.Frames.Count + ".png");
+                            File.WriteAllBytes(frame.PngPath, frame.Png); frame.Png = null;
+                        }
+                        clip.Frames.Add(frame);
                     }
-                    if (clock.ElapsedMilliseconds >= 60000 || bytes >= 192L * 1024 * 1024) { clip.LimitReached = true; break; }
+                    if (clock.ElapsedMilliseconds >= 60000 || (FrameDirectory == null && bytes >= 192L * 1024 * 1024)) { clip.LimitReached = true; break; }
                     nextFrame = Math.Max(nextFrame + interval, clock.Elapsed.TotalMilliseconds);
                     if (!finish)
                     {
@@ -85,7 +103,9 @@ namespace ShotInk
                     }
                 } while (!finish);
                 token.ThrowIfCancellationRequested();
+                if (clip.Frames.Count == 0) throw new OperationCanceledException();
                 clip.Duration = Math.Max(clip.Frames[clip.Frames.Count - 1].Time + 20, (int)clock.ElapsedMilliseconds);
+                for (int index = 0; index < clip.Frames.Count; index++) clip.Frames[index].SourceDuration = clip.EndTime(index) - clip.Frames[index].Time;
                 return clip;
             });
         }

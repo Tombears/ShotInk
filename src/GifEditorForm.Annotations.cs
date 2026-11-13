@@ -50,13 +50,14 @@ namespace ShotInk
             foreach (var frame in clip.Frames) frame.Cache = frameCache;
             var row = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             toolbar = new CaptureToolbar(settings) { Name = "gif-tools", Location = Point.Empty };
-            toolbar.ConfigureForGif();
+            toolbar.ConfigureForGif(clip.Recording != null);
             scope = new GifScopeSelector { Name = "gif-tool-scope", Anchor = AnchorStyles.Top | AnchorStyles.Right };
             row.Controls.Add(toolbar); row.Controls.Add(scope);
             Action positionTools = delegate { scope.Location = new Point(Math.Max(toolbar.Right + 8, row.ClientSize.Width - scope.Width), 0); };
             row.Resize += delegate { positionTools(); };
             toolbar.LayoutChanged += delegate { layout.RowStyles[1].Height = toolbar.Height + 4; positionTools(); };
             scope.ValueChanged += delegate { CommitFrameCanvas(); editScope = scope.Value; };
+            if (clip.Recording != null) scope.SelectScope(GifEditScope.Selected);
             toolbar.ToolChanged += delegate(DrawTool tool)
             {
                 if (busy || clip.Frames.Count == 0) return;

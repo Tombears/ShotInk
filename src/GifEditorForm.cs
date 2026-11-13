@@ -33,7 +33,7 @@ namespace ShotInk
 #if !SHOTINK_LITE
             gifRecognizer = recognizer ?? RapidTextRecognizer.Shared;
 #endif
-            Text = "GIF 剪辑 · ShotInk"; MainForm.UseAppIcon(this);
+            Text = clip.Recording == null ? "GIF 剪辑 · ShotInk" : "编辑录屏 · ShotInk"; MainForm.UseAppIcon(this);
             Font = ToolAppearance.Font; BackColor = Color.White; Size = new Size(980, 760); MinimumSize = new Size(740, 560);
             StartPosition = FormStartPosition.CenterScreen; KeyPreview = true;
             layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 2, RowCount = 7 };
@@ -45,37 +45,38 @@ namespace ShotInk
             viewport = new Panel { Dock = DockStyle.Fill, BackColor = preview.BackColor }; viewport.Controls.Add(preview);
             viewport.Resize += delegate { FitFrameCanvas(); };
             layout.Controls.Add(viewport, 0, 0); layout.SetColumnSpan(viewport, 2);
-            position = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            position = new Label { Dock = DockStyle.Fill, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft };
             layout.Controls.Add(position, 0, 2); layout.SetColumnSpan(position, 2);
             range = new GifRangeSlider(clip.Frames.Count - 1) { Name = "gif-range", Dock = DockStyle.Fill };
             layout.Controls.Add(range, 0, 3); layout.SetColumnSpan(range, 2);
             range.RangeChanged += TrimChanged;
             range.DragStarted += delegate { dragPreviewSession++; Pause(); ReleaseFrameCanvas(true); preview.Show(); frameCache.CancelPrefetch(); };
             range.DragCompleted += delegate { if (!disposed && !busy) ShowFrame(frameIndex); };
-            var hint = new Label { Text = "预览区 ← / → 逐帧查看；点击起点或终点手柄后，← / → 每次调整一帧。", ForeColor = Color.DimGray, Dock = DockStyle.Fill };
+            var hint = new Label { Text = "预览区 ← / → 逐帧查看；点击起点或终点手柄后，← / → 每次调整一帧。", ForeColor = ToolAppearance.Muted, Dock = DockStyle.Fill };
             layout.Controls.Add(hint, 0, 4); layout.SetColumnSpan(hint, 2);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            play = new Button { Name = "gif-play", Text = "播放选段", Width = 104, Height = 32 };
-            delete = new Button { Name = "gif-delete", Text = "删除选中", Width = 104, Height = 32, ForeColor = Color.Firebrick };
-            deleteCurrent = new Button { Name = "gif-delete-current", Text = "删除当前帧", Width = 104, Height = 32, ForeColor = Color.Firebrick };
-            copy = new Button { Name = "gif-copy", Text = "复制 GIF", Width = 104, Height = 32 };
-            save = new Button { Name = "gif-save", Text = "保存 GIF", Width = 104, Height = 32 };
-            play.Click += delegate { if (playback.Enabled) { Pause(); ShowFrame(frameIndex); } else { ShowFrame(range.First, false); play.Text = "暂停"; playback.Interval = FrameDelay(frameIndex); playback.Start(); } };
+            play = new ToolOptionButton { Name = "gif-play", Text = "播放选段", Width = 104, Height = 32 };
+            delete = new ToolOptionButton { Name = "gif-delete", Text = "删除选中", Width = 104, Height = 32, ForeColor = Color.Firebrick, AccentColor = ToolAppearance.Accent("cancel"), Selected = true };
+            deleteCurrent = new ToolOptionButton { Name = "gif-delete-current", Text = "删除当前帧", Width = 104, Height = 32, ForeColor = Color.Firebrick, AccentColor = ToolAppearance.Accent("cancel"), Selected = true };
+            copy = new ToolOptionButton { Name = "gif-copy", Text = "复制 GIF", Width = 104, Height = 32, AccentColor = ToolAppearance.Accent("copy"), Selected = true };
+            save = new ToolOptionButton { Name = "gif-save", Text = "保存 GIF", Width = 104, Height = 32, AccentColor = ToolAppearance.Accent("save"), Selected = true };
+            play.Click += delegate { if (playback.Enabled) { Pause(); ShowFrame(frameIndex); } else { ShowFrame(range.First, false); play.Text = "暂停"; playback.Interval = FrameDelay(frameIndex); playback.Start(); PlayVideoAudio(frameIndex); } };
             copy.Click += async delegate { await ExportAsync(true); }; save.Click += async delegate { await ExportAsync(false); };
             delete.Click += delegate { DeleteSelected(); };
             deleteCurrent.Click += delegate { DeleteFrames(frameIndex, frameIndex, frameIndex); };
             buttons.Controls.Add(play); buttons.Controls.Add(deleteCurrent); buttons.Controls.Add(delete); buttons.Controls.Add(copy); buttons.Controls.Add(save);
             layout.Controls.Add(buttons, 0, 5); layout.SetColumnSpan(buttons, 2);
-            status = new Label { Dock = DockStyle.Fill, ForeColor = Color.DimGray, Visible = false };
+            status = new Label { Dock = DockStyle.Fill, ForeColor = ToolAppearance.Muted, Visible = false };
             layout.Controls.Add(status, 0, 6); layout.SetColumnSpan(status, 2); Controls.Add(layout);
             SetStatus(clip.LimitReached ? "已达到录制上限，已保留内容。" : "");
             playback = new System.Windows.Forms.Timer { Interval = 100 };
-            playback.Tick += delegate { ShowFrame(frameIndex >= range.Last ? range.First : frameIndex + 1, false); playback.Interval = FrameDelay(frameIndex); };
+            playback.Tick += delegate { ShowFrame(frameIndex >= range.Last ? range.First : frameIndex + 1, false); playback.Interval = FrameDelay(frameIndex); PlayVideoAudio(frameIndex); };
+            if (clip.Recording != null) { copy.Text = "复制到剪贴板"; copy.Width = 124; save.Text = "下载 MP4"; }
             SetupAnnotationTools();
             ShowFrame(0);
         }
         private int FrameDelay(int index) { return Math.Max(20, clip.EndTime(index) - clip.Frames[index].Time); }
-        private void Pause() { playback.Stop(); play.Text = "播放选段"; }
+        private void Pause() { playback.Stop(); StopVideoAudio(false); play.Text = "播放选段"; }
         private void TrimChanged(int index)
         {
             Pause(); encoded = null;
@@ -166,10 +167,11 @@ namespace ShotInk
             if (busy || clip.Frames.Count == 0) return;
             EnsureEditorUiContext();
             Pause(); CommitFrameCanvas(); busy = true; EnableEditing(false);
-            int first = range.First, last = range.Last; SetStatus("正在生成 GIF…");
+            int first = range.First, last = range.Last; SetStatus(clip.Recording == null ? "正在生成 GIF…" : "正在生成 MP4…");
             try
             {
                 await frameCache.CancelPrefetch(); if (IsDisposed) return; EnsureEditorUiContext();
+                if (clip.Recording != null) { await ExportVideoAsync(copying, first, last); return; }
                 if (encoded == null || cachedFirst != first || cachedLast != last)
                 {
                     var token = generation.Token;
@@ -185,10 +187,10 @@ namespace ShotInk
                 else SetStatus(GifExport.Save(this, encoded, settings) ? "GIF 已保存。" : "已取消保存。");
             }
             catch (Exception error) { if (!IsDisposed) SetStatus("未完成：" + error.Message); }
-            finally { if (!IsDisposed) { busy = false; EnableEditing(true); } }
+            finally { if (!IsDisposed) { busy = false; EnableEditing(true); } else if (clip.Recording != null) clip.Recording.Dispose(); }
         }
         protected override void Dispose(bool disposing)
-        { if (disposing && !disposed) { disposed = true; generation.Cancel(); generation.Dispose(); frameCache.Dispose(); ReleaseFrameCanvas(false); if (playback != null) playback.Dispose(); if (preview != null && preview.Image != null) { preview.Image.Dispose(); preview.Image = null; } } base.Dispose(disposing); }
+        { if (disposing && !disposed) { disposed = true; StopVideoAudio(true); generation.Cancel(); generation.Dispose(); if (clip.Recording != null && !busy) clip.Recording.Dispose(); frameCache.Dispose(); ReleaseFrameCanvas(false); if (playback != null) playback.Dispose(); if (preview != null && preview.Image != null) { preview.Image.Dispose(); preview.Image = null; } } base.Dispose(disposing); }
         private sealed class GifPreviewBox : PictureBox
         { internal GifPreviewBox() { SetStyle(ControlStyles.Selectable, true); TabStop = true; } }
     }

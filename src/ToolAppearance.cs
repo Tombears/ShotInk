@@ -72,6 +72,7 @@ namespace ShotInk
                 case "eraser": return Color.FromArgb(190, 67, 140);
                 case "ocr": return Color.FromArgb(8, 130, 161);
                 case "scroll": return Color.FromArgb(87, 93, 206);
+                case "video": return Color.FromArgb(211, 71, 87);
                 case "gif": return Color.FromArgb(209, 67, 112);
                 case "save": return Color.FromArgb(32, 137, 92);
                 case "cancel": return Color.FromArgb(209, 67, 67);

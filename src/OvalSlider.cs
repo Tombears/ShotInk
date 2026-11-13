@@ -19,6 +19,7 @@ namespace ShotInk
         private OvalSlider expandedSlider;
         private Action collapseExpansion;
         private bool expansionCloseQueued;
+        private float expandedTrackLeft = -1, expandedTrackRight = -1;
         internal event EventHandler ValueChanged;
         internal int SmallChange = 1;
         internal int LargeChange = 4;
@@ -48,8 +49,8 @@ namespace ShotInk
                 SetValue(value);
             }
         }
-        private float TrackLeft { get { return Math.Min(18, Width / 2F); } }
-        private float TrackRight { get { return Math.Max(TrackLeft, Width - 56); } }
+        private float TrackLeft { get { return expandedTrackLeft >= 0 ? expandedTrackLeft : Math.Min(18, Width / 2F); } }
+        private float TrackRight { get { return expandedTrackRight >= 0 ? expandedTrackRight : Math.Max(TrackLeft, Width - 56); } }
         internal RectangleF ThumbBounds
         {
             get
@@ -106,14 +107,14 @@ namespace ShotInk
             if (form == null || form.ClientSize.Width < 240) return false;
             if (!ThumbBounds.Contains(e.Location)) SetFromPointer(e.X);
             var pointer = PointToScreen(e.Location);
-            var origin = form.PointToClient(PointToScreen(Point.Empty));
+            var anchor = form.PointToClient(pointer);
             int width = Math.Min(320, form.ClientSize.Width - 16);
             expandedSlider = new OvalSlider { Minimum = minimum, Maximum = maximum, Value = value, AccentColor = AccentColor,
                 SmallChange = SmallChange, LargeChange = LargeChange, Size = new Size(width - 12, SliderAppearance.Height), Location = new Point(6, 6), AccessibleName = AccessibleName };
             expandedSlider.collapseExpansion = CloseExpansion;
             var thumb = expandedSlider.ThumbBounds;
-            int left = origin.X + (Width - width) / 2;
-            int top = origin.Y - 6;
+            int left = (int)Math.Round(anchor.X - 6 - thumb.Left - thumb.Width / 2);
+            int top = (int)Math.Round(anchor.Y - 6 - SliderAppearance.TrackY(expandedSlider.Height));
             var panel = new ExpandedSliderPanel { Size = new Size(width, SliderAppearance.Height + 12) };
             panel.Location = new Point(Math.Max(8, Math.Min(form.ClientSize.Width - width - 8, left)),
                 Math.Max(8, Math.Min(form.ClientSize.Height - panel.Height - 8, top)));
@@ -124,7 +125,15 @@ namespace ShotInk
             expandedSlider.MouseCaptureChanged += delegate { if (expandedSlider != null && !expandedSlider.Capture) QueueCloseExpansion(); };
             form.Controls.Add(panel); panel.BringToFront(); expandedSlider.Focus();
             var local = expandedSlider.PointToClient(pointer);
-            expandedSlider.grabOffset = local.X - (thumb.Left + thumb.Width / 2);
+            // Keep the current value under the pointer when the window edge limits placement.
+            double ratio = maximum == minimum ? 0 : (value - (double)minimum) / (maximum - (double)minimum);
+            double span = expandedSlider.TrackRight - expandedSlider.TrackLeft;
+            if (ratio > 0) span = Math.Min(span, (local.X - 9) / ratio);
+            if (ratio < 1) span = Math.Min(span, (expandedSlider.Width - 46 - local.X) / (1 - ratio));
+            span = Math.Max(1, span);
+            expandedSlider.expandedTrackLeft = (float)(local.X - span * ratio);
+            expandedSlider.expandedTrackRight = (float)(local.X + span * (1 - ratio));
+            expandedSlider.grabOffset = 0;
             expandedSlider.dragging = true; expandedSlider.Capture = true; expandedSlider.Invalidate();
             return true;
         }
@@ -165,14 +174,7 @@ namespace ShotInk
             internal ExpandedSliderPanel()
             {
                 SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
-                BackColor = Color.White;
-            }
-            protected override void OnSizeChanged(EventArgs e)
-            {
-                base.OnSizeChanged(e);
-                if (Width < 2 || Height < 2) return;
-                using (var path = ToolAppearance.Rounded(new RectangleF(0, 0, Width, Height), 8))
-                { var previous = Region; Region = new Region(path); if (previous != null) previous.Dispose(); }
+                BackColor = Color.Transparent;
             }
             protected override void OnPaint(PaintEventArgs e)
             {

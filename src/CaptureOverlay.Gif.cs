@@ -52,10 +52,11 @@ namespace ShotInk
         private void UpdateRecordingRegion()
         {
             if (IsDisposed || (gifSession == null && scrollSession == null)) return;
-            if (!captureChromeExcluded && toolbar.Bounds.IntersectsWith(selection))
-                toolbar.Location = CaptureToolbar.Place(selection, ClientRectangle, toolbar.Size);
+            Control navigation = recordingNavigation ?? (Control)toolbar;
+            if (!captureChromeExcluded && navigation.Bounds.IntersectsWith(selection))
+                navigation.Location = CaptureToolbar.Place(selection, ClientRectangle, navigation.Size);
             var surface = new Region(ClientRectangle); var hole = selection; hole.Inflate(5, 5);
-            surface.Exclude(hole); surface.Union(toolbar.Bounds);
+            surface.Exclude(hole); surface.Union(navigation.Bounds);
             var previous = Region; Region = surface; if (previous != null) previous.Dispose();
         }
     }

@@ -26,6 +26,7 @@ namespace ShotInk
         internal bool AutoHistory = true;
         internal int HistoryLimit = 10;
         internal int GifFramesPerSecond = 30;
+        internal bool RecordingGuideSeen, RecordMicrophone, RecordSpeaker = true, RecordPointer = true;
         internal Keys GifDeleteCurrentShortcut = Keys.Control | Keys.X;
         internal Keys GifDeleteSelectedShortcut = Keys.Control | Keys.Shift | Keys.X;
         internal Keys GifUndoShortcut = Keys.Control | Keys.Z;
@@ -60,6 +61,7 @@ namespace ShotInk
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
             StartWithWindows = other.StartWithWindows;
             GifFramesPerSecond = other.GifFramesPerSecond;
+            RecordingGuideSeen = other.RecordingGuideSeen; RecordMicrophone = other.RecordMicrophone; RecordSpeaker = other.RecordSpeaker; RecordPointer = other.RecordPointer;
             GifDeleteCurrentShortcut = other.GifDeleteCurrentShortcut; GifDeleteSelectedShortcut = other.GifDeleteSelectedShortcut; GifUndoShortcut = other.GifUndoShortcut;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
             QuickCopyShortcut = other.QuickCopyShortcut; QuickEditShortcut = other.QuickEditShortcut; FullScreenShortcut = other.FullScreenShortcut;
@@ -99,6 +101,10 @@ namespace ShotInk
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value;
+                if (values.TryGetValue("record-guide-seen", out value)) settings.RecordingGuideSeen = value == "1";
+                if (values.TryGetValue("record-microphone", out value)) settings.RecordMicrophone = value == "1";
+                if (values.TryGetValue("record-speaker", out value)) settings.RecordSpeaker = value == "1";
+                if (values.TryGetValue("record-pointer", out value)) settings.RecordPointer = value == "1";
                 if (values.TryGetValue("save", out value)) settings.AutoHistory = value != "0";
                 settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
                 settings.GifFramesPerSecond = (int)ReadNumber(values, "gif-fps", 1, 50, settings.GifFramesPerSecond);
@@ -182,6 +188,8 @@ namespace ShotInk
             var lines = new List<string> { "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
                 "gif-fps=" + GifFramesPerSecond,
+                "record-guide-seen=" + (RecordingGuideSeen ? "1" : "0"), "record-microphone=" + (RecordMicrophone ? "1" : "0"),
+                "record-speaker=" + (RecordSpeaker ? "1" : "0"), "record-pointer=" + (RecordPointer ? "1" : "0"),
                 "gif-delete-current=" + (int)GifDeleteCurrentShortcut, "gif-delete-selected=" + (int)GifDeleteSelectedShortcut, "gif-undo=" + (int)GifUndoShortcut,
                 "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut,
                 "hotkey-quick-copy=" + (int)QuickCopyShortcut, "hotkey-quick-edit=" + (int)QuickEditShortcut, "hotkey-fullscreen=" + (int)FullScreenShortcut,

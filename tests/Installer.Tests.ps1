@@ -14,7 +14,7 @@ try {
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
     $probe = Join-Path $fixture 'ShotInk.InstalledTests.exe'
-    & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @sources (Join-Path $PSScriptRoot 'Installed.Tests.cs')
+    & $compiler /nologo /utf8output /codepage:65001 /target:exe /main:ShotInk.InstalledTests ('/out:' + $probe) /r:System.dll /r:System.Core.dll ('/r:' + (Join-Path $root 'build\recording\NAudio.dll')) /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Runtime.Serialization.dll /r:Accessibility.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.Core.dll')) ('/r:' + (Join-Path $fixture 'Microsoft.Web.WebView2.WinForms.dll')) @sources (Join-Path $PSScriptRoot 'Installed.Tests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Installed OCR probe compilation failed.' }
     & $probe (Join-Path $PSScriptRoot 'fixtures\ocr-mixed.png')
     if ($LASTEXITCODE -ne 0) { throw 'Installed OCR cannot find or run its bundled environment.' }

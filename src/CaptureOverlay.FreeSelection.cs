@@ -27,7 +27,7 @@ namespace ShotInk
         }
         private void SetSelectionMode(bool free)
         {
-            if (scrolling || scrollSession != null || gifSession != null || longViewport != null) return;
+            if (videoMode || scrolling || scrollSession != null || gifSession != null || longViewport != null) return;
             ClearSelection(); freeSelectionMode = free;
             if (settings.FreeSelectionMode != free) { settings.FreeSelectionMode = free; settings.NotifyChanged(); }
             modePicker.SetMode(free); modePicker.Show(); modePicker.BringToFront();

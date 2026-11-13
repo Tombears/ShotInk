@@ -144,6 +144,7 @@ namespace ShotInk
                 { pen.DashStyle = DashStyle.Dot; g.DrawLine(pen, pointer.X, 0, pointer.X, Height); g.DrawLine(pen, 0, pointer.Y, Width, pointer.Y); }
                 DrawHint(g, scrolling ? "长截图 · 拖选滚动内容区域，避开固定导航栏 · Esc 取消" : freeSelectionMode ? FreeHint : RegionHint, new Point(pointer.X + 18, pointer.Y + 24));
             }
+            PaintRecordingCountdown(g);
         }
 
         private void DrawHint(Graphics g, string text, Point at)
@@ -321,6 +322,7 @@ namespace ShotInk
             toolbar.ScrollClicked += StartLongCapture;
             toolbar.ScrollFinishClicked += delegate { if (gifSession != null) { toolbar.SetScrollFinishing(); gifSession.Finish(); } else FinishLongCapture(); };
             toolbar.GifClicked += StartGifCapture;
+            toolbar.VideoClicked += PrepareVideoCapture;
             toolbar.ToolbarMoved += delegate { PositionToolbar(); UpdateRecordingRegion(); };
 #if !SHOTINK_LITE
             toolbar.RecognitionClicked += async delegate { await recognition.RecognizeAsync(); };
@@ -352,6 +354,7 @@ namespace ShotInk
             work = Rectangle.Intersect(work, ClientRectangle);
             toolbar.Location = toolbar.UserPlaced ? CaptureToolbar.Clamp(toolbar.Location, work, toolbar.Size) : CaptureToolbar.Place(selection, work, toolbar.Size);
             toolbar.BringToFront();
+            if (videoMode) { toolbar.Hide(); PositionVideoOptions(); }
 #if !SHOTINK_LITE
             if (textSearch != null && textSearch.Visible)
             {
@@ -371,6 +374,7 @@ namespace ShotInk
             else if (longAlignmentLost) sizeHint.Text += " · 页面变化过大，已保留可拼接部分";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
             sizeHint.BringToFront();
+            PositionVideoOptions();
             var points = SelectionGeometry.Handles(selection);
             for (int i = 0; i < edgeTargets.Length; i++)
             {
@@ -414,6 +418,7 @@ namespace ShotInk
 
         private void ClearSelection()
         {
+            if (recordingOptions != null) recordingOptions.Hide();
             selectionOutline = null; freePoints.Clear();
             edgeHold.Stop(); keyboardEdge = -1;
             foreach (var edge in edgeTargets) edge.Hide();
@@ -429,13 +434,13 @@ namespace ShotInk
             longLimitReached = false; longAlignmentLost = false;
             if (toolbar != null) { Controls.Remove(toolbar); toolbar.Dispose(); toolbar = null; }
             selection = Rectangle.Empty; sizeHint.Hide();
-            if (modePicker != null) { modePicker.Visible = !scrolling; modePicker.BringToFront(); }
+            if (modePicker != null) { modePicker.Visible = !scrolling && !videoMode; modePicker.BringToFront(); }
             foreach (var grip in grips) grip.Hide();
         }
 
         private void Finish(CaptureAction action)
         {
-            if (!ready || completed || scrollSession != null || gifSession != null) return;
+            if (!ready || completed || videoMode || scrollSession != null || gifSession != null) return;
             var image = canvas.Render();
             if (action == CaptureAction.Save)
             {
@@ -486,6 +491,7 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (videoMode && !videoStarting && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; StartVideoFromKey(); return; }
             if (e.KeyData == Keys.L && !KeyboardEditorFocused(this) && !dragging && scrollSession == null && gifSession == null && longViewport == null)
             { SetSelectionMode(!freeSelectionMode); e.SuppressKeyPress = true; return; }
             if (NudgeSelection(e.KeyData)) { e.SuppressKeyPress = true; return; }
@@ -523,7 +529,7 @@ namespace ShotInk
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
         private void ClearLongDragPreview() { if (longDragPreview != null) { longDragPreview.Dispose(); longDragPreview = null; } }
-        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose();
+        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); recordingTip.Dispose(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose();
 #if !SHOTINK_LITE
             if (recognition != null) recognition.Dispose();
 #endif

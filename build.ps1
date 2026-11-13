@@ -20,12 +20,18 @@ $distRoot = Join-Path $projectRoot $(if($Lite){'dist-lite'}else{'dist'})
 New-Item -ItemType Directory -Path $buildRoot, $distRoot -Force | Out-Null
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
 & (Join-Path $projectRoot 'scripts\build-webview.ps1')
+& (Join-Path $projectRoot 'scripts\build-recording.ps1')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording\NAudio.dll') -Destination $buildRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording\NAudio.dll') -Destination $distRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording') -Destination $distRoot -Recurse -Force
+if ($Lite) { Copy-Item -LiteralPath (Join-Path $projectRoot 'build\recording') -Destination $buildRoot -Recurse -Force }
 foreach ($name in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','WebView2-LICENSE.txt')) {
     $dependency=Join-Path $projectRoot ('build\webview2\'+$name)
     Copy-Item -LiteralPath $dependency -Destination $buildRoot -Force
     Copy-Item -LiteralPath $dependency -Destination $distRoot -Force
 }
 $references = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll', '/r:Accessibility.dll', '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll')
+$references += '/r:' + (Join-Path $buildRoot 'NAudio.dll')
 $references += @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll') | ForEach-Object { '/r:' + (Join-Path $buildRoot $_) }
 $common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references
 if ($Lite) { $common += '/define:SHOTINK_LITE' }
@@ -61,7 +67,7 @@ if ($Lite) {
 [IO.File]::WriteAllText((Join-Path $distRoot 'ShotInk.build.sha256'), $sourceSignature)
 [IO.File]::WriteAllText((Join-Path $distRoot 'update-portable.ps1'), [IO.File]::ReadAllText((Join-Path $projectRoot 'scripts\update-portable.ps1')), (New-Object Text.UTF8Encoding($true)))
 $browserFiles = @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll', 'WebView2-LICENSE.txt') | ForEach-Object { Join-Path $distRoot $_ }
-$files=@($appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ShotInk.build.sha256'), (Join-Path $distRoot 'ShotInk.flavor'), (Join-Path $distRoot 'update-portable.ps1')) + $browserFiles
+$files=@((Join-Path $distRoot 'recording'), (Join-Path $distRoot 'NAudio.dll'), $appPath, (Join-Path $distRoot 'README.md'), (Join-Path $distRoot 'LICENSE'), (Join-Path $distRoot 'ShotInk.build.sha256'), (Join-Path $distRoot 'ShotInk.flavor'), (Join-Path $distRoot 'update-portable.ps1')) + $browserFiles
 if (-not $Lite) {$files+=Join-Path $distRoot 'ocr'}
 Compress-Archive -LiteralPath $files -DestinationPath $archive -Force
 Write-Host ('Built: ' + $appPath)

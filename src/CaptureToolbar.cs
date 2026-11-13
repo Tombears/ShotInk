@@ -16,7 +16,7 @@ namespace ShotInk
         private readonly ToolStripButton redo;
         private readonly ToolStripButton recognize;
         private readonly ToolStripButton scroll;
-        private readonly ToolStripButton gif;
+        private readonly ToolStripButton gif, video;
         private readonly Control dragGrip;
         private bool movingToolbar;
         private Point moveAnchor, moveOrigin;
@@ -47,6 +47,7 @@ namespace ShotInk
         internal event Action ScrollClicked;
         internal event Action ScrollFinishClicked;
         internal event Action GifClicked;
+        internal event Action VideoClicked;
         internal event Action ToolbarMoved;
 
         internal CaptureToolbar(AppSettings settings = null)
@@ -85,6 +86,8 @@ namespace ShotInk
             scroll.Name = "scroll-capture";
             gif = Button("gif", "GIF 录制：使用当前选框，停止后裁剪区段", delegate { if (GifClicked != null) GifClicked(); });
             gif.Name = "gif-capture";
+            video = Button("video", "录屏：选区、声音与指针设置", delegate { if (VideoClicked != null) VideoClicked(); });
+            video.Name = "video-capture";
             strip.Items.Add(new ToolStripSeparator());
             undo = Button("undo", "撤销 (Ctrl+Z)", delegate { if (UndoClicked != null) UndoClicked(); });
             redo = Button("redo", "重做 (Ctrl+Y)", delegate { if (RedoClicked != null) RedoClicked(); });
@@ -131,14 +134,14 @@ namespace ShotInk
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
-        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = !enabled; }
-        internal void SetFreeSelection(bool enabled) { scroll.Enabled = gif.Enabled = !enabled; }
+        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = video.Enabled = !enabled; }
+        internal void SetFreeSelection(bool enabled) { scroll.Enabled = gif.Enabled = video.Enabled = !enabled; }
         internal void SetRecordingText(string text) { finishScroll.Text = text; }
-        internal void ConfigureForGif()
+        internal void ConfigureForGif(bool videoEditor = false)
         {
-            var keep = new HashSet<ToolStripItem>(tools.Values); if (recognize != null) keep.Add(recognize); keep.Add(undo); keep.Add(redo);
+            var keep = new HashSet<ToolStripItem>(tools.Values); if (recognize != null && !videoEditor) keep.Add(recognize); keep.Add(undo); keep.Add(redo);
             for (int index = strip.Items.Count - 1; index >= 0; index--)
-                if (!keep.Contains(strip.Items[index])) { var item = strip.Items[index]; strip.Items.RemoveAt(index); item.Dispose(); }
+                if (!keep.Contains(strip.Items[index])) { var item = strip.Items[index]; strip.Items.RemoveAt(index); if (item != recognize) item.Dispose(); }
             var separator = new ToolStripSeparator { AutoSize = false, Width = 5, Margin = Padding.Empty };
             strip.Items.Insert(strip.Items.IndexOf(undo), separator);
             int width = strip.Padding.Horizontal + 2; foreach (ToolStripItem item in strip.Items) width += item.Width;
@@ -353,6 +356,18 @@ namespace ShotInk
                     case "grip":
                         for (int x = 7; x <= 13; x += 6) for (int y = 5; y <= 15; y += 5) g.FillEllipse(brush, x, y, 2, 2);
                         break;
+                    case "play":
+                        g.FillPolygon(brush, new[] { new Point(6, 3), new Point(6, 17), new Point(17, 10) }); break;
+                    case "pause":
+                        g.FillRectangle(brush, 5, 3, 4, 14); g.FillRectangle(brush, 12, 3, 4, 14); break;
+                    case "microphone":
+                        g.DrawEllipse(pen, 7, 2, 6, 10); g.DrawArc(pen, 4, 5, 12, 10, 0, 180); g.DrawLine(pen, 10, 15, 10, 18); break;
+                    case "speaker":
+                        g.DrawPolygon(pen, new[] { new Point(3, 7), new Point(7, 7), new Point(12, 3), new Point(12, 17), new Point(7, 13), new Point(3, 13) }); g.DrawArc(pen, 10, 4, 8, 12, -70, 140); break;
+                    case "pointer":
+                        g.DrawPolygon(pen, new[] { new Point(4, 2), new Point(16, 11), new Point(11, 12), new Point(9, 18) }); break;
+                    case "video":
+                        g.DrawRectangle(pen, 2, 5, 11, 11); g.DrawPolygon(pen, new[] { new Point(13, 8), new Point(18, 5), new Point(18, 16), new Point(13, 13) }); break;
                     case "gif":
                         using (var path = ToolAppearance.Rounded(new RectangleF(2, 3, 16, 14), 3)) g.DrawPath(pen, path);
                         g.FillPolygon(brush, new[] { new Point(8, 6), new Point(8, 14), new Point(14, 10) });
