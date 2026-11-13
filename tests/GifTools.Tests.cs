@@ -144,9 +144,12 @@ namespace ShotInk
                 var bar = Field<CaptureToolbar>(overlay, "toolbar");
                 var strip = Field<ToolStrip>(bar, "strip");
                 Assert(strip.Items.IndexOf(Field<ToolStripButton>(bar, "video")) == strip.Items.IndexOf(Field<ToolStripButton>(bar, "gif")) + 1, "Video button must follow GIF.");
+                var originalSelection = Field<Rectangle>(overlay, "selection");
+                var originalCanvas = Field<AnnotationCanvas>(overlay, "canvas");
                 Field<ToolStripButton>(bar, "video").PerformClick();
-                Assert(!Field<bool>(overlay, "ready"), "Recording must allow a fresh region selection.");
-                overlay.SelectRegion(new Rectangle(40, 80, 320, 180)); Application.DoEvents();
+                Assert(Field<bool>(overlay, "ready") && Field<Rectangle>(overlay, "selection") == originalSelection, "Recording must immediately reuse the existing screenshot region.");
+                Assert(object.ReferenceEquals(originalCanvas, Field<AnnotationCanvas>(overlay, "canvas")) && originalCanvas.Visible && !originalCanvas.IsDisposed, "Switching to recording discarded the screenshot canvas.");
+                Assert(object.ReferenceEquals(bar, Field<CaptureToolbar>(overlay, "toolbar")) && !bar.IsDisposed, "Switching to recording rebuilt the screenshot toolbar.");
                 Assert(Field<Panel>(overlay, "recordingOptions").Visible && !Field<CaptureToolbar>(overlay, "toolbar").Visible, "Recording selection controls are missing.");
                 Assert(Field<Panel>(overlay, "recordingOptions").Height == bar.Height, "Recording toolbar height differs from the capture toolbar.");
                 var tips = Field<ToolTip>(overlay, "recordingTip");
@@ -165,7 +168,8 @@ namespace ShotInk
                 }
                 overlay.GetType().GetField("recordingCountdownValue", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(overlay, 0);
                 Field<AnnotationCanvas>(overlay, "canvas").Show();
-                overlay.CaptureGifFrame = delegate { return new Bitmap(32, 32); };
+                Rectangle capturedRegion = Rectangle.Empty;
+                overlay.CaptureGifFrame = delegate(Rectangle region) { capturedRegion = region; return new Bitmap(32, 32); };
                 using (var stop = new System.Windows.Forms.Timer { Interval = 50 })
                 {
                     stop.Tick += delegate
@@ -183,6 +187,7 @@ namespace ShotInk
                     stop.Start(); var clock = System.Diagnostics.Stopwatch.StartNew();
                     Wait((Task)overlay.GetType().GetMethod("CaptureVideoAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(overlay, null));
                     Assert(clock.ElapsedMilliseconds >= 3000, "Recording skipped the countdown.");
+                    Assert(capturedRegion == originalSelection, "Recording captured a different region from the original screenshot selection.");
                 }
                 var videoEditor = Application.OpenForms.Cast<Form>().OfType<GifEditorForm>().Single();
                 Assert(videoEditor.Text.Contains("编辑录屏"), "Recording did not open the video editor."); videoEditor.Close();

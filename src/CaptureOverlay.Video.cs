@@ -16,7 +16,7 @@ namespace ShotInk
         private async void StartVideoFromKey() { await CaptureVideoAsync(); }
         private void PrepareVideoCapture()
         {
-            if (gifSession != null || scrollSession != null || longViewport != null || selectionOutline != null) return;
+            if (!ready || videoStarting || gifSession != null || scrollSession != null || longViewport != null || selectionOutline != null) return;
             videoMode = true; toolbar.SelectTool(DrawTool.None); toolbar.Hide();
             if (recordingOptions == null)
             {
@@ -30,7 +30,7 @@ namespace ShotInk
                 start.Click += async delegate { await CaptureVideoAsync(); };
                 recordingOptions.Controls.Add(start); Controls.Add(recordingOptions);
             }
-            ClearSelection(); freeSelectionMode = false; modePicker.Hide(); recordingOptions.Hide(); Invalidate(true);
+            freeSelectionMode = false; modePicker.Hide(); PositionVideoOptions(); Invalidate(true);
         }
         private ToolOptionButton RecordingSwitch(string icon, string label, int left, bool value)
         {
@@ -67,12 +67,12 @@ namespace ShotInk
         private void PositionVideoOptions()
         {
             if (!videoMode || recordingOptions == null || videoStarting || !ready) return;
-            recordingOptions.Show();
-            if (!settings.RecordingGuideSeen && !recordingGuideRunning) ShowRecordingGuide();
             recordingOptions.Location = recordingOptionsPlaced
                 ? CaptureToolbar.Clamp(recordingOptions.Location, ClientRectangle, recordingOptions.Size)
                 : CaptureToolbar.Place(selection, ClientRectangle, recordingOptions.Size);
+            recordingOptions.Show();
             recordingOptions.BringToFront();
+            if (!settings.RecordingGuideSeen && !recordingGuideRunning) ShowRecordingGuide();
         }
         private void AddRecordingDragHandle(Panel panel, Action moved)
         {
