@@ -4,6 +4,7 @@ $planPath=[IO.Path]::GetFullPath($Plan)
 $updateRoot=Split-Path -Parent $planPath
 $update=Get-Content -LiteralPath $planPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $script:CanRestart=$true
+$script:RemoveBackup=$false
 function Resolve-UpdateFile([string]$Root,[string]$Relative) {
     if ([IO.Path]::IsPathRooted($Relative) -or $Relative.Contains('\') -or $Relative.Contains(':')) { throw 'Invalid update file path.' }
     foreach($part in $Relative.Split('/')) { if (-not $part -or $part -eq '..' -or $part -eq '.' -or $part.TrimEnd(' ','.') -ne $part -or $part -match '[<>"|?*\x00-\x1f]|^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])($|\.)') { throw 'Invalid update path segment.' } }
@@ -78,12 +79,14 @@ function Install-PortableUpdate {
             } catch { $rollbackErrors.Add($_.Exception.Message) }
         }
         if($rollbackErrors.Count -gt 0){$script:CanRestart=$false;throw ('更新失败，部分文件未能恢复。请保留备份目录并手动恢复：'+$backup)}
+        $script:RemoveBackup=$true
         throw ('更新失败，已恢复原程序：'+$failure)
     }
+    $script:RemoveBackup=$true
     Start-Process -FilePath (Join-Path $target 'ShotInk.exe') -WorkingDirectory $target -WindowStyle Hidden
 }
 function Remove-UpdatePackage {
-    # Only the known package and payload belong to cleanup; backups and logs stay available.
+    # Keep recovery files only when replacement or rollback has not completed.
     $stage=[IO.Path]::GetFullPath($updateRoot).TrimEnd('\')
     $archive=Resolve-UpdateFile $stage 'ShotInk-portable.zip'
     $payload=Resolve-UpdateFile $stage 'payload'
@@ -91,6 +94,13 @@ function Remove-UpdatePackage {
     if(Test-Path -LiteralPath $payload -PathType Container){
         if([IO.Path]::GetFullPath($payload) -ne (Join-Path $stage 'payload')){throw 'Invalid cleanup directory.'}
         Remove-Item -LiteralPath $payload -Recurse -Force
+    }
+    if($script:RemoveBackup){
+        $backup=Resolve-UpdateFile $stage 'backup'
+        if(Test-Path -LiteralPath $backup -PathType Container){
+            if([IO.Path]::GetFullPath($backup) -ne (Join-Path $stage 'backup')){throw 'Invalid backup cleanup directory.'}
+            Remove-Item -LiteralPath $backup -Recurse -Force
+        }
     }
 }
 # Tests dot-source the functions without installing or restarting a real application.

@@ -47,7 +47,7 @@ try {
     Wait-UpdateFile $complete
     if(-not $helper.WaitForExit(10000) -or $helper.ExitCode -ne 0){throw 'Update helper did not complete successfully.'}
     if([IO.File]::ReadAllText((Join-Path $target 'settings.ini')) -ne 'save-directory=E:\file\picture' -or [IO.File]::ReadAllText((Join-Path $target 'captures\keep.png')) -ne 'user capture'){throw 'Real-process update changed user data.'}
-    if((Get-FileHash -LiteralPath (Join-Path $stage 'backup\ShotInk.exe')).Hash -ne $oldHash){throw 'Original executable backup was lost.'}
+    if(Test-Path -LiteralPath (Join-Path $stage 'backup')){throw 'Successful update retained a rollback backup.'}
     if((Test-Path -LiteralPath (Join-Path $stage 'ShotInk-portable.zip')) -or (Test-Path -LiteralPath $payload)){throw 'Real update retained ZIP or payload after successful restart.'}
     Write-Host 'PASS: real Windows PowerShell handshake, wait-for-exit, replacement, restart and preserved user files'
 }finally {

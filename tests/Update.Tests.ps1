@@ -2,16 +2,18 @@ param([string]$BinaryPath=(Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\Sh
 $ErrorActionPreference='Stop'
 $fixture=Join-Path ([IO.Path]::GetTempPath()) ('ShotInk-update-helper-'+[Guid]::NewGuid().ToString('N'))
 $projectRoot=Split-Path -Parent $PSScriptRoot
-$state=[pscustomobject]@{Starts=0;FailOnce=$false;Failed=$false;Target=''}
+$state=[pscustomobject]@{Starts=0;FailOnce=$false;Failed=$false;FailRollback=$false;Target=''}
 function Start-Process { param($FilePath,$WorkingDirectory,$WindowStyle) $state.Starts++; if(-not(Test-Path -LiteralPath $FilePath)){throw 'Restart target missing.'} }
 function Copy-Item {
     param($LiteralPath,$Destination,[switch]$Force)
     if($state.FailOnce -and -not $state.Failed -and $Destination -eq (Join-Path $state.Target 'ocr\ShotInk.OcrHost.exe')){$state.Failed=$true;throw 'Simulated locked OCR file'}
+    if($state.FailRollback -and $state.Failed -and $Destination -eq (Join-Path $state.Target 'ShotInk.exe')){throw 'Simulated rollback failure'}
     Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
 }
 function Assert-Update([bool]$condition,[string]$message){if(-not $condition){throw $message}}
 try {
-    foreach($fail in @($false,$true)) {
+    foreach($scenario in @('success','rollback','rollback-failure')) {
+        $fail=$scenario -ne 'success'
         $case=Join-Path $fixture ([Guid]::NewGuid().ToString('N'));$stage=Join-Path $case 'stage';$payload=Join-Path $stage 'payload';$target=Join-Path $case 'installed'
         New-Item -ItemType Directory -Path $payload,$target,(Join-Path $payload 'ocr'),(Join-Path $target 'ocr'),(Join-Path $target 'captures') -Force | Out-Null
         [IO.File]::Copy((Resolve-Path -LiteralPath $BinaryPath).Path,(Join-Path $payload 'ShotInk.exe'))
@@ -25,12 +27,15 @@ try {
         $planPath=Join-Path $stage 'update-plan.json'
         @{Target=$target;Payload=$payload;Backup=(Join-Path $stage 'backup');ProcessId=[int]::MaxValue;Version=[Reflection.AssemblyName]::GetAssemblyName((Resolve-Path -LiteralPath $BinaryPath).Path).Version.ToString(3);Files=$files} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $planPath -Encoding UTF8
         . (Join-Path $projectRoot 'scripts\update-portable.ps1') -Plan $planPath
-        $state.Starts=0;$state.FailOnce=$fail;$state.Failed=$false;$state.Target=$target
+        $state.Starts=0;$state.FailOnce=$fail;$state.Failed=$false;$state.FailRollback=$scenario -eq 'rollback-failure';$state.Target=$target
         [IO.File]::WriteAllText((Join-Path $stage 'ShotInk-portable.zip'),'downloaded package')
         $failed=$false
         try { Install-PortableUpdate } catch { $failed=$true; if(-not $fail){throw} }
         Assert-Update ($failed -eq $fail) 'Install failure behavior was incorrect.'
-        if($fail){
+        if($state.FailRollback){
+            Assert-Update (-not $script:CanRestart) 'Incomplete rollback allowed a restart.'
+            Assert-Update ($state.Starts -eq 0) 'Incomplete rollback restarted the application.'
+        }elseif($fail){
             Assert-Update ([IO.File]::ReadAllText((Join-Path $target 'ShotInk.exe')) -eq 'old executable') 'Rollback failed to restore the old executable.'
             Assert-Update ([IO.File]::ReadAllText((Join-Path $target 'ocr\ShotInk.OcrHost.exe')) -eq 'old OCR') 'Rollback damaged an unchanged locked file.'
             Assert-Update (-not(Test-Path -LiteralPath (Join-Path $target 'ShotInk.build.sha256'))) 'Rollback left a newly added file behind.'
@@ -44,9 +49,19 @@ try {
         [IO.File]::WriteAllText((Join-Path $stage 'update-error.txt'),'keep diagnostic')
         Remove-UpdatePackage
         Assert-Update (-not(Test-Path -LiteralPath (Join-Path $stage 'ShotInk-portable.zip')) -and -not(Test-Path -LiteralPath $payload)) 'Completed or failed installation retained package files.'
-        Assert-Update ((Test-Path -LiteralPath (Join-Path $stage 'backup/ShotInk.exe')) -and (Test-Path -LiteralPath (Join-Path $stage 'update-error.txt'))) 'Cleanup removed rollback backup or diagnostic log.'
+        Assert-Update ((Test-Path -LiteralPath (Join-Path $stage 'backup')) -eq $state.FailRollback) 'Backup retention did not match rollback completion.'
+        Assert-Update (Test-Path -LiteralPath (Join-Path $stage 'update-error.txt')) 'Cleanup removed the diagnostic log.'
+        Remove-UpdatePackage
+        Assert-Update ((Test-Path -LiteralPath (Join-Path $stage 'backup')) -eq $state.FailRollback) 'Repeated cleanup changed backup retention.'
         $rejected=$false;try { Resolve-UpdateFile $target '../escape' | Out-Null } catch {$rejected=$true}
         Assert-Update $rejected 'Helper accepted a traversal path.'
     }
     Write-Host 'PASS: update installation, backup, rollback, restart and user-data preservation'
-}finally{if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}}
+}finally{
+    if(Test-Path -LiteralPath $fixture){
+        $resolved=[IO.Path]::GetFullPath($fixture)
+        $temporaryRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+        if(-not $resolved.StartsWith($temporaryRoot,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($resolved) -notlike 'ShotInk-update-helper-*'){throw 'Unsafe update-test cleanup path.'}
+        Remove-Item -LiteralPath $resolved -Recurse -Force
+    }
+}
