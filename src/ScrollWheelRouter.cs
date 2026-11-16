@@ -6,7 +6,7 @@ using System.Windows.Forms;
 namespace ShotInk
 {
     // Route real wheel input to the page, including when the pointer stays over the toolbar.
-    // Advance as soon as the preceding viewport is safely captured and processed.
+    // Advance after capture, allowing bounded stitching work to run independently.
     internal sealed class ScrollWheelRouter : IDisposable
     {
         private delegate IntPtr MouseCallback(int code, IntPtr message, IntPtr data);
@@ -73,12 +73,12 @@ namespace ShotInk
             bool lost = session.AlignmentLost;
             if (lost && !alignmentWasLost) { alignmentWasLost = true; pending = 0; return; }
             alignmentWasLost = lost;
-            bool sampled = session.ProcessedVersion > sentVersion && session.IsCaughtUp;
+            bool sampled = session.CapturedVersion > sentVersion && session.PendingFrames < ScrollCaptureSession.QueueCapacity - 2;
             // A video or blinking caret must not prevent the page from receiving wheel input forever.
             if (!sampled) sampled = elapsed >= 200 && session.Frames > 0 && session.PendingFrames <= 1;
             if (pending == 0 || elapsed < 16 || !sampled) return;
             int delta = Math.Sign(pending) * Math.Min(120, Math.Abs(pending));
-            sentVersion = session.ProcessedVersion;
+            sentVersion = session.CapturedVersion;
             session.NotifyWheel(delta);
             if (!Native.PostWheel(target, Center, delta)) { pending = 0; session.Finish(); return; }
             pending -= delta; sentAt = Environment.TickCount;

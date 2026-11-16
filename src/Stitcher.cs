@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace ShotInk
 {
@@ -17,6 +18,7 @@ namespace ShotInk
         private byte[] head;
         private int framePosition;
         private int frameHeight;
+        internal static readonly int AlignmentWorkers = Math.Max(1, Math.Min(2, Environment.ProcessorCount));
         internal const int MaxHeight = 30000;
         internal const long MaxPixels = 80000000;
         private readonly int heightLimit;
@@ -28,7 +30,7 @@ namespace ShotInk
         internal int Frames { get; private set; }
         internal double LastError { get; private set; }
 
-        internal StitchStatus Add(Bitmap frame, int direction = 0)
+        internal StitchStatus Add(Bitmap frame, int direction = 0, bool requireDirection = false)
         {
             if (previous == null)
             {
@@ -53,14 +55,27 @@ namespace ShotInk
             double bestError = double.MaxValue;
             // Search every pixel: jumping offsets can miss the only valid match on sharp text.
             int preferred = direction < 0 ? -1 : 1;
-            for (int distance = 1; distance <= maximum; distance++)
+            var offsets = new int[AlignmentWorkers];
+            var errors = new double[AlignmentWorkers];
+            Parallel.For(0, AlignmentWorkers, new ParallelOptions { MaxDegreeOfParallelism = AlignmentWorkers }, delegate(int worker)
             {
-                for (int pass = 0; pass < 2; pass++)
+                double localError = double.MaxValue;
+                int localOffset = 0;
+                for (int distance = worker + 1; distance <= maximum; distance += AlignmentWorkers)
                 {
-                    int offset = distance * preferred * (pass == 0 ? 1 : -1);
-                    double error = Error(before, after, Width, frame.Height, offset, Math.Min(12, bestError), 0, fixedBottom);
-                    if (error < bestError) { bestError = error; best = offset; }
+                    for (int pass = 0; pass < 2; pass++)
+                    {
+                        int offset = distance * preferred * (pass == 0 ? 1 : -1);
+                        double error = Error(before, after, Width, frameHeight, offset, Math.Min(12, localError), 0, fixedBottom);
+                        if (error < localError) { localError = error; localOffset = offset; }
+                    }
                 }
+                offsets[worker] = localOffset; errors[worker] = localError;
+            });
+            for (int worker = 0; worker < AlignmentWorkers; worker++)
+            {
+                if (errors[worker] < bestError || errors[worker] == bestError && Math.Abs(offsets[worker]) < Math.Abs(best))
+                { bestError = errors[worker]; best = offsets[worker]; }
             }
             if (best == 0 || bestError > 12 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
             // Validate the alignment at full width; sparse sampling can miss a one-pixel text shift.
@@ -74,11 +89,12 @@ namespace ShotInk
             }
             LastError = bestError;
             if (bestError > 3 || bestError > unchanged * 0.65) return StitchStatus.Unmatched;
+            if (requireDirection && best * direction < 0) return StitchStatus.Unmatched;
             int position = framePosition + best;
             if (position < 0)
             {
                 int prepend = -position;
-                int headBottom = Math.Max(fixedBottom, FindFixedBottom(head, after, Width, frameHeight));
+                int headBottom = object.ReferenceEquals(head, before) ? fixedBottom : Math.Max(fixedBottom, FindFixedBottom(head, after, Width, frameHeight));
                 if (prepend > maximum || Error(head, after, Width, frameHeight, -prepend, 3, 1, headBottom) > 3) return StitchStatus.Unmatched;
                 if (Height + prepend > heightLimit || (long)Width * (Height + prepend) > pixelLimit) return StitchStatus.LimitReached;
                 // The new viewport precedes the old head. Replace its overlapping
@@ -99,7 +115,7 @@ namespace ShotInk
             }
             // Returning through previously captured content must not append it again.
             // Validate any new tail against the furthest captured viewport, not the last revisited frame.
-            int tailBottom = Math.Max(fixedBottom, FindFixedBottom(frontier, after, Width, frameHeight));
+            int tailBottom = object.ReferenceEquals(frontier, before) ? fixedBottom : Math.Max(fixedBottom, FindFixedBottom(frontier, after, Width, frameHeight));
             if (added > maximum || Error(frontier, after, Width, frameHeight, added, 3, 1, tailBottom) > 3) return StitchStatus.Unmatched;
             if (Height + added > heightLimit || (long)Width * (Height + added) > pixelLimit) return StitchStatus.LimitReached;
             int seam = FindTextSeam(frontier, after, Width, frame.Height, added, tailBottom);

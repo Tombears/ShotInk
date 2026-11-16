@@ -18,7 +18,7 @@ namespace ShotInk
         public void Dispose() { if (Image != null) Image.Dispose(); }
     }
 
-    // Preserve sampled frames in order. Back pressure never replaces an overlap frame.
+    // Keep overlap frames until a newer frame has been successfully aligned.
     internal sealed class ScrollCaptureSession : IDisposable
     {
         internal const int PollInterval = 10;
@@ -44,6 +44,7 @@ namespace ShotInk
         internal bool IsCaughtUp { get { return Volatile.Read(ref processedVersion) > 0 && Volatile.Read(ref processedVersion) == Volatile.Read(ref capturedVersion); } }
         internal int PendingFrames { get { return Volatile.Read(ref capturedVersion) - Volatile.Read(ref processedVersion); } }
         internal int ProcessedVersion { get { return Volatile.Read(ref processedVersion); } }
+        internal int CapturedVersion { get { return Volatile.Read(ref capturedVersion); } }
         internal int StableMilliseconds { get { return unchecked(Environment.TickCount - Volatile.Read(ref lastChangedAt)); } }
         internal bool AlignmentLost { get { return Volatile.Read(ref alignmentLost) != 0; } }
         internal int Height { get { return Volatile.Read(ref stitchedHeight); } }
@@ -60,9 +61,12 @@ namespace ShotInk
             return Task.Run(async delegate
             {
                 var token = cancellation.Token;
+                bool samplingStopped = false;
                 var producer = Task.Run(async delegate
                 {
                     ulong previous = 0; bool first = true;
+                    byte[] pixels = null;
+                    long finishingAt = -1, lastChange = 0;
                     var clock = System.Diagnostics.Stopwatch.StartNew();
                     try
                     {
@@ -70,20 +74,22 @@ namespace ShotInk
                         {
                             long sampleStarted = clock.ElapsedMilliseconds;
                             token.ThrowIfCancellationRequested();
+                            if (Volatile.Read(ref samplingStopped)) break;
                             while (true)
                             {
                                 lock (gate) { if (pending.Count < QueueCapacity) break; }
-                                if (finishRequested) return;
+                                if (Volatile.Read(ref samplingStopped)) return;
                                 await Task.Delay(1, token).ConfigureAwait(false);
                             }
                             int direction = Volatile.Read(ref scrollDirection);
                             var frame = capture();
                             try
                             {
-                                ulong signature = Signature(frame);
+                                ulong signature = Signature(frame, ref pixels);
                                 if (first || signature != previous)
                                 {
                                     first = false; previous = signature;
+                                    lastChange = clock.ElapsedMilliseconds;
                                     lock (gate)
                                     {
                                         pending.Enqueue(new CapturedFrame { Image = frame, Direction = direction });
@@ -94,7 +100,12 @@ namespace ShotInk
                                 }
                             }
                             finally { if (frame != null) frame.Dispose(); }
-                            if (finishRequested) break;
+                            if (finishRequested)
+                            {
+                                if (finishingAt < 0) finishingAt = clock.ElapsedMilliseconds;
+                                long finishingFor = clock.ElapsedMilliseconds - finishingAt;
+                                if (finishingFor >= 600 || finishingFor >= 200 && clock.ElapsedMilliseconds - lastChange >= 80) break;
+                            }
                             await Task.Delay((int)Math.Max(1, PollInterval - (clock.ElapsedMilliseconds - sampleStarted)), token).ConfigureAwait(false);
                         }
                     }
@@ -106,23 +117,47 @@ namespace ShotInk
                     using (var stitcher = new VerticalStitcher(heightLimit, pixelLimit))
                     {
                         bool limit = false;
+                        var stitchClock = System.Diagnostics.Stopwatch.StartNew();
+                        long lastStitch = -32;
                         while (true)
                         {
                             await changed.WaitAsync(token).ConfigureAwait(false);
-                            CapturedFrame frame = null;
+                            if (!finishRequested && Volatile.Read(ref scrollDirection) != 0)
+                                await Task.Delay((int)Math.Max(0, 32 - (stitchClock.ElapsedMilliseconds - lastStitch)), token).ConfigureAwait(false);
+                            var batch = new List<CapturedFrame>();
                             lock (gate)
                             {
-                                if (pending.Count > 0) frame = pending.Dequeue();
+                                if (pending.Count > 0)
+                                {
+                                    var frame = pending.Dequeue(); batch.Add(frame);
+                                    while (frame.Direction != 0 && batch.Count < 3 && pending.Count > 0 && pending.Peek().Direction == frame.Direction)
+                                    { batch.Add(pending.Dequeue()); changed.Wait(0); }
+                                }
                                 else if (producerDone) break;
                             }
-                            if (frame == null) continue;
-                            StitchStatus status;
-                            using (frame.Image) { if (BeforeStitch != null) BeforeStitch(); status = stitcher.Add(frame.Image, frame.Direction); }
+                            if (batch.Count == 0) continue;
+                            StitchStatus status = StitchStatus.Unchanged;
+                            lastStitch = stitchClock.ElapsedMilliseconds;
+                            try
+                            {
+                                if (BeforeStitch != null) BeforeStitch();
+                                var newest = batch[batch.Count - 1];
+                                status = stitcher.Add(newest.Image, newest.Direction, batch.Count > 1);
+                                // Retain intermediate overlap frames until the larger step is validated.
+                                if (batch.Count > 1 && status != StitchStatus.Added)
+                                    foreach (var frame in batch)
+                                    {
+                                        status = stitcher.Add(frame.Image, frame.Direction);
+                                        frame.Image.Dispose(); frame.Image = null;
+                                        if (status == StitchStatus.LimitReached) break;
+                                    }
+                            }
+                            finally { foreach (var frame in batch) if (frame.Image != null) frame.Image.Dispose(); }
                             Volatile.Write(ref alignmentLost, status == StitchStatus.Unmatched ? 1 : 0);
                             Volatile.Write(ref stitchedHeight, stitcher.Height); Volatile.Write(ref stitchedFrames, stitcher.Frames);
-                            Interlocked.Increment(ref processedVersion);
+                            Interlocked.Add(ref processedVersion, batch.Count);
                             if (status == StitchStatus.LimitReached || stitcher.Height >= heightLimit || (long)stitcher.Width * stitcher.Height >= pixelLimit)
-                            { limit = true; Finish(); break; }
+                            { limit = true; Volatile.Write(ref samplingStopped, true); Finish(); break; }
                         }
                         await producer.ConfigureAwait(false); token.ThrowIfCancellationRequested();
                         if (stitcher.Frames == 0) throw new InvalidOperationException("选区超过长截图尺寸上限。");
@@ -138,7 +173,7 @@ namespace ShotInk
                 return output;
             });
         }
-        private static ulong Signature(Bitmap image)
+        private static ulong Signature(Bitmap image, ref byte[] pixels)
         {
             int bytes = System.Drawing.Image.GetPixelFormatSize(image.PixelFormat) / 8;
             if (bytes < 3) throw new InvalidOperationException("不支持的截图像素格式。");
@@ -146,12 +181,17 @@ namespace ShotInk
             try
             {
                 ulong hash = 1469598103934665603UL;
-                for (int y = 0; y < image.Height; y += Math.Max(1, image.Height / 48))
-                    for (int x = 0; x < image.Width; x += Math.Max(1, image.Width / 64))
+                int rowBytes = image.Width * bytes;
+                int stride = Math.Abs(data.Stride);
+                if (pixels == null || pixels.Length < stride * image.Height) pixels = new byte[stride * image.Height];
+                if (data.Stride > 0) Marshal.Copy(data.Scan0, pixels, 0, stride * image.Height);
+                else for (int y = 0; y < image.Height; y++) Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), pixels, y * stride, rowBytes);
+                for (int y = 0; y < image.Height; y++)
+                    for (int x = 0; x < rowBytes; x += bytes)
                     {
-                        int at = y * data.Stride + x * bytes;
-                        for (int channel = 0; channel < 3; channel++)
-                            hash = unchecked((hash ^ Marshal.ReadByte(data.Scan0, at + channel)) * 1099511628211UL);
+                        int at = y * stride + x;
+                        uint pixel = (uint)(pixels[at] | pixels[at + 1] << 8 | pixels[at + 2] << 16);
+                        hash = unchecked((hash ^ pixel) * 1099511628211UL);
                     }
                 return hash;
             }

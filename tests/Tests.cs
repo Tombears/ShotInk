@@ -65,8 +65,11 @@ namespace ShotInk
                 if (args.Length == 1 && args[0] == "--scroll-tests")
                 {
                     Run("manual scroll sampling and asynchronous stitching preserve pixels", TestScrollPipeline);
+                    Run("slow stitching retains every queued overlap frame under pressure", TestScrollBackPressure);
+                    Run("scroll keyframes preserve pixels, release captures and include delayed final movement", TestScrollKeyframes);
                     Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
                     Run("integrated scroll capture keeps its selection when the pointer leaves", TestIntegratedScroll);
+                    Run("native wheel bursts preserve overlap and reversals", TestLiveIntegratedScroll);
                     Run("page changes wait for completion and retain a partial-capture notice", TestScrollGap);
                     return 0;
                 }
@@ -123,6 +126,7 @@ namespace ShotInk
                 Run("capture toolbar drags without moving the screenshot", TestToolbarDrag);
                 Run("GIF capture uses the chosen region and opens its editor", TestIntegratedGif);
                 Run("slow stitching retains every queued overlap frame under pressure", TestScrollBackPressure);
+                Run("scroll keyframes preserve pixels, release captures and include delayed final movement", TestScrollKeyframes);
                 Run("scroll capture automatically completes at limits and cancels without hanging", TestScrollLimitAndCancel);
                 Run("integrated scroll capture restores tools and edits within a fixed viewport", TestIntegratedScroll);
                 Run("long preview preserves native pixels and moves its frame without altering content", TestLongPreviewMove);
@@ -1001,6 +1005,66 @@ namespace ShotInk
                         EqualPixels(content, result.Image, content.Height);
                     }
                     Assert(session.PeakPendingFrames > 2 && session.PeakPendingFrames <= ScrollCaptureSession.QueueCapacity, "The pressure test did not fill the bounded FIFO queue.");
+                }
+            }
+        }
+        private static void TestScrollKeyframes()
+        {
+            Assert(VerticalStitcher.AlignmentWorkers >= 1 && VerticalStitcher.AlignmentWorkers <= 2, "Alignment worker count exceeded its limit.");
+            using (var content = Pattern(100, 960, 227))
+            {
+                int captures = 0;
+                var images = new System.Collections.Concurrent.ConcurrentBag<Bitmap>();
+                using (var session = new ScrollCaptureSession(delegate
+                {
+                    int index = Math.Min(19, System.Threading.Interlocked.Increment(ref captures) - 1);
+                    var frame = content.Clone(new Rectangle(0, index * 40, 100, 200), PixelFormat.Format24bppRgb);
+                    images.Add(frame); return frame;
+                }))
+                {
+                    session.NotifyWheel(-120);
+                    session.BeforeStitch = delegate { System.Threading.Thread.Sleep(45); };
+                    var task = session.RunAsync(); WaitUntil(delegate { return captures >= 20; }); session.Finish(); Pump(task);
+                    using (var result = task.Result)
+                    {
+                        Assert(result.Frames < 20 && !result.AlignmentLost, "Captured viewports were not combined into validated keyframes.");
+                        EqualPixels(content, result.Image, content.Height);
+                    }
+                    foreach (var image in images)
+                    {
+                        bool released = false;
+                        try { int width = image.Width; } catch (ArgumentException) { released = true; }
+                        Assert(released, "A stitched or skipped capture retained its bitmap.");
+                    }
+                    Console.WriteLine("Keyframe stitching retained " + session.Frames + " of 20 moving viewports; maximum workers=" + VerticalStitcher.AlignmentWorkers);
+                }
+            }
+            using (var content = Pattern(100, 440, 228))
+            {
+                int offset = 0;
+                using (var session = new ScrollCaptureSession(delegate { return content.Clone(new Rectangle(0, System.Threading.Volatile.Read(ref offset), 100, 240), PixelFormat.Format24bppRgb); }))
+                {
+                    var task = session.RunAsync(); WaitUntil(delegate { return session.Height == 240; }); session.Finish();
+                    var tail = System.Threading.Tasks.Task.Run(async delegate { await System.Threading.Tasks.Task.Delay(120); System.Threading.Volatile.Write(ref offset, 160); });
+                    Pump(task); tail.GetAwaiter().GetResult();
+                    using (var result = task.Result) EqualPixels(content, result.Image, 400);
+                }
+            }
+            using (var content = new Bitmap(100, 240))
+            {
+                int changed = 0;
+                using (var session = new ScrollCaptureSession(delegate
+                {
+                    var frame = new Bitmap(content);
+                    if (System.Threading.Volatile.Read(ref changed) != 0) frame.SetPixel(1, 1, Color.White);
+                    return frame;
+                }))
+                {
+                    var task = session.RunAsync(); WaitUntil(delegate { return session.Frames == 1; });
+                    int version = session.CapturedVersion;
+                    System.Threading.Volatile.Write(ref changed, 1);
+                    WaitUntil(delegate { return session.CapturedVersion > version; }); session.Finish(); Pump(task);
+                    task.Result.Dispose();
                 }
             }
         }
