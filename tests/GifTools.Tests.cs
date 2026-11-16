@@ -134,7 +134,7 @@ namespace ShotInk
         private static void TestVideoTools()
         {
             TestAudioTrack(); TestSilentAudioTracks();
-            TestMicrophoneEnhancement(); TestRecordingPlacement();
+            TestMicrophoneEnhancement(); TestMicrophoneCleanup(); TestRecordingSwitchPersistence(); TestRecordingPlacement();
             Assert(File.Exists(VideoExport.EncoderPath), "Recording encoder was omitted from the test output.");
             var settings = new AppSettings { RecordSpeaker = false, RecordingGuideSeen = true };
             var desktop = new Bitmap(640, 480);
@@ -246,6 +246,106 @@ namespace ShotInk
                 Assert(after > before * 2 && after <= .96F, "Microphone enhancement failed to raise quiet speech safely.");
                 using (var reader = new NAudio.Wave.WaveFileReader(path)) Assert(Math.Abs(reader.TotalTime.TotalMilliseconds - 1000) < 5, "Microphone enhancement shifted the audio timeline.");
                 Assert(!File.Exists(path + ".enhanced.wav"), "Microphone processing retained an intermediate file.");
+            }
+        }
+        private static float[] ReadAudio(string path)
+        {
+            using (var reader = new NAudio.Wave.AudioFileReader(path))
+            {
+                var samples = new float[reader.Length / sizeof(float)];
+                int offset = 0, count;
+                while ((count = reader.Read(samples, offset, samples.Length - offset)) > 0) offset += count;
+                return samples;
+            }
+        }
+        private static double AudioRms(float[] samples, int first, int count)
+        {
+            double energy = 0;
+            for (int index = first; index < first + count; index++) energy += samples[index] * samples[index];
+            return Math.Sqrt(energy / count);
+        }
+        private static double ToneAmplitude(float[] samples, int first, int count, int frequency)
+        {
+            double real = 0, imaginary = 0;
+            for (int index = 0; index < count; index++)
+            {
+                double phase = index * 2 * Math.PI * frequency / 48000;
+                real += samples[first + index] * Math.Cos(phase);
+                imaginary += samples[first + index] * Math.Sin(phase);
+            }
+            return Math.Sqrt(real * real + imaginary * imaginary) * 2 / count;
+        }
+        private static void TestMicrophoneCleanup()
+        {
+            using (var media = new RecordingMedia())
+            {
+                string path = Path.Combine(media.DirectoryPath, "noise.wav");
+                var random = new Random(7);
+                using (var writer = new NAudio.Wave.WaveFileWriter(path, new NAudio.Wave.WaveFormat(48000, 16, 1)))
+                    for (int sample = 0; sample < 192000; sample++)
+                    {
+                        double time = sample / 48000.0;
+                        double value = (random.NextDouble() * 2 - 1) * .0026 + .003 * Math.Sin(2 * Math.PI * 30 * time);
+                        if (sample >= 48000 && sample < 144000) value += .015 * Math.Sin(2 * Math.PI * 440 * time);
+                        if (sample >= 96000 && sample < 98400) value += .025 * Math.Sin(2 * Math.PI * 7000 * time);
+                        if (sample >= 144000 && sample < 144120) value += .65;
+                        writer.WriteSample((float)value);
+                    }
+                var before = ReadAudio(path);
+                Wait(RecordingMedia.EnhanceMicrophone(path, 200));
+                var after = ReadAudio(path);
+                Assert(after.Length == before.Length, "Noise cleanup changed audio duration.");
+                Assert(AudioRms(after, 12000, 24000) < AudioRms(before, 12000, 24000) * .8, "Microphone cleanup amplified background noise.");
+                Assert(AudioRms(after, 60000, 24000) > AudioRms(before, 60000, 24000) * 2, "Noise cleanup removed quiet speech.");
+                double sharpBefore = ToneAmplitude(before, 96000, 2400, 7000) / ToneAmplitude(before, 96000, 2400, 440);
+                double sharpAfter = ToneAmplitude(after, 96000, 2400, 7000) / ToneAmplitude(after, 96000, 2400, 440);
+                Assert(sharpAfter < sharpBefore * .85 && RecordingMedia.Peak(path) <= .91F, "High-frequency harshness or transient peaks were not reduced.");
+            }
+            foreach (int rate in new[] { 8000, 16000, 44100, 48000 })
+            foreach (int frames in new[] { rate, rate / 50, rate / 400 })
+            using (var media = new RecordingMedia())
+            {
+                string path = Path.Combine(media.DirectoryPath, "pulse.wav");
+                int pulse = frames - Math.Max(2, rate / 1000);
+                using (var writer = new NAudio.Wave.WaveFileWriter(path, new NAudio.Wave.WaveFormat(rate, 16, 2)))
+                    for (int frame = 0; frame < frames; frame++)
+                    { writer.WriteSample(frame == pulse ? .5F : 0); writer.WriteSample(frame == pulse ? .5F : 0); }
+                Wait(RecordingMedia.EnhanceMicrophone(path, 200));
+                var samples = ReadAudio(path);
+                int peak = 0;
+                for (int index = 0; index < samples.Length; index++) if (Math.Abs(samples[index]) > Math.Abs(samples[peak])) peak = index;
+                Assert(samples.Length == frames * 2 && Math.Abs(samples[peak]) > .001F, "Noise cleanup lost a short recording or its final sound.");
+                Assert(Math.Abs(peak / 2 - pulse) <= rate / 1000, "Noise cleanup shifted audio relative to video.");
+                using (var reader = new NAudio.Wave.WaveFileReader(path)) Assert(reader.WaveFormat.SampleRate == rate && reader.WaveFormat.Channels == 2, "Noise cleanup changed sample rate or channel count.");
+            }
+            Console.WriteLine("PASS microphone noise, harsh frequencies, quiet speech, peaks and denoising delay at four sample rates");
+        }
+        private static void TestRecordingSwitchPersistence()
+        {
+            using (var media = new RecordingMedia())
+            {
+                string path = Path.Combine(media.DirectoryPath, "settings.ini");
+                var settings = new AppSettings { RecordingGuideSeen = true };
+                int saved = 0;
+                settings.Changed += delegate { settings.Save(path); saved++; };
+                using (var desktop = new Bitmap(640, 480))
+                using (var overlay = new CaptureOverlay(false, (Bitmap)desktop.Clone(), new Rectangle(0, 0, 640, 480), settings))
+                {
+                    overlay.Show(); overlay.SelectRegion(new Rectangle(40, 60, 320, 180));
+                    Field<ToolStripButton>(Field<CaptureToolbar>(overlay, "toolbar"), "video").PerformClick();
+                    foreach (string field in new[] { "recordMicrophone", "recordSpeaker", "recordPointer" }) Field<ToolOptionButton>(overlay, field).PerformClick();
+                    Assert(settings.RecordMicrophone && !settings.RecordSpeaker && !settings.RecordPointer && saved >= 3, "Recording switches were not saved when toggled.");
+                    overlay.Close();
+                }
+                var restored = AppSettings.Load(path).Clone();
+                using (var desktop = new Bitmap(640, 480))
+                using (var overlay = new CaptureOverlay(false, (Bitmap)desktop.Clone(), new Rectangle(0, 0, 640, 480), restored))
+                {
+                    overlay.Show(); overlay.SelectRegion(new Rectangle(40, 60, 320, 180));
+                    Field<ToolStripButton>(Field<CaptureToolbar>(overlay, "toolbar"), "video").PerformClick();
+                    Assert(Field<ToolOptionButton>(overlay, "recordMicrophone").Selected && !Field<ToolOptionButton>(overlay, "recordSpeaker").Selected && !Field<ToolOptionButton>(overlay, "recordPointer").Selected, "Recording switches were not restored after reopening.");
+                    overlay.Close();
+                }
             }
         }
         private static void TestRecordingPlacement()

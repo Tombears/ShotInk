@@ -46,10 +46,18 @@ namespace ShotInk
                 toggle.AccentColor = toggle.Selected ? ToolAppearance.Accent("copy") : ToolAppearance.Muted;
                 toggle.AccessibleDescription = toggle.Selected ? "已开启" : "已关闭";
                 toggle.Invalidate();
+                SaveRecordingOptions();
             };
             recordingTip.SetToolTip(toggle, label + "开关，高亮边框表示开启");
             recordingOptions.Controls.Add(toggle);
             return toggle;
+        }
+        private void SaveRecordingOptions()
+        {
+            settings.RecordMicrophone = recordMicrophone.Selected;
+            settings.RecordSpeaker = recordSpeaker.Selected;
+            settings.RecordPointer = recordPointer.Selected;
+            settings.NotifyChanged();
         }
         private async void ShowRecordingGuide()
         {
@@ -113,7 +121,7 @@ namespace ShotInk
         {
             if (videoStarting || gifSession != null || !ready) return;
             EnsureCaptureUiContext(); videoStarting = true; recordingTip.Hide(recordMicrophone); recordingTip.Hide(recordSpeaker); recordingTip.Hide(recordPointer);
-            settings.RecordMicrophone = recordMicrophone.Selected; settings.RecordSpeaker = recordSpeaker.Selected; settings.RecordPointer = recordPointer.Selected; settings.NotifyChanged();
+            SaveRecordingOptions();
             var region = new Rectangle(selection.X + screenBounds.X, selection.Y + screenBounds.Y, selection.Width, selection.Height);
             var media = new RecordingMedia(); bool handedToEditor = false;
             var session = new GifCaptureSession(delegate { var frame = CaptureGifFrame(region); if (settings.RecordPointer) RecordingCursor.Draw(frame, region); return frame; }, settings.GifFramesPerSecond);

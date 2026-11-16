@@ -158,7 +158,7 @@ namespace ShotInk
             audioLayout.Controls.Add(new Label { Text = "麦克风增益（%）", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
             microphoneGain = new NumericUpDown { Name = "record-microphone-gain", Minimum = 100, Maximum = 400, Increment = 25, Value = current.RecordMicrophoneGain, Dock = DockStyle.Fill };
             audioLayout.Controls.Add(new RoundedInputFrame(microphoneGain, Skins.Current.Accent), 1, 1);
-            var audioHint = new Label { Text = "录屏工具栏开启麦克风后生效。默认增益 200%，录制结束后自动平衡轻声并限制峰值。系统声音单独采集。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, Padding = new Padding(0, 8, 0, 0) };
+            var audioHint = new Label { Text = "录屏工具栏开启麦克风后生效。默认增益 200%，录制结束后自动降噪、柔化齿音并平衡音量。系统声音单独采集。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, Padding = new Padding(0, 8, 0, 0) };
             audioLayout.Controls.Add(audioHint, 0, 2); audioLayout.SetColumnSpan(audioHint, 2);
             recordingTab.Controls.Add(audioLayout); tabs.TabPages.Add(recordingTab);
             skin.SelectedIndexChanged += delegate

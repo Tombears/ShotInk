@@ -116,7 +116,17 @@ namespace ShotInk
         internal static async Task EnhanceMicrophone(string path, int gain)
         {
             string enhanced = path + ".enhanced.wav";
-            string filter = "volume=" + (gain / 100.0).ToString("0.00", CultureInfo.InvariantCulture) + ",dynaudnorm=f=150:g=7:p=0.85:m=6:r=0.12:n=0:b=1,alimiter=limit=0.95:level=0:latency=1";
+            int sampleRate;
+            using (var reader = new WaveFileReader(path)) sampleRate = reader.WaveFormat.SampleRate;
+            // afftdn buffers two 1/80-second hops. Flush its tail and remove that delay.
+            int denoiseDelay = 2 * (sampleRate / 80);
+            string filter = "highpass=f=80:p=2,lowpass=f=" + Math.Min(9000, sampleRate * 45 / 100).ToString(CultureInfo.InvariantCulture)
+                + ":p=2,apad=pad_len=" + denoiseDelay.ToString(CultureInfo.InvariantCulture)
+                + ",afftdn=nr=10:nf=-45:tn=1:gs=6,atrim=start_sample=" + denoiseDelay.ToString(CultureInfo.InvariantCulture)
+                + ",asetpts=PTS-STARTPTS,deesser=i=0.25:m=0.4:f=0.5,treble=g=-3:f=" + Math.Min(4000, sampleRate / 4).ToString(CultureInfo.InvariantCulture)
+                + ",volume=" + (Math.Max(100, Math.Min(400, gain)) / 100.0).ToString("0.00", CultureInfo.InvariantCulture)
+                + ",dynaudnorm=f=150:g=7:p=0.8:m=3:r=0.08:n=1:b=1:t=0.006"
+                + ",acompressor=threshold=0.25:ratio=2.5:attack=3:release=100:makeup=1,alimiter=limit=0.90:level=0:latency=1";
             try
             {
                 await VideoExport.RunEncoder("-i " + VideoExport.Quote(path) + " -af " + VideoExport.Quote(filter) + " -c:a pcm_s16le " + VideoExport.Quote(enhanced), CancellationToken.None);
