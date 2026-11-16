@@ -21,6 +21,8 @@ namespace ShotInk
         private readonly List<MMDevice> endpoints = new List<MMDevice>();
         private string microphonePath;
         private int microphoneGain;
+        private WasapiOut silentOutput;
+        private MMDevice outputEndpoint;
         internal string AudioNotice { get; private set; }
         internal RecordingMedia()
         {
@@ -33,6 +35,7 @@ namespace ShotInk
         {
             try
             {
+                if (microphone || speaker) StartSilentOutput();
                 if (microphone)
                 {
                     try
@@ -57,6 +60,28 @@ namespace ShotInk
             }
             catch { Dispose(); throw; }
         }
+        private void StartSilentOutput()
+        {
+            try
+            {
+                using (var devices = new MMDeviceEnumerator())
+                    outputEndpoint = devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                // Keep Bluetooth capture and loopback clocks running while the desktop is quiet.
+                silentOutput = new WasapiOut(outputEndpoint, AudioClientShareMode.Shared, false, 100);
+                silentOutput.Init(new SilenceProvider(outputEndpoint.AudioClient.MixFormat));
+                silentOutput.Play();
+            }
+            catch
+            {
+                // A capture-only device can still record when no output endpoint is available.
+                StopSilentOutput();
+            }
+        }
+        private void StopSilentOutput()
+        {
+            if (silentOutput != null) { silentOutput.Dispose(); silentOutput = null; }
+            if (outputEndpoint != null) { outputEndpoint.Dispose(); outputEndpoint = null; }
+        }
         private void AddTrack(IWaveIn device, string name)
         {
             string path = Path.Combine(DirectoryPath, name);
@@ -68,7 +93,7 @@ namespace ShotInk
         internal async Task StopAudio()
         {
             try { foreach (var track in tracks) { await track.Stop(); track.Dispose(); } }
-            finally { foreach (var track in tracks) track.Dispose(); tracks.Clear(); foreach (var endpoint in endpoints) endpoint.Dispose(); endpoints.Clear(); }
+            finally { foreach (var track in tracks) track.Dispose(); tracks.Clear(); foreach (var endpoint in endpoints) endpoint.Dispose(); endpoints.Clear(); StopSilentOutput(); }
             if (microphonePath == null) return;
             try
             {
@@ -103,6 +128,7 @@ namespace ShotInk
         {
             foreach (var track in tracks) track.Dispose(); tracks.Clear();
             foreach (var endpoint in endpoints) endpoint.Dispose(); endpoints.Clear();
+            StopSilentOutput();
             try { if (Directory.Exists(DirectoryPath)) Directory.Delete(DirectoryPath, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         private sealed class AudioTrack : IDisposable
@@ -127,12 +153,7 @@ namespace ShotInk
                         // Loopback emits no packets during silence. Preserve its wall-clock position.
                         long desired = Math.Max(0, clock.ElapsedMilliseconds * writer.WaveFormat.AverageBytesPerSecond / 1000 - args.BytesRecorded);
                         desired -= desired % writer.WaveFormat.BlockAlign;
-                        long gap = desired - writer.Length;
-                        if (gap > writer.WaveFormat.AverageBytesPerSecond / 10)
-                        {
-                            var silence = new byte[4096];
-                            while (gap > 0) { int count = (int)Math.Min(silence.Length, gap); writer.Write(silence, 0, count); gap -= count; }
-                        }
+                        if (desired - writer.Length > writer.WaveFormat.AverageBytesPerSecond / 10) PadTo(desired);
                         writer.Write(args.Buffer, 0, args.BytesRecorded);
                     }
                 };
@@ -142,9 +163,24 @@ namespace ShotInk
             internal void Start() { clock.Start(); device.StartRecording(); started = true; }
             internal async Task Stop()
             {
+                clock.Stop();
                 if (started) { device.StopRecording(); await stopped.Task; }
-                lock (gate) { if (!disposed) writer.Flush(); }
+                lock (gate)
+                {
+                    if (!disposed)
+                    {
+                        PadTo(clock.ElapsedMilliseconds * writer.WaveFormat.AverageBytesPerSecond / 1000);
+                        writer.Flush();
+                    }
+                }
                 if (failure != null) throw new IOException("音频录制中断。", failure);
+            }
+            private void PadTo(long length)
+            {
+                long gap = length - length % writer.WaveFormat.BlockAlign - writer.Length;
+                var silence = new byte[4096 - 4096 % writer.WaveFormat.BlockAlign];
+                if (writer.WaveFormat.BitsPerSample == 8) for (int index = 0; index < silence.Length; index++) silence[index] = 128;
+                while (gap > 0) { int count = (int)Math.Min(silence.Length, gap); writer.Write(silence, 0, count); gap -= count; }
             }
             public void Dispose()
             {

@@ -133,7 +133,7 @@ namespace ShotInk
         }
         private static void TestVideoTools()
         {
-            TestAudioTrack();
+            TestAudioTrack(); TestSilentAudioTracks();
             TestMicrophoneEnhancement(); TestRecordingPlacement();
             Assert(File.Exists(VideoExport.EncoderPath), "Recording encoder was omitted from the test output.");
             var settings = new AppSettings { RecordSpeaker = false, RecordingGuideSeen = true };
@@ -228,7 +228,8 @@ namespace ShotInk
             public event EventHandler<NAudio.Wave.StoppedEventArgs> RecordingStopped;
             internal byte[] Samples;
             internal bool Disposed;
-            public void StartRecording() { DataAvailable(this, new NAudio.Wave.WaveInEventArgs(Samples, Samples.Length)); }
+            public void StartRecording() { if (Samples != null) Emit(Samples); }
+            internal void Emit(byte[] samples) { DataAvailable(this, new NAudio.Wave.WaveInEventArgs(samples, samples.Length)); }
             public void StopRecording() { RecordingStopped(this, new NAudio.Wave.StoppedEventArgs()); }
             public void Dispose() { Disposed = true; }
         }
@@ -291,6 +292,55 @@ namespace ShotInk
                 }
                 Assert(device.Disposed, "Stopped audio input was not released.");
             }
+        }
+        private static void TestSilentAudioTracks()
+        {
+            foreach (bool delayedSound in new[] { false, true })
+            using (var media = new RecordingMedia())
+            {
+                var format = NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+                var device = new TestAudioInput { WaveFormat = format };
+                typeof(RecordingMedia).GetMethod("AddTrack", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(media, new object[] { device, "speaker.wav" });
+                Thread.Sleep(180);
+                if (delayedSound)
+                {
+                    var samples = new byte[format.AverageBytesPerSecond / 20];
+                    for (int index = 0; index < samples.Length; index += 4) Buffer.BlockCopy(BitConverter.GetBytes(.2F), 0, samples, index, 4);
+                    device.Emit(samples);
+                }
+                Thread.Sleep(180);
+                Wait(media.StopAudio());
+                using (var reader = new NAudio.Wave.WaveFileReader(media.AudioPaths.Single()))
+                {
+                    Assert(reader.TotalTime.TotalMilliseconds >= 350, "Silent system audio was truncated when capture emitted no packets.");
+                    Assert(reader.Length % format.BlockAlign == 0, "Silence padding split an audio frame.");
+                }
+                Assert(delayedSound ? RecordingMedia.Peak(media.AudioPaths.Single()) > .19F : RecordingMedia.Peak(media.AudioPaths.Single()) == 0, "Silence padding altered captured system sound.");
+            }
+            foreach (bool systemAudio in new[] { false, true })
+            {
+                var clip = Fixture(); clip.Recording = new RecordingMedia();
+                try
+                {
+                    foreach (var frame in clip.Frames) { frame.SourceTime = frame.Time; frame.SourceDuration = 100; }
+                    string microphone = Path.Combine(clip.Recording.DirectoryPath, "microphone.wav");
+                    using (var writer = new NAudio.Wave.WaveFileWriter(microphone, new NAudio.Wave.WaveFormat(48000, 16, 1)))
+                        for (int sample = 0; sample < 14400; sample++) writer.WriteSample((float)(Math.Sin(sample * 2 * Math.PI * 440 / 48000) * .2));
+                    clip.Recording.AudioPaths.Add(microphone);
+                    if (systemAudio)
+                    {
+                        string speaker = Path.Combine(clip.Recording.DirectoryPath, "speaker.wav");
+                        using (var writer = new NAudio.Wave.WaveFileWriter(speaker, NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2))) { }
+                        clip.Recording.AudioPaths.Add(speaker);
+                    }
+                    var export = VideoExport.Encode(clip, 0, 2, CancellationToken.None); Wait(export);
+                    string decoded = Path.Combine(clip.Recording.DirectoryPath, "decoded.wav");
+                    Wait(VideoExport.RunEncoder("-i " + VideoExport.Quote(export.Result) + " -vn -c:a pcm_s16le " + VideoExport.Quote(decoded), CancellationToken.None));
+                    Assert(RecordingMedia.Peak(decoded) > .1F, "MP4 lost microphone audio while system audio was silent or disabled.");
+                }
+                finally { clip.Recording.Dispose(); }
+            }
+            Console.WriteLine("PASS microphone-only and silent-system MP4 audio, packet-free and trailing silence");
         }
         internal static void Run()
         {
