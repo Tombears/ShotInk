@@ -32,13 +32,21 @@ namespace ShotInk
             using (var editor = new GifEditorForm(clip, editorSettings))
             {
                 editor.Show(); Application.DoEvents();
+                var wechat = Field<WechatGifPreview>(editor, "wechatPreview");
+                Assert(wechat.Visible && !wechat.IsFile && wechat.FrameSize == new Size(128, 96), "Small GIF did not show the WeChat thumbnail.");
+                editor.Size = editor.MinimumSize; Application.DoEvents();
+                Assert(Field<GifRangeSlider>(editor, "range").Right <= wechat.Left && Field<Button>(editor, "save").Bottom <= Field<Button>(editor, "save").Parent.ClientSize.Height,
+                    "WeChat preview overlaps the timeline or clips export buttons at minimum size.");
+                editor.Size = new Size(980, 760);
                 Assert(editor.Controls.Find("gif-frame-count", true).Length == 0, "GIF retained the removed frame count adjustment.");
                 Key(editor, Keys.Right);
+                Assert(Field<Bitmap>(wechat, "thumbnail").GetPixel(60, 50).G > 240, "WeChat thumbnail did not follow frame navigation.");
                 Field<Button>(editor, "deleteCurrent").PerformClick();
                 Assert(clip.Frames.Count == 2 && clip.Duration == 200 && Field<int>(editor, "frameIndex") == 1, "Delete current frame affected the full selected range.");
                 using (var image = clip.Frames[1].Decode()) Assert(image.GetPixel(60, 50).B > 240, "Current-frame deletion removed the wrong image.");
                 Field<Button>(editor, "deleteCurrent").PerformClick(); Field<Button>(editor, "deleteCurrent").PerformClick();
                 Assert(clip.Frames.Count == 0 && !Field<Button>(editor, "deleteCurrent").Enabled, "Empty clip retained frame controls.");
+                Assert(wechat.FrameSize.IsEmpty, "Deleting all frames retained a stale WeChat preview.");
                 Key(editor, Keys.Control | Keys.Z); Key(editor, Keys.Control | Keys.Z); Key(editor, Keys.Control | Keys.Z);
                 Assert(clip.Frames.Count == 3 && clip.Duration == 300 && clip.Frames.Select(frame => frame.Time).SequenceEqual(new[] { 0, 100, 200 }), "Undo did not restore deleted frames and original timing.");
                 var range = Field<GifRangeSlider>(editor, "range"); range.SetRange(1, 2);
@@ -444,6 +452,15 @@ namespace ShotInk
         }
         internal static void Run()
         {
+            using (var preview = new WechatGifPreview())
+            {
+                foreach (var size in new[] { new Size(980, 980), new Size(981, 100), new Size(100, 981) })
+                using (var image = new Bitmap(size.Width, size.Height))
+                {
+                    preview.SetFrame(image);
+                    Assert(preview.IsFile == (size.Width > 980 || size.Height > 980) && preview.FrameSize == size, "WeChat file preview ignored the 980-pixel boundary.");
+                }
+            }
             TestVideoTools();
             TestFrameControls();
             TestDragPreview();

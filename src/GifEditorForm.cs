@@ -11,6 +11,7 @@ namespace ShotInk
         private readonly GifClip clip;
         private readonly AppSettings settings;
         private readonly PictureBox preview;
+        private readonly WechatGifPreview wechatPreview;
         private readonly GifRangeSlider range;
         private readonly Label position, status;
         private readonly Button play, copy, save, delete, deleteCurrent;
@@ -34,10 +35,10 @@ namespace ShotInk
             gifRecognizer = recognizer ?? RapidTextRecognizer.Shared;
 #endif
             Text = clip.Recording == null ? "GIF 剪辑 · ShotInk" : "编辑录屏 · ShotInk"; MainForm.UseAppIcon(this);
-            Font = ToolAppearance.Font; BackColor = Color.White; Size = new Size(980, 760); MinimumSize = new Size(740, 560);
+            Font = ToolAppearance.Font; BackColor = Color.White; Size = new Size(980, 760); MinimumSize = new Size(clip.Recording == null ? 800 : 740, 560);
             StartPosition = FormStartPosition.CenterScreen; KeyPreview = true;
             layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 2, RowCount = 7 };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 54)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, clip.Recording == null ? 180 : 0));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             foreach (int height in new[] { 34, 28, SliderAppearance.RangeHeight, 24, 38, 22 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             preview = new GifPreviewBox { Name = "gif-preview", Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(28, 31, 38) };
@@ -46,14 +47,14 @@ namespace ShotInk
             viewport.Resize += delegate { FitFrameCanvas(); };
             layout.Controls.Add(viewport, 0, 0); layout.SetColumnSpan(viewport, 2);
             position = new Label { Dock = DockStyle.Fill, ForeColor = ToolAppearance.Muted, TextAlign = ContentAlignment.MiddleLeft };
-            layout.Controls.Add(position, 0, 2); layout.SetColumnSpan(position, 2);
+            layout.Controls.Add(position, 0, 2);
             range = new GifRangeSlider(clip.Frames.Count - 1) { Name = "gif-range", Dock = DockStyle.Fill };
-            layout.Controls.Add(range, 0, 3); layout.SetColumnSpan(range, 2);
+            layout.Controls.Add(range, 0, 3);
             range.RangeChanged += TrimChanged;
             range.DragStarted += delegate { dragPreviewSession++; Pause(); ReleaseFrameCanvas(true); preview.Show(); frameCache.CancelPrefetch(); };
             range.DragCompleted += delegate { if (!disposed && !busy) ShowFrame(frameIndex); };
-            var hint = new Label { Text = "预览区 ← / → 逐帧查看；点击起点或终点手柄后，← / → 每次调整一帧。", ForeColor = ToolAppearance.Muted, Dock = DockStyle.Fill };
-            layout.Controls.Add(hint, 0, 4); layout.SetColumnSpan(hint, 2);
+            var hint = new Label { Text = "← / → 逐帧查看；点击起点或终点手柄后，方向键每次调整一帧。", ForeColor = ToolAppearance.Muted, Dock = DockStyle.Fill };
+            layout.Controls.Add(hint, 0, 4);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             play = new ToolOptionButton { Name = "gif-play", Text = "播放选段", Width = 104, Height = 32 };
             delete = new ToolOptionButton { Name = "gif-delete", Text = "删除选中", Width = 104, Height = 32, ForeColor = Color.Firebrick, AccentColor = ToolAppearance.Accent("cancel"), Selected = true };
@@ -65,9 +66,15 @@ namespace ShotInk
             delete.Click += delegate { DeleteSelected(); };
             deleteCurrent.Click += delegate { DeleteFrames(frameIndex, frameIndex, frameIndex); };
             buttons.Controls.Add(play); buttons.Controls.Add(deleteCurrent); buttons.Controls.Add(delete); buttons.Controls.Add(copy); buttons.Controls.Add(save);
-            layout.Controls.Add(buttons, 0, 5); layout.SetColumnSpan(buttons, 2);
+            layout.Controls.Add(buttons, 0, 5);
             status = new Label { Dock = DockStyle.Fill, ForeColor = ToolAppearance.Muted, Visible = false };
-            layout.Controls.Add(status, 0, 6); layout.SetColumnSpan(status, 2); Controls.Add(layout);
+            layout.Controls.Add(status, 0, 6);
+            if (clip.Recording == null)
+            {
+                wechatPreview = new WechatGifPreview { Dock = DockStyle.Fill, Margin = new Padding(8, 0, 0, 0), ForeColor = ToolAppearance.Muted };
+                layout.Controls.Add(wechatPreview, 1, 2); layout.SetRowSpan(wechatPreview, 5);
+            }
+            Controls.Add(layout);
             SetStatus(clip.Recording != null && clip.Recording.AudioNotice != null ? clip.Recording.AudioNotice : clip.LimitReached ? "已达到录制上限，已保留内容。" : "");
             playback = new System.Windows.Forms.Timer { Interval = 100 };
             playback.Tick += delegate { ShowFrame(frameIndex >= range.Last ? range.First : frameIndex + 1, false); playback.Interval = FrameDelay(frameIndex); PlayVideoAudio(frameIndex); };
@@ -107,13 +114,21 @@ namespace ShotInk
             if (clip.Frames.Count == 0)
             {
                 var oldImage = preview.Image; preview.Image = null; if (oldImage != null) oldImage.Dispose();
+                if (wechatPreview != null) wechatPreview.SetFrame(null);
                 frameIndex = 0; position.Text = "暂无帧"; UpdateAnnotationHistory(); return;
             }
             var previous = preview.Image;
             preview.Image = editing && activeTool != DrawTool.None ? null : clip.Frames[index].Decode();
             if (previous != null) previous.Dispose();
             UpdateFramePosition(index);
+            UpdateWechatPreview(preview.Image);
             if (editing && activeTool != DrawTool.None) EnsureFrameCanvas(); UpdateAnnotationHistory();
+        }
+        private void UpdateWechatPreview(Image image = null)
+        {
+            if (wechatPreview == null) return;
+            if (image != null) wechatPreview.SetFrame(image);
+            else using (var rendered = clip.Frames[frameIndex].Decode()) wechatPreview.SetFrame(rendered);
         }
         private void UpdateFramePosition(int index)
         {

@@ -150,6 +150,7 @@ namespace ShotInk
                 edit.Before.Add(frame, frame.Annotations); edit.After.Add(frame, next); frame.Annotations = next;
             }
             annotationUndo.Push(edit); annotationRedo.Clear(); encoded = null; cachedFirst = cachedLast = -1; UpdateAnnotationHistory(); PreloadNearbyFrames();
+            UpdateWechatPreview();
         }
         private void PreloadNearbyFrames()
         { frameCache.Schedule(Enumerable.Range(0, clip.Frames.Count).OrderBy(index => Math.Abs(index - frameIndex)).Select(index => clip.Frames[index])); }

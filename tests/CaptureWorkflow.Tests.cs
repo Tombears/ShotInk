@@ -274,6 +274,23 @@ namespace ShotInk
         internal static void Run()
         {
             CompactToolbar();
+            using (var overlay = new CaptureOverlay(false, new Bitmap(900, 650), new Rectangle(0, 0, 900, 650)))
+            {
+                overlay.EnableWindowSelection(new Rectangle[0]); overlay.Show();
+                Mouse(overlay, "OnMouseDown", 30, 40); Mouse(overlay, "OnMouseMove", 330, 240); Application.DoEvents();
+                var hint = Field<Label>(overlay, "sizeHint");
+                Check(hint.Visible && hint.Text == "300 × 200 px", "Dragging a new selection hides its live pixel dimensions.");
+                Mouse(overlay, "OnMouseUp", 330, 240);
+                Call(overlay, "BeginAdjust", 4, new Point(330, 240));
+                Mouse(overlay, "OnMouseMove", 430, 340); Application.DoEvents();
+                Check(hint.Visible && hint.Text == "400 × 300 px", "Resizing a selection hides or freezes its pixel dimensions.");
+                Mouse(overlay, "OnMouseUp", 430, 340);
+                overlay.SelectRegion(new Rectangle(0, 0, 899, 649));
+                Call(overlay, "BeginAdjust", 0, Point.Empty); Mouse(overlay, "OnMouseMove", 1, 1); Application.DoEvents();
+                Check(hint.Visible && overlay.ClientRectangle.Contains(hint.Bounds) && overlay.Controls.GetChildIndex(hint) == 0,
+                    "Screen-edge resizing clips or covers the pixel dimensions.");
+                Mouse(overlay, "OnMouseUp", 1, 1); overlay.Close();
+            }
             KeyboardSelection();
             FreeSelection();
             var previousClipboard = Clipboard.GetDataObject();

@@ -35,6 +35,7 @@ namespace ShotInk
                     if (disposed || !range.IsDragging || session != dragPreviewSession)
                     { image.Dispose(); continue; }
                     var previous = preview.Image; preview.Image = image; if (previous != null) previous.Dispose();
+                    UpdateWechatPreview(image);
                     if (revision == dragPreviewRevision) break;
                 }
             }

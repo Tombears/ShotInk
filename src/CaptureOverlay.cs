@@ -69,7 +69,7 @@ namespace ShotInk
             selectionHold.Tick += delegate
             {
                 selectionHold.Stop();
-                if (dragging && !ready && dragMode == -2 && !manualSelection) { manualSelection = true; selection = Rectangle.Empty; Invalidate(); }
+                if (dragging && !ready && dragMode == -2 && !manualSelection) { manualSelection = true; selection = Rectangle.Empty; UpdateSelectionChrome(); Invalidate(); }
             };
             pointer = new Point(Cursor.Position.X - bounds.X, Cursor.Position.Y - bounds.Y);
             Skins.Attach(this);
@@ -146,10 +146,6 @@ namespace ShotInk
                 }
                 if (dragging)
                 {
-                    string size = SelectionSizeText(selection);
-                    var hint = DragHintBounds(selection);
-                    using (var brush = new SolidBrush(sizeHint.BackColor)) g.FillRectangle(brush, hint);
-                    TextRenderer.DrawText(g, size, sizeHint.Font, hint, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.PreserveGraphicsClipping);
                     if (ready && longViewport == null) foreach (var point in SelectionGeometry.Handles(selection))
                     { g.FillEllipse(Brushes.DodgerBlue, point.X - 4, point.Y - 4, 8, 8); g.DrawEllipse(Pens.White, point.X - 4, point.Y - 4, 8, 8); }
                 }
@@ -185,6 +181,7 @@ namespace ShotInk
             selectionPressTime = System.Diagnostics.Stopwatch.GetTimestamp(); manualSelection = scrolling;
             selectionHold.Start();
             anchor = e.Location; pointer = e.Location; dragMode = -2; dragging = true; selection = manualSelection ? Rectangle.Empty : pressedWindow; Capture = true;
+            UpdateSelectionChrome();
             // Remove the hover crosshair and hint before drawing the first selection frame.
             Invalidate(); Update();
         }
@@ -209,7 +206,7 @@ namespace ShotInk
                 longViewport.Hide();
             }
             if (canvas != null) { canvas.CommitTextEdit(); if (longViewport == null) canvas.Hide(); }
-            sizeHint.Hide(); foreach (var grip in grips) grip.Hide();
+            UpdateSelectionChrome(); foreach (var grip in grips) grip.Hide();
             foreach (var edge in edgeTargets) edge.Hide();
             if (toolbar != null) toolbar.Hide();
             Focus();
@@ -238,7 +235,7 @@ namespace ShotInk
                     if (Math.Abs(delta.X) + Math.Abs(delta.Y) > 3) edgeHold.Stop();
                     selection = dragMode == -1 ? SelectionGeometry.Move(dragOriginal, delta, ClientRectangle) : SelectionGeometry.Resize(dragOriginal, dragMode, delta, ClientRectangle);
                 }
-                if (selection != previousSelection) InvalidateDrag(previousSelection);
+                if (selection != previousSelection) { UpdateSelectionChrome(); InvalidateDrag(previousSelection); }
             }
             else if (!ready && previousPointer != pointer)
             {
@@ -387,13 +384,13 @@ namespace ShotInk
 
         private void UpdateSelectionChrome()
         {
-            if (dragging) return;
             sizeHint.Visible = selection.Width > 0 && selection.Height > 0;
             sizeHint.Text = (longViewport == null ? selection.Width : canvas.Image.Width) + " × " + (longViewport == null ? selection.Height : canvas.Image.Height) + " px";
             if (longLimitReached) sizeHint.Text += " · 达到上限，已自动完成";
             else if (longAlignmentLost) sizeHint.Text += " · 页面变化过大，已保留可拼接部分";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
             sizeHint.BringToFront();
+            if (dragging) return;
             PositionVideoOptions();
             var points = SelectionGeometry.Handles(selection);
             for (int i = 0; i < edgeTargets.Length; i++)

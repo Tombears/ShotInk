@@ -1442,6 +1442,10 @@ namespace ShotInk
                 graphics.SetClip(clip);
                 overlay.GetType().GetMethod("OnPaint", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay,
                     new object[] { new PaintEventArgs(graphics, clip) });
+                var hint = Field<Label>(overlay, "sizeHint");
+                if (hint.Visible)
+                    using (var label = new Bitmap(hint.Width, hint.Height))
+                    { hint.DrawToBitmap(label, hint.ClientRectangle); graphics.DrawImageUnscaled(label, hint.Location); }
             }
         }
         private static void TestInitialSelectionPaint()
@@ -1505,8 +1509,7 @@ namespace ShotInk
                 PaintSelectionPreview(overlay, expected, overlay.ClientRectangle);
                 try
                 {
-                    var hint = Field<bool>(overlay, "dragging") ? (Rectangle)overlay.GetType().GetMethod("DragHintBounds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(overlay,
-                        new object[] { Field<Rectangle>(overlay, "selection") }) : Rectangle.Empty;
+                    var hint = Field<Label>(overlay, "sizeHint").Bounds;
                     var picker = Field<SelectionModePicker>(overlay, "modePicker");
                     for (int y = 0; y < expected.Height; y++) for (int x = 0; x < expected.Width; x++)
                     {
