@@ -14,6 +14,8 @@ namespace ShotInk
         internal WechatGifPreview()
         {
             Name = "gif-wechat-preview";
+            Text = "任一边超过 980 PX\n微信自动展示为文件";
+            AccessibleName = "微信预览";
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw, true);
         }
@@ -40,12 +42,17 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            TextRenderer.DrawText(e.Graphics, "微信预览", Font, new Rectangle(8, 0, Width - 16, 24), ForeColor,
+            const int contentTop = 40;
+            int titleWidth = TextRenderer.MeasureText(e.Graphics, "微信预览", Font).Width;
+            TextRenderer.DrawText(e.Graphics, "微信预览", Font, new Rectangle(8, 0, titleWidth, 36), ForeColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            using (var reminderFont = new Font(Font.FontFamily, 7.5F))
+                TextRenderer.DrawText(e.Graphics, Text, reminderFont, new Rectangle(8 + titleWidth, 0, Math.Max(1, Width - titleWidth - 16), 36), ForeColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             if (FrameSize.IsEmpty) return;
             if (IsFile)
             {
-                var card = new Rectangle(8, 28, Math.Max(1, Width - 16), 76);
+                var card = new Rectangle(8, contentTop, Math.Max(1, Width - 16), 76);
                 using (var background = new SolidBrush(Color.FromArgb(52, 52, 52))) e.Graphics.FillRectangle(background, card);
                 TextRenderer.DrawText(e.Graphics, "录屏.gif", Font, new Rectangle(card.X + 10, card.Y + 12, card.Width - 48, 24), Color.White,
                     TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
@@ -57,7 +64,7 @@ namespace ShotInk
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return;
             }
-            if (thumbnail != null) e.Graphics.DrawImageUnscaled(thumbnail, 8, 28);
+            if (thumbnail != null) e.Graphics.DrawImageUnscaled(thumbnail, 8, contentTop);
         }
 
         protected override void Dispose(bool disposing)
