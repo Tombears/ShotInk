@@ -320,8 +320,12 @@ namespace ShotInk
                     System.Threading.SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
                     var screen = SystemInformation.VirtualScreen;
                     var region = new Rectangle(screen.Left + 20, screen.Top + 20, 120, 80);
-                    Field<AppSettings>(home, "settings").LastCaptureRegion = region;
+                    var captureSettings = Field<AppSettings>(home, "settings");
+                    captureSettings.LastCaptureRegion = region;
+                    captureSettings.RandomSkin = true; captureSettings.RandomSkinMask = (1 << (int)SkinKind.Linear) | (1 << (int)SkinKind.Ink);
+                    Skins.Select(SkinKind.Linear);
                     Call(home, "BeginQuickCapture", true); Wait(delegate { return !Field<bool>(home, "captureBusy"); });
+                    Check(Skins.Current.Kind == SkinKind.Ink, "Quick copy did not select a random skin.");
                     using (var image = Clipboard.GetImage()) Check(image != null && image.Size == region.Size, "Quick copy omitted clipboard image or changed dimensions: " + (image == null ? "null" : image.Size.ToString()) + " expected " + region.Size + " notice " + Field<Label>(home, "notice").Text);
                     Check(!Application.OpenForms.Cast<Form>().Any(f => f is CaptureOverlay || f is EditorForm), "Quick copy left an editor open");
                     var feedback = Field<CaptureFeedback>(home, "captureFeedback");
@@ -329,13 +333,30 @@ namespace ShotInk
                     Check(Native.GetForegroundWindow() != feedback.Handle && !feedback.ContainsFocus, "Success feedback stole focus: foreground=" + Native.GetForegroundWindow() + " toast=" + feedback.Handle + " focused=" + feedback.ContainsFocus);
                     Wait(delegate { return feedback.IsDisposed; });
                     Call(home, "BeginQuickCapture", false); Wait(delegate { return Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Any(f => f.Visible && Field<bool>(f, "ready")); });
+                    Check(Skins.Current.Kind == SkinKind.Linear, "Quick edit did not select a random skin.");
                     var editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
                     Check(Field<bool>(editor, "ready") && Field<Rectangle>(editor, "selection").Size == region.Size, "Quick edit did not open the previous selection");
                     editor.Close();
                     Call(home, "BeginFullScreenCapture"); Wait(delegate { return Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Any(f => f.Visible && Field<bool>(f, "ready")); });
+                    Check(Skins.Current.Kind == SkinKind.Ink, "Full-screen capture did not select a random skin.");
                     editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
                     Check(Field<Rectangle>(editor, "selection") == new Rectangle(Point.Empty, screen.Size), "Full screen did not include every display: " + Field<Rectangle>(editor, "selection") + " expected " + screen);
                     editor.Close();
+                    foreach (bool scrolling in new[] { false, true })
+                    {
+                        var previousSkin = Skins.Current.Kind;
+                        Call(home, "BeginCapture", scrolling);
+                        Wait(delegate { return Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Any(f => f.Visible); });
+                        Check(Skins.Current.Kind != previousSkin, "Region or scrolling capture did not switch skins.");
+                        var activeSkin = Skins.Current.Kind;
+                        Call(home, "BeginCapture", false);
+                        Check(Skins.Current.Kind == activeSkin, "Blocked duplicate capture changed the active skin.");
+                        Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single().Close();
+                    }
+                    home.GetType().GetField("settingsOpen", Private).SetValue(home, true);
+                    var beforeBlocked = Skins.Current.Kind; Call(home, "BeginCapture", false);
+                    Check(Skins.Current.Kind == beforeBlocked && !Field<bool>(home, "captureBusy"), "Capture blocked by settings changed the skin.");
+                    home.GetType().GetField("settingsOpen", Private).SetValue(home, false);
                     Clipboard.SetText("no image"); Call(home, "PinClipboard");
                     var pin = Application.OpenForms.Cast<Form>().OfType<PinForm>().Single();
                     Check(Field<Bitmap>(pin, "image").Size == region.Size, "Clipboard fallback did not use first history image"); pin.Close();

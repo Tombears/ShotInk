@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace ShotInk
 {
@@ -21,7 +22,11 @@ namespace ShotInk
         };
         private static readonly Dictionary<SkinKind, Bitmap> atlases = new Dictionary<SkinKind, Bitmap>();
         private static readonly Dictionary<string, Color> accents = new Dictionary<string, Color>();
+        private static readonly Dictionary<string, Bitmap> icons = new Dictionary<string, Bitmap>();
         private static readonly object gate = new object();
+        private static readonly object preloadGate = new object();
+        private static int preloadMask;
+        private static Task preloadTask = Task.FromResult(true);
         private const int CellSize = 96;
         private static Bitmap Atlas(SkinKind kind)
         {
@@ -45,9 +50,37 @@ namespace ShotInk
         {
             int index = Array.IndexOf(Names, name);
             var kind = Skins.Current.Kind;
-            if (index < 0 || kind == SkinKind.Classic && name != "custom-color") return ToolbarIcons.CreateOutline(name, color);
+            if (index < 0) return ToolbarIcons.CreateOutline(name, color);
+            if (kind == SkinKind.Classic && name != "custom-color") return ClassicIcon(name, color);
+            bool disabled = color.ToArgb() == Skins.All[(int)kind].Muted.ToArgb();
             if (kind == SkinKind.Classic) kind = SkinKind.Linear;
-            bool disabled = color.ToArgb() == Skins.Current.Muted.ToArgb();
+            return CachedIcon(kind, index, disabled);
+        }
+        private static Bitmap ClassicIcon(string name, Color color)
+        {
+            // User-selected annotation colors are unbounded. Cache only toolbar states.
+            if (color != Color.FromArgb(65, 68, 74) && color != Skins.All[0].Muted && color != ToolAppearance.ClassicAccent(name))
+                return ToolbarIcons.CreateOutline(name, color);
+            string key = "Classic/" + name + "/" + color.ToArgb();
+            lock (gate)
+            {
+                Bitmap icon;
+                if (!icons.TryGetValue(key, out icon)) { icon = ToolbarIcons.CreateOutline(name, color); icons.Add(key, icon); }
+                return (Bitmap)icon.Clone();
+            }
+        }
+        private static Bitmap CachedIcon(SkinKind kind, int index, bool disabled)
+        {
+            string key = kind + "/" + index + "/" + disabled;
+            lock (gate)
+            {
+                Bitmap icon;
+                if (!icons.TryGetValue(key, out icon)) { icon = Render(kind, index, disabled); icons.Add(key, icon); }
+                return (Bitmap)icon.Clone();
+            }
+        }
+        private static Bitmap Render(SkinKind kind, int index, bool disabled)
+        {
             return ToolAppearance.RenderSmooth(new Size(20, 20), delegate(Graphics graphics)
             {
                 using (var attributes = new ImageAttributes())
@@ -62,16 +95,19 @@ namespace ShotInk
                     }
                     graphics.InterpolationMode = kind == SkinKind.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic;
                     var rectangle = Cell(index);
-                    lock (gate) graphics.DrawImage(Atlas(kind), new Rectangle(0, 0, 20, 20), rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, GraphicsUnit.Pixel, attributes);
+                    graphics.DrawImage(Atlas(kind), new Rectangle(0, 0, 20, 20), rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height, GraphicsUnit.Pixel, attributes);
                 }
             });
         }
         internal static Color Accent(string name, Color fallback)
         {
+            return Accent(Skins.Current.Kind, name, fallback);
+        }
+        private static Color Accent(SkinKind kind, string name, Color fallback)
+        {
             int index = Array.IndexOf(Names, name);
-            var kind = Skins.Current.Kind;
             if (kind == SkinKind.Classic) return fallback;
-            if (kind == SkinKind.Ink || index < 0) return Skins.Current.Accent;
+            if (kind == SkinKind.Ink || index < 0) return Skins.All[(int)kind].Accent;
             string key = kind + "/" + name;
             lock (gate)
             {
@@ -86,8 +122,51 @@ namespace ShotInk
                     double sample = pixel.GetSaturation(); weight += sample;
                     red += pixel.R * sample; green += pixel.G * sample; blue += pixel.B * sample;
                 }
-                result = weight > 0 ? Color.FromArgb((int)(red / weight), (int)(green / weight), (int)(blue / weight)) : Skins.Current.Accent;
+                result = weight > 0 ? Color.FromArgb((int)(red / weight), (int)(green / weight), (int)(blue / weight)) : Skins.All[(int)kind].Accent;
                 accents.Add(key, result); return result;
+            }
+        }
+        internal static Task Preload(int mask)
+        {
+            lock (preloadGate)
+            {
+                int pending = mask & Skins.AllMask & ~preloadMask;
+                if (pending == 0) return preloadTask;
+                preloadMask |= pending;
+                preloadTask = preloadTask.ContinueWith(delegate(Task previous)
+                {
+                    // Observe an earlier failure. Normal icon loading can still retry it.
+                    if (previous.IsFaulted) System.Diagnostics.Trace.WriteLine(previous.Exception);
+                    foreach (var palette in Skins.All)
+                    {
+                        if ((pending & (1 << (int)palette.Kind)) == 0) continue;
+                        foreach (var name in Names)
+                        {
+                            Accent(palette.Kind, name, ToolAppearance.ClassicAccent(name));
+                            if (palette.Kind == SkinKind.Classic && name != "custom-color")
+                            {
+                                using (ClassicIcon(name, Color.FromArgb(65, 68, 74))) { }
+                                using (ClassicIcon(name, palette.Muted)) { }
+                                using (ClassicIcon(name, ToolAppearance.ClassicAccent(name))) { }
+                            }
+                            else
+                            {
+                                var kind = palette.Kind == SkinKind.Classic ? SkinKind.Linear : palette.Kind;
+                                int index = Array.IndexOf(Names, name);
+                                using (CachedIcon(kind, index, false)) { }
+                                using (CachedIcon(kind, index, true)) { }
+                            }
+                        }
+                        // Only small rendered icons are needed after a palette is warm.
+                        lock (gate)
+                        {
+                            var kind = palette.Kind == SkinKind.Classic ? SkinKind.Linear : palette.Kind;
+                            Bitmap atlas;
+                            if (atlases.TryGetValue(kind, out atlas)) { atlases.Remove(kind); atlas.Dispose(); }
+                        }
+                    }
+                }, TaskScheduler.Default);
+                return preloadTask;
             }
         }
     }

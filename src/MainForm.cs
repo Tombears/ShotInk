@@ -47,6 +47,7 @@ namespace ShotInk
             this.startup = startup ?? (integrateDesktop ? new StartupRegistration(Application.ExecutablePath) : null);
             dataRoot = storageRoot ?? ResolveDataRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             settings = AppSettings.Load(SettingsPath);
+            SkinIcons.Preload(settings.RandomSkin ? settings.RandomSkinMask : 1 << (int)settings.Skin);
             Skins.Select(settings.Skin); Skins.Attach(this);
             if (this.startup != null) settings.StartWithWindows = this.startup.IsEnabled;
             settingsTimer = new Timer { Interval = 350 };
@@ -186,6 +187,7 @@ namespace ShotInk
             }
             else try { persist(); } catch (Exception ex) { return "设置未保存：" + ex.Message; }
             settings.CopyFrom(candidate); settingsDirty = false; settingsTimer.Stop();
+            SkinIcons.Preload(settings.RandomSkin ? settings.RandomSkinMask : 1 << (int)settings.Skin);
             Skins.Select(settings.Skin);
             RefreshShortcutLabels(); if (notice != null) notice.Text = "设置已保存并立即生效。"; return null;
         }
@@ -315,6 +317,7 @@ namespace ShotInk
                 await Task.Delay(200);
                 if (IsDisposed) return;
                 if (updateInstalling) { captureBusy = false; restoreWindows(); return; }
+                Skins.SelectForCapture(settings);
                 if (fullScreen) region = SystemInformation.VirtualScreen;
                 if (directCopy)
                 {

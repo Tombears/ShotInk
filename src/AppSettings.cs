@@ -26,6 +26,8 @@ namespace ShotInk
         internal string RecordMicrophoneDevice = "";
         internal int RecordMicrophoneGain = 200;
         internal SkinKind Skin = SkinKind.Classic;
+        internal bool RandomSkin;
+        internal int RandomSkinMask = Skins.AllMask;
         internal bool AutoHistory = true;
         internal int HistoryLimit = 10;
         internal int GifFramesPerSecond = 30;
@@ -63,6 +65,7 @@ namespace ShotInk
         {
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
             StartWithWindows = other.StartWithWindows; Skin = other.Skin; RecordMicrophoneDevice = other.RecordMicrophoneDevice; RecordMicrophoneGain = other.RecordMicrophoneGain;
+            RandomSkin = other.RandomSkin; RandomSkinMask = other.RandomSkinMask;
             GifFramesPerSecond = other.GifFramesPerSecond;
             RecordingGuideSeen = other.RecordingGuideSeen; RecordMicrophone = other.RecordMicrophone; RecordSpeaker = other.RecordSpeaker; RecordPointer = other.RecordPointer;
             GifDeleteCurrentShortcut = other.GifDeleteCurrentShortcut; GifDeleteSelectedShortcut = other.GifDeleteSelectedShortcut; GifUndoShortcut = other.GifUndoShortcut;
@@ -100,13 +103,18 @@ namespace ShotInk
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
-                var knownKeys = new[] { "record-microphone-device", "record-microphone-gain", "skin", "save", "history-limit", "gif-fps", "gif-delete-current", "gif-delete-selected", "gif-undo", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
+                var knownKeys = new[] { "record-microphone-device", "record-microphone-gain", "skin", "random-skin", "random-skin-mask", "save", "history-limit", "gif-fps", "gif-delete-current", "gif-delete-selected", "gif-undo", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value; int skin;
                 if (values.TryGetValue("record-microphone-device", out value)) settings.RecordMicrophoneDevice = value;
                 settings.RecordMicrophoneGain = (int)ReadNumber(values, "record-microphone-gain", 100, 400, 200);
                 if (values.TryGetValue("skin", out value) && int.TryParse(value, out skin) && Skins.Valid((SkinKind)skin)) settings.Skin = (SkinKind)skin;
+                if (values.TryGetValue("random-skin", out value)) settings.RandomSkin = value == "1";
+                int randomSkinMask;
+                if (values.TryGetValue("random-skin-mask", out value) && int.TryParse(value, out randomSkinMask) && randomSkinMask >= 0 && (randomSkinMask & ~Skins.AllMask) == 0)
+                    settings.RandomSkinMask = randomSkinMask;
+                if (settings.RandomSkin && settings.RandomSkinMask == 0) settings.RandomSkinMask = Skins.AllMask;
                 if (values.TryGetValue("record-guide-seen", out value)) settings.RecordingGuideSeen = value == "1";
                 if (values.TryGetValue("record-microphone", out value)) settings.RecordMicrophone = value == "1";
                 if (values.TryGetValue("record-speaker", out value)) settings.RecordSpeaker = value == "1";
@@ -181,6 +189,8 @@ namespace ShotInk
             if (RecordMicrophoneGain < 100 || RecordMicrophoneGain > 400) throw new ArgumentException("麦克风增益应为 100%～400%。");
             if (RecordMicrophoneDevice == null || RecordMicrophoneDevice.IndexOfAny(new[] { '\r', '\n' }) >= 0) throw new ArgumentException("麦克风设备配置无效。");
             if (!Skins.Valid(Skin)) throw new ArgumentException("请选择有效的皮肤。");
+            if (RandomSkinMask < 0 || (RandomSkinMask & ~Skins.AllMask) != 0) throw new ArgumentException("随机皮肤选择无效。");
+            if (RandomSkin && RandomSkinMask == 0) throw new ArgumentException("请至少勾选一套参与随机的皮肤。");
             if (HistoryLimit < 1 || HistoryLimit > 10000) throw new ArgumentException("历史保留张数应为 1～10000。");
             if (GifFramesPerSecond < 1 || GifFramesPerSecond > 50) throw new ArgumentException("GIF 每秒帧数应为 1～50。");
             if (GifShortcuts.Any(key => !Shortcut.Valid(key))) throw new ArgumentException("GIF 快捷键无效，字母需搭配 Ctrl 或 Alt。");
@@ -195,6 +205,7 @@ namespace ShotInk
             if (loadFailed) throw new IOException(LoadWarning);
             Validate(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             var lines = new List<string> { "skin=" + (int)Skin, "record-microphone-device=" + RecordMicrophoneDevice, "record-microphone-gain=" + RecordMicrophoneGain, "save=" + (AutoHistory ? "1" : "0"), "history-limit=" + HistoryLimit, "ask-save-location=" + (AskSaveLocation ? "1" : "0"),
+                "random-skin=" + (RandomSkin ? "1" : "0"), "random-skin-mask=" + RandomSkinMask,
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
                 "gif-fps=" + GifFramesPerSecond,
                 "record-guide-seen=" + (RecordingGuideSeen ? "1" : "0"), "record-microphone=" + (RecordMicrophone ? "1" : "0"),

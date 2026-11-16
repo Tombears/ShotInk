@@ -23,6 +23,8 @@ namespace ShotInk
     {
         private readonly AppSettings original;
         private readonly ComboBox skin, microphoneDevice;
+        private readonly CheckBox randomSkin;
+        private readonly CheckBox[] randomSkinChoices;
         private readonly NumericUpDown microphoneGain;
         private readonly SkinKind previousSkin;
         private bool skinCommitted;
@@ -117,6 +119,25 @@ namespace ShotInk
             foreach (var palette in Skins.All) skin.Items.Add(palette.Name);
             skin.SelectedIndex = (int)current.Skin;
             skinLayout.Controls.Add(skin);
+            randomSkin = new CheckBox { Name = "random-skin", Text = "每次截图随机切换皮肤", AutoSize = true, Checked = current.RandomSkin, Margin = new Padding(0, 0, 0, 12) };
+            skinLayout.Controls.Add(randomSkin);
+            skinLayout.Controls.Add(new Label { Text = "参与随机的皮肤", AutoSize = true, Margin = new Padding(0, 0, 0, 8) });
+            var choices = new FlowLayoutPanel { Name = "random-skin-choices", Size = new Size(570, 64), Margin = new Padding(0, 0, 0, 12), Enabled = current.RandomSkin };
+            randomSkinChoices = new CheckBox[Skins.All.Length];
+            foreach (var palette in Skins.All)
+            {
+                var choice = new CheckBox { Name = "random-skin-" + palette.Kind, Text = palette.Name, Size = new Size(132, 26), Margin = new Padding(0, 0, 8, 4), Checked = (current.RandomSkinMask & (1 << (int)palette.Kind)) != 0 };
+                randomSkinChoices[(int)palette.Kind] = choice; choices.Controls.Add(choice);
+                choice.CheckedChanged += delegate { if (randomSkin.Checked) SkinIcons.Preload(SelectedRandomSkins()); };
+            }
+            skin.Enabled = !current.RandomSkin;
+            randomSkin.CheckedChanged += delegate
+            {
+                choices.Enabled = randomSkin.Checked; skin.Enabled = !randomSkin.Checked;
+                if (randomSkin.Checked) SkinIcons.Preload(SelectedRandomSkins());
+                if (!randomSkin.Checked) Skins.Select((SkinKind)skin.SelectedIndex);
+            };
+            skinLayout.Controls.Add(choices);
             skinLayout.Controls.Add(new Label { Text = "将鼠标移入或按下按钮，体验当前皮肤的反馈。", AutoSize = true, Margin = new Padding(0, 8, 0, 12) });
             var preview = new Panel { Name = "skin-preview", Size = new Size(570, 160), Margin = new Padding(0, 0, 0, 16) };
             var previewTools = new CaptureToolbar(current.Clone()) { Location = new Point(8, 12) };
@@ -142,7 +163,8 @@ namespace ShotInk
             recordingTab.Controls.Add(audioLayout); tabs.TabPages.Add(recordingTab);
             skin.SelectedIndexChanged += delegate
             {
-                Skins.Select((SkinKind)skin.SelectedIndex); Skins.Apply(this);
+                SkinIcons.Preload(1 << skin.SelectedIndex);
+                Skins.Select((SkinKind)skin.SelectedIndex);
             };
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 80 }; footer.Controls.Add(error); footer.Controls.Add(buttons);
             Controls.Add(tabs); Controls.Add(footer); AcceptButton = save; CancelButton = cancel;
@@ -210,9 +232,17 @@ namespace ShotInk
             candidate.QuickCopyShortcut = quickCopy.ShortcutValue; candidate.QuickEditShortcut = quickEdit.ShortcutValue; candidate.FullScreenShortcut = fullScreen.ShortcutValue;
             candidate.RecordMicrophoneDevice = ((RecordingInput)microphoneDevice.SelectedItem).Id; candidate.RecordMicrophoneGain = (int)microphoneGain.Value;
             candidate.Skin = (SkinKind)skin.SelectedIndex;
+            candidate.RandomSkin = randomSkin.Checked; candidate.RandomSkinMask = SelectedRandomSkins();
             candidate.GifFramesPerSecond = (int)gifFps.Value;
             candidate.GifDeleteCurrentShortcut = gifDeleteCurrent.ShortcutValue; candidate.GifDeleteSelectedShortcut = gifDeleteSelected.ShortcutValue; candidate.GifUndoShortcut = gifUndo.ShortcutValue;
             candidate.SaveDirectory = folder.Text.Trim(); candidate.AskSaveLocation = ask.Checked; candidate.StartWithWindows = startup.Checked; candidate.Validate(); return candidate;
+        }
+        private int SelectedRandomSkins()
+        {
+            int mask = 0;
+            for (int index = 0; index < randomSkinChoices.Length; index++)
+                if (randomSkinChoices[index].Checked) mask |= 1 << index;
+            return mask;
         }
     }
 }

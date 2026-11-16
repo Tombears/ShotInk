@@ -31,6 +31,8 @@ namespace ShotInk
                 Check(AppSettings.Load(path).Skin == SkinKind.Classic, "Old settings need a skin key.");
                 File.WriteAllText(path, "save=1\nskin=99");
                 Check(AppSettings.Load(path).Skin == SkinKind.Classic, "Unknown skin was not recovered safely.");
+                TestRandomSkins(path);
+                TestPreload();
                 foreach (var palette in Skins.All.Skip(1))
                 {
                     Skins.Select(palette.Kind);
@@ -87,9 +89,20 @@ namespace ShotInk
                     options.Show(); Application.DoEvents();
                     Check(options.Controls.Find("skin-feedback", true).Length == 0, "Removed skin description is still visible.");
                     var selector = (ComboBox)options.Controls.Find("skin-selector", true)[0];
+                    var random = (CheckBox)options.Controls.Find("random-skin", true)[0];
+                    var choices = options.Controls.Find("random-skin-choices", true)[0];
+                    Check(!random.Checked && !choices.Enabled && choices.Controls.Cast<CheckBox>().All(choice => choice.Checked), "Random skin candidates must default to all selected.");
                     selector.SelectedIndex = (int)SkinKind.Ink;
                     Check(Skins.Current.Kind == SkinKind.Ink && options.ReadSettings().Skin == SkinKind.Ink, "Skin preview or settings entry point failed.");
+                    random.Checked = true;
+                    Check(!selector.Enabled && choices.Enabled, "Random skin toggle did not update its controls.");
+                    foreach (CheckBox choice in choices.Controls) choice.Checked = false;
                     var save = FindButton(options, "保存"); save.PerformClick();
+                    Check(options.DialogResult != DialogResult.OK, "Empty enabled random selection was accepted.");
+                    ((CheckBox)options.Controls.Find("random-skin-Ink", true)[0]).Checked = true;
+                    var candidate = options.ReadSettings();
+                    Check(candidate.RandomSkin && candidate.RandomSkinMask == 1 << (int)SkinKind.Ink, "Candidate checkboxes were not read from the settings dialog.");
+                    save.PerformClick();
                     Check(options.DialogResult != DialogResult.OK, "Failed save closed the settings dialog.");
                     options.Close();
                 }
@@ -114,6 +127,72 @@ namespace ShotInk
                 Console.WriteLine("PASS: 8 skins, 49 glyphs each, persistence, live toolbar refresh, grayscale ink, hover, disabled state, preview rollback and screenshot isolation");
             }
             finally { Skins.Select(SkinKind.Classic); Directory.Delete(root, true); }
+        }
+        private static void TestRandomSkins(string path)
+        {
+            var defaults = AppSettings.Load(path);
+            Check(!defaults.RandomSkin && defaults.RandomSkinMask == Skins.AllMask, "Legacy settings changed manual mode or lost the default candidate set.");
+            foreach (string mask in new[] { "-1", "256", "bad", "0" })
+            {
+                File.WriteAllText(path, "skin=2\nrandom-skin=1\nrandom-skin-mask=" + mask);
+                var recovered = AppSettings.Load(path);
+                Check(recovered.RandomSkin && recovered.RandomSkinMask == Skins.AllMask, "Damaged random skin candidates were not recovered.");
+                recovered.Validate();
+            }
+            var settings = new AppSettings { Skin = SkinKind.Glass, RandomSkin = true, RandomSkinMask = (1 << (int)SkinKind.Clay) | (1 << (int)SkinKind.Ink) };
+            settings.Save(path);
+            var restored = AppSettings.Load(path).Clone();
+            Check(restored.RandomSkin && restored.RandomSkinMask == settings.RandomSkinMask, "Random preferences did not survive save/load/clone.");
+            Skins.Select(SkinKind.Glass);
+            for (int repeat = 0; repeat < 100; repeat++)
+            {
+                var previous = Skins.Current.Kind;
+                Skins.SelectForCapture(restored);
+                Check((restored.RandomSkinMask & (1 << (int)Skins.Current.Kind)) != 0 && Skins.Current.Kind != previous, "Random capture escaped its candidates or repeated the previous skin.");
+            }
+            Check(restored.Skin == SkinKind.Glass, "Random capture overwrote the manually selected skin.");
+            restored.RandomSkinMask = 1 << (int)SkinKind.Ink;
+            for (int repeat = 0; repeat < 3; repeat++) { Skins.SelectForCapture(restored); Check(Skins.Current.Kind == SkinKind.Ink, "Single candidate was not respected."); }
+            restored.RandomSkin = false; Skins.Select(SkinKind.Pixel); Skins.SelectForCapture(restored);
+            Check(Skins.Current.Kind == SkinKind.Pixel, "Disabled random mode changed the skin.");
+            restored.RandomSkinMask = 0; restored.Save(path);
+            Check(AppSettings.Load(path).RandomSkinMask == 0, "Disabled random candidates were not preserved.");
+            restored.RandomSkin = true;
+            bool rejected = false;
+            try { restored.Validate(); } catch (ArgumentException) { rejected = true; }
+            Check(rejected, "Empty random candidates passed validation.");
+            Skins.Select(SkinKind.Classic);
+            Console.WriteLine("PASS: random candidates, legacy defaults, persistence, clone isolation, single selection and repeat avoidance");
+        }
+        private static void TestPreload()
+        {
+            var selected = Skins.Current.Kind;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var warm = SkinIcons.Preload(Skins.AllMask); warm.GetAwaiter().GetResult();
+            Check(Skins.Current.Kind == selected && object.ReferenceEquals(warm, SkinIcons.Preload(Skins.AllMask)), "Preloading changed the active skin or queued duplicate work.");
+            var cache = (System.Collections.IDictionary)typeof(SkinIcons).GetField("icons", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+            int count = cache.Count;
+            watch.Restart();
+            foreach (var palette in Skins.All)
+            {
+                Skins.Select(palette.Kind);
+                foreach (var name in Names)
+                {
+                    using (var first = ToolbarIcons.Create(name))
+                    using (var second = ToolbarIcons.Create(name))
+                    {
+                        Check(!object.ReferenceEquals(first, second) && Signature(first) == Signature(second), "Cached icons do not have independent ownership or matching pixels.");
+                        first.SetPixel(0, 0, Color.Magenta);
+                        using (var third = ToolbarIcons.Create(name)) Check(Signature(second) == Signature(third), "A caller modified the shared icon cache.");
+                    }
+                    using (ToolbarIcons.Create(name, ToolAppearance.Muted)) { }
+                }
+            }
+            Check(cache.Count == count, "Warm icon requests grew the bounded cache.");
+            var atlases = (System.Collections.IDictionary)typeof(SkinIcons).GetField("atlases", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+            Check(atlases.Count == 0, "Preloaded skins retained full-size atlases or decoded them again.");
+            Console.WriteLine("PASS: background preload, stable active skin, bounded cache, independent images and released atlases; warm icon checks " + watch.ElapsedMilliseconds + " ms");
+            Skins.Select(selected);
         }
         private static Button FindButton(Control root, string text)
         {

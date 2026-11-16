@@ -40,6 +40,8 @@ namespace ShotInk
             new SkinPalette(SkinKind.Ink, "黑白水墨", 0xf4f3f0, 0xfbfaf7, 0x202020, 0x666666, 0xababaa, 0x303030, 0x777777)
         };
         internal static SkinPalette Current { get; private set; }
+        internal static int AllMask { get { return (1 << All.Length) - 1; } }
+        private static readonly Random random = new Random();
         internal static event Action Changed;
         private sealed class ControlColors
         {
@@ -57,6 +59,14 @@ namespace ShotInk
         private static readonly ConditionalWeakTable<Control, ControlColors> colors = new ConditionalWeakTable<Control, ControlColors>();
         static Skins() { Current = All[0]; }
         internal static bool Valid(SkinKind value) { return (int)value >= 0 && (int)value < All.Length; }
+        internal static void SelectForCapture(AppSettings settings)
+        {
+            if (!settings.RandomSkin) return;
+            var candidates = Array.FindAll(All, delegate(SkinPalette palette) { return (settings.RandomSkinMask & (1 << (int)palette.Kind)) != 0; });
+            if (candidates.Length == 0) return;
+            if (candidates.Length > 1) candidates = Array.FindAll(candidates, delegate(SkinPalette palette) { return palette.Kind != Current.Kind; });
+            Select(candidates[random.Next(candidates.Length)].Kind);
+        }
         internal static void Select(SkinKind value)
         {
             if (!Valid(value)) value = SkinKind.Classic;

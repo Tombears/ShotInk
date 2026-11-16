@@ -63,7 +63,7 @@ namespace ShotInk
         {
             return SkinIcons.Accent(name, ClassicAccent(name));
         }
-        private static Color ClassicAccent(string name)
+        internal static Color ClassicAccent(string name)
         {
             switch (name)
             {
