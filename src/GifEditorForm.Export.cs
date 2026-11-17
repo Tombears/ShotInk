@@ -34,7 +34,7 @@ namespace ShotInk
                 int revision = exportRevision;
                 try { await GetGifBytesAsync(); }
                 catch (OperationCanceledException) { }
-                catch (Exception error) { if (!disposed && revision == exportRevision) { wechatPreview.Text = "GIF 大小\n未能生成"; wechatPreview.Invalidate(); SetStatus(error.Message); } }
+                catch (Exception error) { if (!disposed && revision == exportRevision) { wechatPreview.Text = "大小：未能生成"; wechatPreview.Invalidate(); SetStatus(error.Message); } }
             };
         }
 
@@ -46,8 +46,8 @@ namespace ShotInk
             if (encodingCancel != null) encodingCancel.Cancel();
             encodingCancel = null;
             encodingTask = null;
-            if (wechatPreview.Text == "GIF 大小\n未能生成") SetStatus("");
-            wechatPreview.Text = clip.Frames.Count == 0 ? "GIF 大小\n暂无帧" : "GIF 大小\n计算中…";
+            if (wechatPreview.Text == "大小：未能生成") SetStatus("");
+            wechatPreview.Text = clip.Frames.Count == 0 ? "大小：暂无帧" : "大小：计算中…";
             wechatPreview.Invalidate();
             if (clip.Frames.Count > 0) sizeRefresh.Start();
         }
@@ -90,7 +90,7 @@ namespace ShotInk
                 double size = bytes.Length / 1024.0;
                 string unit = "KB";
                 if (size >= 1024) { size /= 1024; unit = "MB"; }
-                wechatPreview.Text = "GIF 大小\n" + size.ToString("0.00") + " " + unit;
+                wechatPreview.Text = "大小：" + size.ToString("0.00") + unit;
                 wechatPreview.Invalidate();
                 return bytes;
             }

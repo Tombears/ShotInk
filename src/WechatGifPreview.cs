@@ -14,7 +14,7 @@ namespace ShotInk
         internal WechatGifPreview()
         {
             Name = "gif-wechat-preview";
-            Text = "GIF 大小\n计算中…";
+            Text = "大小：计算中…";
             AccessibleName = "微信预览";
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw, true);
@@ -42,13 +42,13 @@ namespace ShotInk
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            const int contentTop = 40;
+            const int contentTop = 28;
             int titleWidth = TextRenderer.MeasureText(e.Graphics, "微信预览", Font).Width;
-            TextRenderer.DrawText(e.Graphics, "微信预览", Font, new Rectangle(8, 0, titleWidth, 36), ForeColor,
+            TextRenderer.DrawText(e.Graphics, "微信预览", Font, new Rectangle(8, 0, titleWidth, 24), ForeColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             using (var reminderFont = new Font(Font.FontFamily, 7.5F))
-                TextRenderer.DrawText(e.Graphics, Text, reminderFont, new Rectangle(8 + titleWidth, 0, Math.Max(1, Width - titleWidth - 16), 36), ForeColor,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+                TextRenderer.DrawText(e.Graphics, Text, reminderFont, new Rectangle(8 + titleWidth, 0, Math.Max(1, Width - titleWidth - 16), 24), ForeColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             if (FrameSize.IsEmpty) return;
             if (IsFile)
             {
