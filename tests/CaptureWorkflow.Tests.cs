@@ -173,6 +173,54 @@ namespace ShotInk
             Console.WriteLine("PASS: pixel nudging, held edge expansion/shrinking/repeat, release reset and keyboard input isolation");
         }
 
+        private static void EdgeResizeTargets()
+        {
+            var region = new Rectangle(100, 100, 500, 300);
+            var handles = SelectionGeometry.Handles(region);
+            for (int index = 0; index < 8; index++)
+            {
+                Check(SelectionGeometry.ResizeHandleAt(region, handles[index], 6) == index, "Resize handle lost priority.");
+                if (index % 2 == 0) continue;
+                foreach (int offset in new[] { -6, -5, 5, 6 })
+                {
+                    var point = handles[index];
+                    point.Offset(index == 3 || index == 7 ? offset : 0, index == 1 || index == 5 ? offset : 0);
+                    Check(SelectionGeometry.ResizeHandleAt(region, point, 6) == index, "Resize band misses points beside the edge.");
+                }
+            }
+            Check(SelectionGeometry.ResizeHandleAt(region, new Point(350, 250), 6) == -1 &&
+                SelectionGeometry.ResizeHandleAt(region, new Point(350, 93), 6) == -1, "Resize band swallowed the center or distant background.");
+            Check(SelectionGeometry.ResizeHandleAt(region, new Point(350, 88), 12) == 1 &&
+                SelectionGeometry.ResizeHandleAt(region, new Point(94, 94), 6) == 0, "Scaled edge tolerance or expanded corner priority was lost.");
+            using (var overlay = new CaptureOverlay(false, new Bitmap(900, 650), new Rectangle(-300, 20, 900, 650)))
+            {
+                overlay.Show();
+                foreach (int handle in new[] { 1, 3, 5, 7 })
+                foreach (int offset in new[] { -5, 5 })
+                {
+                    overlay.SelectRegion(new Rectangle(region.X - 300, region.Y + 20, region.Width, region.Height));
+                    var point = handles[handle];
+                    point.Offset(handle == 3 || handle == 7 ? offset : 0, handle == 1 || handle == 5 ? offset : 0);
+                    var target = region.Contains(point) ? (Control)Field<AnnotationCanvas>(overlay, "canvas") : overlay;
+                    var local = target.PointToClient(overlay.PointToScreen(point));
+                    var hover = Message.Create(target.Handle, 0x200, IntPtr.Zero, new IntPtr((local.Y << 16) | (local.X & 0xffff)));
+                    Check(overlay.PreFilterMessage(ref hover) && Cursor.Current.Handle == (handle == 1 || handle == 5 ? Cursors.SizeNS : Cursors.SizeWE).Handle,
+                        "Hovering near an edge did not show its resize cursor.");
+                    Cursor.Current = target.Cursor;
+                    var message = Message.Create(target.Handle, 0x201, new IntPtr(1), new IntPtr((local.Y << 16) | (local.X & 0xffff)));
+                    Check(overlay.PreFilterMessage(ref message) && Field<int>(overlay, "dragMode") == handle, "Native edge click moved the whole selection or missed the canvas edge.");
+                    var end = new Point(point.X + (handle == 3 || handle == 7 ? 10 : 0), point.Y + (handle == 1 || handle == 5 ? 10 : 0));
+                    Mouse(overlay, "OnMouseMove", end.X, end.Y); Mouse(overlay, "OnMouseUp", end.X, end.Y);
+                    Check(Field<Rectangle>(overlay, "selection") == SelectionGeometry.Resize(region, handle, new Point(end.X - point.X, end.Y - point.Y), overlay.ClientRectangle), "Edge dragging resized the wrong side.");
+                }
+                var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                var cursorMessage = Message.Create(overlay.Handle, 0x20, toolbar.Handle, new IntPtr(1));
+                Check(!overlay.PreFilterMessage(ref cursorMessage), "Parent cursor forwarding intercepted toolbar controls.");
+                overlay.Close();
+            }
+            Console.WriteLine("PASS: expanded inner/outer edge targets, corner priority and native resize routing across virtual-screen origins");
+        }
+
         private static void FreeSelection()
         {
             using (var source = new Bitmap(600, 400))
@@ -292,6 +340,7 @@ namespace ShotInk
                 Mouse(overlay, "OnMouseUp", 1, 1); overlay.Close();
             }
             KeyboardSelection();
+            EdgeResizeTargets();
             FreeSelection();
             var previousClipboard = Clipboard.GetDataObject();
             var root = Path.Combine(Path.GetTempPath(), "ShotInk-capture-" + Guid.NewGuid().ToString("N"));

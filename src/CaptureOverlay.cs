@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace ShotInk
 {
-    internal sealed partial class CaptureOverlay : Form
+    internal sealed partial class CaptureOverlay : Form, IMessageFilter
     {
         private readonly Bitmap desktop;
         private readonly Rectangle screenBounds;
@@ -96,6 +96,7 @@ namespace ShotInk
                 };
                 grips[i] = grip; Controls.Add(grip);
             }
+            Application.AddMessageFilter(this);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -546,7 +547,7 @@ namespace ShotInk
         }
         protected override void OnFormClosed(FormClosedEventArgs e) { if (!completed && Cancelled != null) Cancelled(); base.OnFormClosed(e); }
         private void ClearLongDragPreview() { if (longDragPreview != null) { longDragPreview.Dispose(); longDragPreview = null; } }
-        protected override void Dispose(bool disposing) { if (disposing) { DisposePaintCache(); ClearLongDragPreview(); recordingTip.Dispose(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose();
+        protected override void Dispose(bool disposing) { if (disposing) { Application.RemoveMessageFilter(this); DisposePaintCache(); ClearLongDragPreview(); recordingTip.Dispose(); if (gifSession != null) gifSession.Dispose(); if (scrollWheel != null) { scrollWheel.Dispose(); scrollWheel = null; } if (scrollSession != null) scrollSession.Dispose();
 #if !SHOTINK_LITE
             if (recognition != null) recognition.Dispose();
 #endif
@@ -561,6 +562,20 @@ namespace ShotInk
 
     internal static class SelectionGeometry
     {
+        internal static int ResizeHandleAt(Rectangle bounds, Point point, int radius)
+        {
+            if (point.X < bounds.Left - radius || point.X > bounds.Right + radius || point.Y < bounds.Top - radius || point.Y > bounds.Bottom + radius) return -1;
+            var handles = Handles(bounds);
+            for (int index = 0; index < 8; index += 2)
+                if (Math.Abs(point.X - handles[index].X) <= radius && Math.Abs(point.Y - handles[index].Y) <= radius) return index;
+            int hit = -1, distance = radius + 1;
+            for (int index = 1; index < 8; index += 2)
+            {
+                int current = index == 1 || index == 5 ? Math.Abs(point.Y - handles[index].Y) : Math.Abs(point.X - handles[index].X);
+                if (current < distance) { hit = index; distance = current; }
+            }
+            return hit;
+        }
         internal static Rectangle Move(Rectangle original, Point delta, Rectangle bounds)
         {
             return new Rectangle(Math.Max(bounds.Left, Math.Min(original.Left + delta.X, bounds.Right - original.Width)), Math.Max(bounds.Top, Math.Min(original.Top + delta.Y, bounds.Bottom - original.Height)), original.Width, original.Height);
