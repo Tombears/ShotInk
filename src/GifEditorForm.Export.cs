@@ -8,7 +8,7 @@ namespace ShotInk
 {
     internal sealed partial class GifEditorForm
     {
-        private CheckBox compression;
+        private Button compression;
         private NumericUpDown targetSize;
         private System.Windows.Forms.Timer sizeRefresh;
         private CancellationTokenSource encodingCancel;
@@ -19,14 +19,15 @@ namespace ShotInk
 
         private void SetupGifCompression(FlowLayoutPanel row)
         {
-            compression = new CheckBox { Name = "gif-compression", Text = "按大小压缩", AutoSize = true, Margin = new Padding(0, 3, 6, 0) };
-            compression.AccessibleDescription = "等比缩小像素尺寸以压缩 GIF，缩小会减少画面细节。";
-            row.Controls.Add(compression);
-            targetSize = new NumericUpDown { Name = "gif-target-mb", Width = 72, Minimum = .01M, Maximum = 500M, DecimalPlaces = 2, Increment = .1M, Value = 1M, Margin = Padding.Empty };
+            row.Controls.Add(new Label { Text = "目标大小", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
+            targetSize = new NumericUpDown { Name = "gif-target-mb", Width = 72, Minimum = .01M, Maximum = 500M, DecimalPlaces = 2, Increment = .1M, Value = settings.GifTargetMegabytes, Margin = Padding.Empty };
             row.Controls.Add(targetSize);
             row.Controls.Add(new Label { Text = "MB", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
-            compression.CheckedChanged += delegate { Pause(); CommitFrameCanvas(); InvalidateGifExport(); };
-            targetSize.ValueChanged += delegate { if (compression.Checked) { Pause(); CommitFrameCanvas(); InvalidateGifExport(); } };
+            compression = new ToolOptionButton { Name = "gif-compression", Text = "开始压缩", Width = 84, Height = 23, Margin = Padding.Empty };
+            compression.AccessibleDescription = "点击后按目标大小等比缩小像素尺寸，缩小会减少画面细节。";
+            row.Controls.Add(compression);
+            compression.Click += async delegate { await CompressGifAsync(); };
+            targetSize.ValueChanged += delegate { settings.GifTargetMegabytes = targetSize.Value; settings.NotifyChanged(); };
             sizeRefresh = new System.Windows.Forms.Timer { Interval = 400 };
             sizeRefresh.Tick += async delegate
             {
@@ -52,7 +53,24 @@ namespace ShotInk
             if (clip.Frames.Count > 0) sizeRefresh.Start();
         }
 
-        private async Task<byte[]> GetGifBytesAsync()
+        private async Task CompressGifAsync()
+        {
+            if (busy || clip.Frames.Count == 0) return;
+            EnsureEditorUiContext(); Pause(); CommitFrameCanvas();
+            busy = true; EnableEditing(false); InvalidateGifExport(); sizeRefresh.Stop();
+            SetStatus("正在压缩 GIF…");
+            try
+            {
+                await EncodeGifAsync((long)(targetSize.Value * 1024 * 1024));
+                if (!disposed) SetStatus("压缩完成。");
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error) { if (!disposed) { SetStatus("压缩未完成：" + error.Message); sizeRefresh.Start(); } }
+            finally { if (!disposed) { busy = false; EnableEditing(true); } }
+        }
+
+        private Task<byte[]> GetGifBytesAsync() { return EncodeGifAsync(null); }
+        private async Task<byte[]> EncodeGifAsync(long? targetBytes)
         {
             EnsureEditorUiContext();
             if (encoded != null) return encoded;
@@ -70,11 +88,12 @@ namespace ShotInk
                 }));
                 var cancellation = CancellationTokenSource.CreateLinkedTokenSource(generation.Token);
                 encodingCancel = cancellation;
-                long limit = compression.Checked ? (long)(targetSize.Value * 1024 * 1024) : long.MaxValue;
+                int scale = exportScale;
                 var token = cancellation.Token;
                 encodingTask = Task.Run(delegate
                 {
-                    return EncodeToSize(snapshot, limit, token);
+                    if (targetBytes.HasValue) return EncodeToSize(snapshot, targetBytes.Value, token);
+                    return new GifEncodingResult { Bytes = GifEncoder.Encode(snapshot, 0, snapshot.Frames.Count - 1, token, scale), Scale = scale };
                 });
             }
             var pending = encodingTask;

@@ -31,6 +31,7 @@ namespace ShotInk
         internal bool AutoHistory = true;
         internal int HistoryLimit = 10;
         internal int GifFramesPerSecond = 30;
+        internal decimal GifTargetMegabytes = 1M;
         internal bool RecordingGuideSeen, RecordMicrophone, RecordSpeaker = true, RecordPointer = true;
         internal Keys GifDeleteCurrentShortcut = Keys.Control | Keys.X;
         internal Keys GifDeleteSelectedShortcut = Keys.Control | Keys.Shift | Keys.X;
@@ -67,6 +68,7 @@ namespace ShotInk
             StartWithWindows = other.StartWithWindows; Skin = other.Skin; RecordMicrophoneDevice = other.RecordMicrophoneDevice; RecordMicrophoneGain = other.RecordMicrophoneGain;
             RandomSkin = other.RandomSkin; RandomSkinMask = other.RandomSkinMask;
             GifFramesPerSecond = other.GifFramesPerSecond;
+            GifTargetMegabytes = other.GifTargetMegabytes;
             RecordingGuideSeen = other.RecordingGuideSeen; RecordMicrophone = other.RecordMicrophone; RecordSpeaker = other.RecordSpeaker; RecordPointer = other.RecordPointer;
             GifDeleteCurrentShortcut = other.GifDeleteCurrentShortcut; GifDeleteSelectedShortcut = other.GifDeleteSelectedShortcut; GifUndoShortcut = other.GifUndoShortcut;
             CaptureShortcut = other.CaptureShortcut; PinShortcut = other.PinShortcut; ScrollShortcut = other.ScrollShortcut;
@@ -103,7 +105,7 @@ namespace ShotInk
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
-                var knownKeys = new[] { "record-microphone-device", "record-microphone-gain", "skin", "random-skin", "random-skin-mask", "save", "history-limit", "gif-fps", "gif-delete-current", "gif-delete-selected", "gif-undo", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
+                var knownKeys = new[] { "record-microphone-device", "record-microphone-gain", "skin", "random-skin", "random-skin-mask", "save", "history-limit", "gif-fps", "gif-target-mb", "gif-delete-current", "gif-delete-selected", "gif-undo", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value; int skin;
@@ -122,6 +124,7 @@ namespace ShotInk
                 if (values.TryGetValue("save", out value)) settings.AutoHistory = value != "0";
                 settings.HistoryLimit = (int)ReadNumber(values, "history-limit", 1, 10000, settings.HistoryLimit);
                 settings.GifFramesPerSecond = (int)ReadNumber(values, "gif-fps", 1, 50, settings.GifFramesPerSecond);
+                settings.GifTargetMegabytes = Math.Round((decimal)ReadNumber(values, "gif-target-mb", .01F, 500, (float)settings.GifTargetMegabytes), 2);
                 settings.GifDeleteCurrentShortcut = ReadShortcut(values, "gif-delete-current", settings.GifDeleteCurrentShortcut);
                 settings.GifDeleteSelectedShortcut = ReadShortcut(values, "gif-delete-selected", settings.GifDeleteSelectedShortcut);
                 settings.GifUndoShortcut = ReadShortcut(values, "gif-undo", settings.GifUndoShortcut);
@@ -193,6 +196,7 @@ namespace ShotInk
             if (RandomSkin && RandomSkinMask == 0) throw new ArgumentException("请至少勾选一套参与随机的皮肤。");
             if (HistoryLimit < 1 || HistoryLimit > 10000) throw new ArgumentException("历史保留张数应为 1～10000。");
             if (GifFramesPerSecond < 1 || GifFramesPerSecond > 50) throw new ArgumentException("GIF 每秒帧数应为 1～50。");
+            if (GifTargetMegabytes < .01M || GifTargetMegabytes > 500M) throw new ArgumentException("GIF 目标大小应为 0.01～500 MB。");
             if (GifShortcuts.Any(key => !Shortcut.Valid(key))) throw new ArgumentException("GIF 快捷键无效，字母需搭配 Ctrl 或 Alt。");
             if (GifShortcuts.Where(key => key != Keys.None).Distinct().Count() != GifShortcuts.Count(key => key != Keys.None)) throw new ArgumentException("GIF 快捷键不能重复。");
             if (Shortcuts.Any(key => !Shortcut.Valid(key))) throw new ArgumentException("快捷键无效：字母、数字和 Esc 需搭配 Ctrl 或 Alt，不能只使用修饰键。");
@@ -208,6 +212,7 @@ namespace ShotInk
                 "random-skin=" + (RandomSkin ? "1" : "0"), "random-skin-mask=" + RandomSkinMask,
                 "start-with-windows=" + (StartWithWindows ? "1" : "0"),
                 "gif-fps=" + GifFramesPerSecond,
+                "gif-target-mb=" + GifTargetMegabytes.ToString(CultureInfo.InvariantCulture),
                 "record-guide-seen=" + (RecordingGuideSeen ? "1" : "0"), "record-microphone=" + (RecordMicrophone ? "1" : "0"),
                 "record-speaker=" + (RecordSpeaker ? "1" : "0"), "record-pointer=" + (RecordPointer ? "1" : "0"),
                 "gif-delete-current=" + (int)GifDeleteCurrentShortcut, "gif-delete-selected=" + (int)GifDeleteSelectedShortcut, "gif-undo=" + (int)GifUndoShortcut,

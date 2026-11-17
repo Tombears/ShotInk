@@ -117,19 +117,26 @@ namespace ShotInk
                     "Compression changed the frame count or emitted the wrong dimensions.");
                 Assert(image.GetPropertyItem(0x5100).Value.Take(8).SequenceEqual(new byte[] { 10, 0, 0, 0, 10, 0, 0, 0 }), "Compression changed frame timing.");
             }
-            using (var editor = new GifEditorForm(clip, new AppSettings()))
+            var settings = new AppSettings();
+            using (var editor = new GifEditorForm(clip, settings))
             {
                 editor.Show(); Application.DoEvents();
-                var enabled = (CheckBox)editor.Controls.Find("gif-compression", true)[0];
+                var button = (Button)editor.Controls.Find("gif-compression", true)[0];
                 var target = (NumericUpDown)editor.Controls.Find("gif-target-mb", true)[0];
-                target.Value = .02M; enabled.Checked = true;
+                target.Value = .02M;
+                Assert(settings.GifTargetMegabytes == .02M && target.Left < button.Left, "Target was not remembered or did not precede the compression button.");
                 var task = (Task<byte[]>)typeof(GifEditorForm).GetMethod("GetGifBytesAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
                 Wait(task);
-                Assert(task.Result.Length <= .02 * 1024 * 1024 && Field<WechatGifPreview>(editor, "wechatPreview").Text.Contains("KB"), "Editor size display or target input did not match encoded output.");
-                enabled.Checked = false;
-                task = (Task<byte[]>)typeof(GifEditorForm).GetMethod("GetGifBytesAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
-                Wait(task);
-                Assert(task.Result.SequenceEqual(original), "Disabling compression did not restore original export bytes.");
+                Assert(task.Result.SequenceEqual(original), "Typing a target compressed the GIF automatically.");
+                var compressing = (Task)typeof(GifEditorForm).GetMethod("CompressGifAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+                Wait(compressing);
+                var compressed = Field<byte[]>(editor, "encoded");
+                Assert(compressed.Length <= .02 * 1024 * 1024 && Field<WechatGifPreview>(editor, "wechatPreview").Text.Contains("KB"), "Explicit compression exceeded the target size.");
+                target.Value = .01M;
+                Assert(ReferenceEquals(compressed, Field<byte[]>(editor, "encoded")), "Changing the target recompressed an existing GIF.");
+                target.Value = 500M;
+                Wait((Task)typeof(GifEditorForm).GetMethod("CompressGifAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null));
+                Assert(Field<byte[]>(editor, "encoded").SequenceEqual(original), "A larger explicit target did not restore original export bytes.");
                 var range = Field<GifRangeSlider>(editor, "range");
                 range.SetRange(0, 0);
                 for (int worker = 0; worker < GifEncoder.Workers; worker++) GifRenderWorkers.Gate.Wait();
@@ -146,6 +153,17 @@ namespace ShotInk
                 Assert(task.Result.SequenceEqual(GifEncoder.Encode(clip, 1, 1)), "Size calculation retained an outdated selected range.");
                 editor.Close();
             }
+            string settingsPath = Path.Combine(Path.GetTempPath(), "gif-target-" + Guid.NewGuid().ToString("N"), "settings.ini");
+            try
+            {
+                settings.GifTargetMegabytes = .37M; settings.Save(settingsPath);
+                var restored = AppSettings.Load(settingsPath).Clone();
+                Assert(restored.GifTargetMegabytes == .37M, "Compression target did not persist across save, load and clone.");
+                using (var next = new GifEditorForm(clip, restored))
+                    Assert(((NumericUpDown)next.Controls.Find("gif-target-mb", true)[0]).Value == .37M && Field<int>(next, "exportScale") == 100,
+                        "Next GIF lost the saved target or automatically enabled compression.");
+            }
+            finally { Directory.Delete(Path.GetDirectoryName(settingsPath), true); }
             try { GifEditorForm.EncodeToSize(clip, 1, CancellationToken.None); throw new Exception("Impossible target silently exported an oversized GIF."); }
             catch (InvalidOperationException) { }
         }
