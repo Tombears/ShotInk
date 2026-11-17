@@ -149,7 +149,7 @@ namespace ShotInk
                 { int at = next.FindIndex(previous => previous.Id == mark.Id); if (at < 0) next.Add(mark); else next[at] = mark; }
                 edit.Before.Add(frame, frame.Annotations); edit.After.Add(frame, next); frame.Annotations = next;
             }
-            annotationUndo.Push(edit); annotationRedo.Clear(); encoded = null; cachedFirst = cachedLast = -1; UpdateAnnotationHistory(); PreloadNearbyFrames();
+            annotationUndo.Push(edit); annotationRedo.Clear(); InvalidateGifExport(); UpdateAnnotationHistory(); PreloadNearbyFrames();
             UpdateWechatPreview();
         }
         private void PreloadNearbyFrames()
@@ -167,7 +167,7 @@ namespace ShotInk
             var edit = source.Pop(); ReleaseFrameCanvas(false);
             if (edit.BeforeTimeline != null) RestoreTimeline(redo ? edit.AfterTimeline : edit.BeforeTimeline);
             else foreach (var pair in redo ? edit.After : edit.Before) pair.Key.Annotations = pair.Value;
-            (redo ? annotationUndo : annotationRedo).Push(edit); encoded = null; cachedFirst = cachedLast = -1; ShowFrame(frameIndex); PreloadNearbyFrames();
+            (redo ? annotationUndo : annotationRedo).Push(edit); InvalidateGifExport(); ShowFrame(frameIndex); PreloadNearbyFrames();
         }
         private bool HandleAnnotationKey(ref Message message, Keys keyData)
         {

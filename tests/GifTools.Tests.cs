@@ -96,6 +96,59 @@ namespace ShotInk
             }
             finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
+        private static void TestTargetCompression()
+        {
+            var clip = new GifClip { Duration = 200 };
+            var random = new Random(17);
+            for (int index = 0; index < 2; index++)
+            using (var image = new Bitmap(160, 120)) using (var stream = new MemoryStream())
+            {
+                for (int y = 0; y < image.Height; y++) for (int x = 0; x < image.Width; x++)
+                    image.SetPixel(x, y, Color.FromArgb(random.Next(256), random.Next(256), random.Next(256)));
+                image.Save(stream, ImageFormat.Png);
+                clip.Frames.Add(new GifFrame { Time = index * 100, Png = stream.ToArray() });
+            }
+            var original = GifEncoder.Encode(clip, 0, 1);
+            var result = GifEditorForm.EncodeToSize(clip, original.Length / 2, CancellationToken.None);
+            Assert(result.Bytes.Length <= original.Length / 2 && result.Scale < 100, "Target compression exceeded its byte limit.");
+            using (var stream = new MemoryStream(result.Bytes)) using (var image = Image.FromStream(stream))
+            {
+                Assert(image.Size == GifEncoder.OutputSize(new Size(160, 120), result.Scale) && image.GetFrameCount(FrameDimension.Time) == 2,
+                    "Compression changed the frame count or emitted the wrong dimensions.");
+                Assert(image.GetPropertyItem(0x5100).Value.Take(8).SequenceEqual(new byte[] { 10, 0, 0, 0, 10, 0, 0, 0 }), "Compression changed frame timing.");
+            }
+            using (var editor = new GifEditorForm(clip, new AppSettings()))
+            {
+                editor.Show(); Application.DoEvents();
+                var enabled = (CheckBox)editor.Controls.Find("gif-compression", true)[0];
+                var target = (NumericUpDown)editor.Controls.Find("gif-target-mb", true)[0];
+                target.Value = .02M; enabled.Checked = true;
+                var task = (Task<byte[]>)typeof(GifEditorForm).GetMethod("GetGifBytesAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+                Wait(task);
+                Assert(task.Result.Length <= .02 * 1024 * 1024 && Field<WechatGifPreview>(editor, "wechatPreview").Text.Contains("KB"), "Editor size display or target input did not match encoded output.");
+                enabled.Checked = false;
+                task = (Task<byte[]>)typeof(GifEditorForm).GetMethod("GetGifBytesAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+                Wait(task);
+                Assert(task.Result.SequenceEqual(original), "Disabling compression did not restore original export bytes.");
+                var range = Field<GifRangeSlider>(editor, "range");
+                range.SetRange(0, 0);
+                for (int worker = 0; worker < GifEncoder.Workers; worker++) GifRenderWorkers.Gate.Wait();
+                try
+                {
+                    task = (Task<byte[]>)typeof(GifEditorForm).GetMethod("GetGifBytesAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+                    range.SetRange(1, 1);
+                }
+                finally { GifRenderWorkers.Gate.Release(GifEncoder.Workers); }
+                try { Wait(task); throw new Exception("A stale encoding survived a selection change."); }
+                catch (OperationCanceledException) { }
+                task = (Task<byte[]>)typeof(GifEditorForm).GetMethod("GetGifBytesAsync", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+                Wait(task);
+                Assert(task.Result.SequenceEqual(GifEncoder.Encode(clip, 1, 1)), "Size calculation retained an outdated selected range.");
+                editor.Close();
+            }
+            try { GifEditorForm.EncodeToSize(clip, 1, CancellationToken.None); throw new Exception("Impossible target silently exported an oversized GIF."); }
+            catch (InvalidOperationException) { }
+        }
         private static void TestDragPreview()
         {
             var clip = new GifClip { Duration = 2400 };
@@ -452,6 +505,7 @@ namespace ShotInk
         }
         internal static void Run()
         {
+            TestTargetCompression();
             using (var preview = new WechatGifPreview())
             {
                 foreach (var size in new[] { new Size(980, 980), new Size(981, 100), new Size(100, 981) })

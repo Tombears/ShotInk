@@ -21,7 +21,6 @@ namespace ShotInk
         private byte[] encoded;
         private bool busy;
         private bool disposed;
-        private int cachedFirst = -1, cachedLast = -1;
 #if !SHOTINK_LITE
         private readonly ITextRecognizer gifRecognizer;
         internal GifEditorForm(GifClip clip, AppSettings settings, ITextRecognizer recognizer = null)
@@ -53,8 +52,10 @@ namespace ShotInk
             range.RangeChanged += TrimChanged;
             range.DragStarted += delegate { dragPreviewSession++; Pause(); ReleaseFrameCanvas(true); preview.Show(); frameCache.CancelPrefetch(); };
             range.DragCompleted += delegate { if (!disposed && !busy) ShowFrame(frameIndex); };
-            var hint = new Label { Text = "← / → 逐帧查看；点击起点或终点手柄后，方向键每次调整一帧。", ForeColor = ToolAppearance.Muted, Dock = DockStyle.Fill };
-            layout.Controls.Add(hint, 0, 4);
+            var hints = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false };
+            if (clip.Recording == null) SetupGifCompression(hints);
+            hints.Controls.Add(new Label { Text = "← / → 逐帧查看；选中手柄后微调。", ForeColor = ToolAppearance.Muted, AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
+            layout.Controls.Add(hints, 0, 4);
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             play = new ToolOptionButton { Name = "gif-play", Text = "播放选段", Width = 104, Height = 32 };
             delete = new ToolOptionButton { Name = "gif-delete", Text = "删除选中", Width = 104, Height = 32, ForeColor = Color.Firebrick, AccentColor = ToolAppearance.Accent("cancel"), Selected = true };
@@ -81,12 +82,13 @@ namespace ShotInk
             if (clip.Recording != null) { copy.Text = "复制到剪贴板"; copy.Width = 124; save.Text = "下载 MP4"; }
             SetupAnnotationTools();
             ShowFrame(0);
+            InvalidateGifExport();
         }
         private int FrameDelay(int index) { return Math.Max(20, clip.EndTime(index) - clip.Frames[index].Time); }
         private void Pause() { playback.Stop(); StopVideoAudio(false); play.Text = "播放选段"; }
         private void TrimChanged(int index)
         {
-            Pause(); encoded = null;
+            Pause(); InvalidateGifExport();
             if (range.IsDragging) { UpdateFramePosition(index); RequestDragPreview(); }
             else ShowFrame(index);
         }
@@ -97,7 +99,7 @@ namespace ShotInk
             if (busy || clip.Frames.Count == 0) return;
             Pause(); ReleaseFrameCanvas(true); int count = last - first + 1;
             var edit = new FrameEdit { BeforeTimeline = CaptureTimeline() };
-            clip.DeleteRange(first, last); encoded = null; cachedFirst = cachedLast = -1;
+            clip.DeleteRange(first, last); InvalidateGifExport();
             frameCache.Prune(clip.Frames);
             range.Reset(Math.Max(0, clip.Frames.Count - 1)); EnableEditing(true);
             ShowFrame(Math.Min(nextIndex, Math.Max(0, clip.Frames.Count - 1)));
@@ -105,7 +107,7 @@ namespace ShotInk
             SetStatus("已删除 " + count + " 帧。" + (clip.Frames.Count == 0 ? "暂无可用帧。" : "起点和终点已复位。")); preview.Focus();
         }
         private void EnableEditing(bool enabled)
-        { range.Enabled = play.Enabled = copy.Enabled = save.Enabled = delete.Enabled = deleteCurrent.Enabled = toolbar.Enabled = scope.Enabled = viewport.Enabled = enabled && clip.Frames.Count > 0; }
+        { if (compression != null) { compression.Enabled = targetSize.Enabled = enabled && clip.Frames.Count > 0; } range.Enabled = play.Enabled = copy.Enabled = save.Enabled = delete.Enabled = deleteCurrent.Enabled = toolbar.Enabled = scope.Enabled = viewport.Enabled = enabled && clip.Frames.Count > 0; }
         private void ShowFrame(int index, bool editing = true)
         {
             dragPreviewRevision++;
@@ -127,8 +129,8 @@ namespace ShotInk
         private void UpdateWechatPreview(Image image = null)
         {
             if (wechatPreview == null) return;
-            if (image != null) wechatPreview.SetFrame(image);
-            else using (var rendered = clip.Frames[frameIndex].Decode()) wechatPreview.SetFrame(rendered);
+            if (image != null) wechatPreview.SetFrame(image, ExportScale);
+            else using (var rendered = clip.Frames[frameIndex].Decode()) wechatPreview.SetFrame(rendered, ExportScale);
         }
         private void UpdateFramePosition(int index)
         {
@@ -138,7 +140,7 @@ namespace ShotInk
         }
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (range.EditingValue) return base.ProcessCmdKey(ref msg, keyData);
+            if (range.EditingValue || targetSize != null && targetSize.ContainsFocus) return base.ProcessCmdKey(ref msg, keyData);
             if (!busy && frameCanvas != null && frameCanvas.EditingInlineText)
             {
                 var key = new KeyEventArgs(keyData);
@@ -187,12 +189,8 @@ namespace ShotInk
             {
                 await frameCache.CancelPrefetch(); if (IsDisposed) return; EnsureEditorUiContext();
                 if (clip.Recording != null) { await ExportVideoAsync(copying, first, last); return; }
-                if (encoded == null || cachedFirst != first || cachedLast != last)
-                {
-                    var token = generation.Token;
-                    var bytes = await Task.Run(delegate { return GifEncoder.Encode(clip, first, last, token); });
-                    if (IsDisposed) return; encoded = bytes; cachedFirst = first; cachedLast = last;
-                }
+                encoded = await GetGifBytesAsync();
+                if (IsDisposed) return;
                 if (copying)
                 {
                     string path = GifExport.WriteNew(encoded, GifExport.CacheDirectory);
@@ -205,7 +203,7 @@ namespace ShotInk
             finally { if (!IsDisposed) { busy = false; EnableEditing(true); } else if (clip.Recording != null) clip.Recording.Dispose(); }
         }
         protected override void Dispose(bool disposing)
-        { if (disposing && !disposed) { disposed = true; StopVideoAudio(true); generation.Cancel(); generation.Dispose(); if (clip.Recording != null && !busy) clip.Recording.Dispose(); frameCache.Dispose(); ReleaseFrameCanvas(false); if (playback != null) playback.Dispose(); if (preview != null && preview.Image != null) { preview.Image.Dispose(); preview.Image = null; } } base.Dispose(disposing); }
+        { if (disposing && !disposed) { disposed = true; if (sizeRefresh != null) { sizeRefresh.Stop(); sizeRefresh.Dispose(); } StopVideoAudio(true); generation.Cancel(); generation.Dispose(); if (clip.Recording != null && !busy) clip.Recording.Dispose(); frameCache.Dispose(); ReleaseFrameCanvas(false); if (playback != null) playback.Dispose(); if (preview != null && preview.Image != null) { preview.Image.Dispose(); preview.Image = null; } } base.Dispose(disposing); }
         private sealed class GifPreviewBox : PictureBox
         { internal GifPreviewBox() { SetStyle(ControlStyles.Selectable, true); TabStop = true; } }
     }

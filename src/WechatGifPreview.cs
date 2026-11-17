@@ -14,16 +14,16 @@ namespace ShotInk
         internal WechatGifPreview()
         {
             Name = "gif-wechat-preview";
-            Text = "任一边超过 980 PX\n微信自动展示为文件";
+            Text = "GIF 大小\n计算中…";
             AccessibleName = "微信预览";
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw, true);
         }
 
-        internal void SetFrame(Image image)
+        internal void SetFrame(Image image, int scalePercent = 100)
         {
             var previous = thumbnail; thumbnail = null;
-            FrameSize = image == null ? Size.Empty : image.Size;
+            FrameSize = image == null ? Size.Empty : GifEncoder.OutputSize(image.Size, scalePercent);
             IsFile = FrameSize.Width > 980 || FrameSize.Height > 980;
             if (image != null && !IsFile)
             {

@@ -115,21 +115,38 @@ namespace ShotInk
     {
         internal static readonly int Workers = Math.Max(1, Math.Min(4, Environment.ProcessorCount - 1));
         private sealed class EncodedFrame { internal int Width, Height; internal byte[] Data; }
-        private static EncodedFrame EncodeFrame(GifFrame source, CancellationToken token)
+        internal static Size OutputSize(Size size, int scalePercent)
+        {
+            if (scalePercent < 1 || scalePercent > 100) throw new ArgumentOutOfRangeException("scalePercent");
+            return new Size(Math.Max(1, (int)Math.Round(size.Width * scalePercent / 100.0)), Math.Max(1, (int)Math.Round(size.Height * scalePercent / 100.0)));
+        }
+        private static EncodedFrame EncodeFrame(GifFrame source, CancellationToken token, int scalePercent)
         {
             GifRenderWorkers.Gate.Wait(token);
             try
             {
                 token.ThrowIfCancellationRequested();
                 using (var bitmap = source.Decode()) using (var stream = new MemoryStream())
-                { bitmap.Save(stream, ImageFormat.Gif); return new EncodedFrame { Width = bitmap.Width, Height = bitmap.Height, Data = stream.ToArray() }; }
+                using (var resized = scalePercent == 100 ? null : new Bitmap(OutputSize(bitmap.Size, scalePercent).Width, OutputSize(bitmap.Size, scalePercent).Height))
+                {
+                    if (resized != null) using (var graphics = Graphics.FromImage(resized))
+                    {
+                        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                        graphics.DrawImage(bitmap, new Rectangle(Point.Empty, resized.Size));
+                    }
+                    var output = resized ?? bitmap;
+                    output.Save(stream, ImageFormat.Gif);
+                    return new EncodedFrame { Width = output.Width, Height = output.Height, Data = stream.ToArray() };
+                }
             }
             finally { GifRenderWorkers.Gate.Release(); }
         }
         // Use GDI+'s palette quantizer and LZW encoder for each frame, then assemble
         // full-size local-palette frames with explicit timing and an infinite loop.
-        internal static byte[] Encode(GifClip clip, int first, int last, CancellationToken cancellation = default(CancellationToken))
+        internal static byte[] Encode(GifClip clip, int first, int last, CancellationToken cancellation = default(CancellationToken), int scalePercent = 100)
         {
+            OutputSize(new Size(1, 1), scalePercent);
             if (first < 0 || last < first || last >= clip.Frames.Count) throw new ArgumentOutOfRangeException("first");
             using (var output = new MemoryStream()) using (var writer = new BinaryWriter(output))
             {
@@ -142,7 +159,7 @@ namespace ShotInk
                 {
                     batchStart = index; batch = new EncodedFrame[Math.Min(Workers * 2, last - index + 1)];
                     Parallel.For(0, batch.Length, new ParallelOptions { MaxDegreeOfParallelism = Workers, CancellationToken = cancellation },
-                        delegate(int at) { batch[at] = EncodeFrame(clip.Frames[batchStart + at], cancellation); });
+                        delegate(int at) { batch[at] = EncodeFrame(clip.Frames[batchStart + at], cancellation, scalePercent); });
                 }
                 var encoded = batch[index - batchStart];
                 {
