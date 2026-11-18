@@ -2196,7 +2196,7 @@ namespace ShotInk
                 var strip = Field<ToolStrip>(toolbar, "strip");
                 var recognize = Field<ToolStripButton>(toolbar, "recognize");
                 var crop = strip.Items["crop-image"];
-                Assert(crop != null && strip.Items.IndexOf(crop) == strip.Items.IndexOf(tools[DrawTool.Eraser]) + 1
+                Assert(crop != null && !crop.Available && strip.Items.IndexOf(crop) == strip.Items.IndexOf(tools[DrawTool.Eraser]) + 1
                     && strip.Items.IndexOf(recognize) == strip.Items.IndexOf(crop) + 1, "Crop and OCR are out of order after the eraser.");
                 int requests = 0;
                 using (var isolated = new CaptureToolbar())

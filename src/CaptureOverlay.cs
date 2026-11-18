@@ -34,7 +34,7 @@ namespace ShotInk
         private Bitmap longDragPreview;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
-        private bool CanReframeSelection { get { return longViewport == null && canvas != null && !canvas.IsCropping && !canvas.HasCrop; } }
+        private bool CanReframeSelection { get { return longViewport == null && canvas != null; } }
 #if !SHOTINK_LITE
         private OcrSearchPanel textSearch;
 #endif
@@ -123,10 +123,9 @@ namespace ShotInk
             if (dragging && dragMode == -3) { PaintFreeStroke(g); return; }
             if (selection.Width > 0 && selection.Height > 0)
             {
-                var visibleOutline = selectionOutline == null || canvas == null ? selectionOutline : canvas.VisibleCaptureOutline;
                 var surfaceState = g.Save();
-                if (visibleOutline != null)
-                    using (var outline = FreeSelectionGeometry.Path(visibleOutline, selection)) g.SetClip(outline, CombineMode.Intersect);
+                if (selectionOutline != null)
+                    using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) g.SetClip(outline, CombineMode.Intersect);
                 g.SetClip(selection, CombineMode.Intersect);
                 g.DrawImageUnscaled(desktop, Point.Empty);
                 if (dragging && longDragPreview != null) g.DrawImageUnscaled(longDragPreview, selection.Location);
@@ -139,8 +138,8 @@ namespace ShotInk
                 g.Restore(surfaceState);
                 using (var pen = new Pen(Color.FromArgb(38, 139, 255), 2))
                 {
-                    if (visibleOutline == null || canvas.HasCrop) g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
-                    else using (var outline = FreeSelectionGeometry.Path(visibleOutline, selection)) { g.SmoothingMode = SmoothingMode.AntiAlias; g.DrawPath(pen, outline); }
+                    if (selectionOutline == null) g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
+                    else using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) { g.SmoothingMode = SmoothingMode.AntiAlias; g.DrawPath(pen, outline); }
                 }
                 if (keyboardEdge >= 0)
                 {
@@ -268,7 +267,7 @@ namespace ShotInk
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
             keyboardEdge = -1;
             dragging = false; Capture = false;
-            if (selection.Width < 8 || selection.Height < 8) { ClearSelection(); Invalidate(); return; }
+            if (longViewport == null && (selection.Width < 8 || selection.Height < 8)) { ClearSelection(); Invalidate(); return; }
             if (!ready) PrepareEditor();
             else if (canvas != null)
             {
@@ -350,13 +349,6 @@ namespace ShotInk
             canvas.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
 #endif
             canvas.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
-            canvas.ImageBoundsChanged += delegate(Rectangle previous)
-            {
-                var bounds = canvas.ImageBounds;
-                selection = new Rectangle(selection.X + bounds.Left - previous.Left, selection.Y + bounds.Top - previous.Top, bounds.Width, bounds.Height);
-                canvas.Location = selection.Location;
-                UpdateSelectionChrome(); PositionToolbar(); Invalidate(true);
-            };
             Controls.Add(toolbar);
             SyncSettings();
             canvas.Focus();
@@ -364,6 +356,7 @@ namespace ShotInk
 
         private void BeginCrop()
         {
+            if (longViewport == null || scrollSession != null) return;
             canvas.BeginCrop();
             toolbar.SetCropMode(true);
             UpdateSelectionChrome();

@@ -327,14 +327,24 @@ namespace ShotInk
                 overlay.Show();
                 var selection = new Rectangle(screen.Left + 60, screen.Top + 50, 180, 120);
                 overlay.SelectRegion(selection);
-                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
-                using (var graphics = Graphics.FromImage(canvas.Image)) graphics.Clear(Color.CornflowerBlue);
-                canvas.AddMark(new Mark { Tool = DrawTool.Pen, Width = 5, Color = Color.Red,
-                    Points = { new PointF(30, 42), new PointF(130, 42) } });
                 var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
                 var strip = Field<ToolStrip>(toolbar, "strip");
                 var crop = (ToolStripButton)strip.Items["crop-image"];
-                Check(crop != null && strip.Items[strip.Items.IndexOf(crop) - 1].ToolTipText.StartsWith("橡皮擦"), "Crop was not next to the eraser");
+                Check(crop != null && !crop.Available && !crop.Visible, "Regular screenshot exposed crop");
+                var ordinaryCanvas = Field<AnnotationCanvas>(overlay, "canvas");
+                crop.PerformClick(); ordinaryCanvas.BeginCrop();
+                Check(!ordinaryCanvas.IsCropping, "Regular screenshot entered crop mode");
+                int ordinaryToolbarWidth = toolbar.Width;
+                var image = new Bitmap(180, 250);
+                for (int y = 0; y < image.Height; y++) for (int x = 0; x < image.Width; x++)
+                    image.SetPixel(x, y, Color.FromArgb(x, y, 128));
+                overlay.ShowLongPreview(image);
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                var viewport = Field<Panel>(overlay, "longViewport");
+                Check(crop.Visible && toolbar.Width == ordinaryToolbarWidth + crop.Width
+                    && strip.Items[strip.Items.IndexOf(crop) - 1].ToolTipText.StartsWith("橡皮擦"), "Long screenshot did not show crop after the eraser");
+                canvas.AddMark(new Mark { Tool = DrawTool.Pen, Width = 5, Color = Color.Red,
+                    Points = { new PointF(30, 42), new PointF(130, 42) } });
                 var previousSkin = Skins.Current.Kind;
                 try
                 {
@@ -352,59 +362,56 @@ namespace ShotInk
                     Check(canvas.IsCropping && !strip.Visible, "Crop action did not open crop mode");
                     Mouse(canvas, "OnMouseDown", 0, 60); Mouse(canvas, "OnMouseUp", 15, 60);
                     Mouse(canvas, "OnMouseDown", 89, 0); Mouse(canvas, "OnMouseUp", 89, 12);
-                    Mouse(canvas, "OnMouseDown", 179, 65); Mouse(canvas, "OnMouseUp", 159, 65);
-                    Mouse(canvas, "OnMouseDown", 87, 119); Mouse(canvas, "OnMouseUp", 87, 103);
+                    canvas.ScrollDocumentHorizontal(image.Width);
+                    int right = image.Width - 1 - (int)canvas.DocumentOffsetX;
+                    Mouse(canvas, "OnMouseDown", right, 65); Mouse(canvas, "OnMouseUp", right - 20, 65);
+                    canvas.ScrollDocumentHorizontal(-image.Width);
+                    canvas.ScrollDocument(image.Height);
+                    int bottom = image.Height - 1 - (int)canvas.DocumentOffsetY;
+                    Mouse(canvas, "OnMouseDown", 87, bottom);
+                    canvas.ScrollDocument(-107);
+                    Mouse(canvas, "OnMouseUp", 87, bottom - 39);
                     Check(canvas.ImageBounds.Size == original.Size, "Cropping changed the image before confirmation");
                     ((Button)toolbar.Controls.Find("finish-crop", true).Single()).PerformClick();
                     var expected = new Rectangle(15, 12, 145, 92);
                     Check(!canvas.IsCropping && strip.Visible && canvas.ImageBounds == expected, "Four-edge crop produced wrong bounds");
+                    Check(canvas.Size == expected.Size && viewport.Size == expected.Size
+                        && Field<Rectangle>(overlay, "selection").Size == expected.Size, "Preview left empty space around the crop");
+                    Check(canvas.DocumentOffsetX == 0 && canvas.DocumentOffsetY == 0, "Fitted crop retained a scroll offset");
+                    using (var preview = new Bitmap(canvas.Width, canvas.Height))
                     using (var cropped = canvas.Render())
                     {
+                        canvas.DrawToBitmap(preview, canvas.ClientRectangle);
                         Check(cropped.Size == expected.Size, "Crop did not change export size");
                         for (int y = 0; y < cropped.Height; y++) for (int x = 0; x < cropped.Width; x++)
+                        {
                             Check(cropped.GetPixel(x, y) == original.GetPixel(x + expected.Left, y + expected.Top), "Crop altered pixels or annotation position");
+                            Check(preview.GetPixel(x, y) == cropped.GetPixel(x, y), "Preview contains pixels outside the crop or is missing retained pixels");
+                        }
                     }
                     canvas.Undo();
-                    Check(!canvas.HasCrop && canvas.Size == original.Size, "Undo did not restore the screenshot bounds");
+                    Check(canvas.ImageBounds.Size == original.Size && viewport.Size == selection.Size, "Undo did not restore the original long screenshot and frame");
                     canvas.Redo();
-                    Check(canvas.ImageBounds == expected && canvas.Size == expected.Size, "Redo did not restore crop bounds");
+                    Check(canvas.ImageBounds == expected && viewport.Size == expected.Size, "Redo did not restore crop and frame bounds");
                     crop.PerformClick();
                     Mouse(canvas, "OnMouseDown", 0, 45); Mouse(canvas, "OnMouseUp", 25, 45);
                     ((Button)toolbar.Controls.Find("cancel-crop", true).Single()).PerformClick();
                     Check(!canvas.IsCropping && canvas.ImageBounds == expected, "Cancellation applied a preview crop");
-                    overlay.Completed += delegate(Bitmap image, CaptureAction action)
-                    { using (image) Check(image.Size == expected.Size && action == CaptureAction.Copy, "Copy ignored confirmed crop"); };
+                    overlay.Completed += delegate(Bitmap exported, CaptureAction action)
+                    { using (exported) Check(exported.Size == expected.Size && action == CaptureAction.Copy, "Copy ignored confirmed crop"); };
                     Call(overlay, "Finish", CaptureAction.Copy);
                     Check(overlay.IsDisposed, "Copy did not complete the cropped screenshot");
                 }
             }
-            using (var canvas = new AnnotationCanvas(new Bitmap(160, 120)))
-            {
-                using (var graphics = Graphics.FromImage(canvas.Image)) graphics.Clear(Color.White);
-                canvas.SetCaptureOutline(new[] { new PointF(0, 0), new PointF(1, 0), new PointF(0, 1) });
-                canvas.SetZoom(.5F);
-                canvas.BeginCrop();
-                Mouse(canvas, "OnMouseDown", 0, 30); Mouse(canvas, "OnMouseUp", 10, 30);
-                Mouse(canvas, "OnMouseDown", 40, 0); Mouse(canvas, "OnMouseUp", 40, 5);
-                canvas.EndCrop(true);
-                using (var cropped = canvas.Render())
-                    Check(cropped.Size == new Size(140, 110) && cropped.GetPixel(0, 0).A == 255 && cropped.GetPixel(139, 109).A == 0,
-                        "Zoomed crop did not preserve the free selection's transparent mask");
-            }
             using (var editor = new EditorForm(new Bitmap(160, 120), image => image.Dispose()))
-            {
-                editor.Show();
-                var canvas = Field<AnnotationCanvas>(editor, "canvas");
-                var crop = (Button)editor.Controls.Find("crop-image", true).Single();
-                Check(crop.Parent.Controls[crop.Parent.Controls.IndexOf(crop) - 1].Text == "橡皮擦", "Image editor crop was not next to the eraser");
-                crop.PerformClick();
-                Mouse(canvas, "OnMouseDown", 159, 60); Mouse(canvas, "OnMouseUp", 139, 60);
-                ((Button)editor.Controls.Find("finish-crop", true).Single()).PerformClick();
-                Check(crop.Visible && canvas.ImageBounds.Size == new Size(140, 120), "Image editor did not apply crop and restore the toolbar");
-                canvas.Undo();
-                Check(canvas.ImageBounds.Size == new Size(160, 120), "Image editor did not undo the crop");
-            }
-            Console.WriteLine("PASS: screenshot and image editor crop, themes, four edges, exact pixels, undo/redo, cancellation, and transparent selection");
+                Check(editor.Controls.Find("crop-image", true).Length == 0, "History image editor exposed crop");
+            foreach (bool video in new[] { false, true })
+                using (var toolbar = new CaptureToolbar())
+                {
+                    toolbar.ConfigureForGif(video);
+                    Check(Field<ToolStrip>(toolbar, "strip").Items["crop-image"] == null, "Recording editor exposed crop");
+                }
+            Console.WriteLine("PASS: long-screenshot-only crop, four edges with scrolling, exact export, no empty preview area, and undo/redo");
         }
 
         internal static void Run()

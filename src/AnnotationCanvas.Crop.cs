@@ -14,17 +14,15 @@ namespace ShotInk
         private float cropAnchorOffsetX, cropAnchorOffsetY;
         private int cropHandle = -1;
         internal bool IsCropping { get { return !cropPreview.IsEmpty; } }
-        internal bool HasCrop { get { return !appliedCrop.IsEmpty; } }
-        internal Rectangle ImageBounds { get { return HasCrop ? appliedCrop : new Rectangle(Point.Empty, Image.Size); } }
-        internal event Action<Rectangle> ImageBoundsChanged;
+        internal Rectangle ImageBounds { get { return appliedCrop.IsEmpty ? new Rectangle(Point.Empty, Image.Size) : appliedCrop; } }
+        internal event Action ImageBoundsChanged;
 
         internal void BeginCrop()
         {
-            if (IsCropping) return;
+            if (documentScroll == null || IsCropping) return;
             Tool = Tool;
             Revision++; // Invalidate OCR requests started before entering crop mode.
             cropPreview = ImageBounds;
-            if (captureOutline != null) UpdateCaptureRegion();
             Cursor = Cursors.Default;
             Focus();
             Invalidate();
@@ -43,7 +41,6 @@ namespace ShotInk
                 SetCrop(next);
                 NotifyChanged();
             }
-            else if (captureOutline != null) UpdateCaptureRegion();
             UpdateToolCursor();
         }
 
@@ -51,12 +48,9 @@ namespace ShotInk
         {
             if (appliedCrop == crop) return;
             var previous = ImageBounds;
-            float offsetX = DocumentOffsetX, offsetY = DocumentOffsetY;
             appliedCrop = crop;
-            if (documentScroll == null) SetZoom(Zoom);
-            else UpdateDocumentViewport(offsetX + previous.Left - ImageBounds.Left, offsetY + previous.Top - ImageBounds.Top);
-            if (captureOutline != null) UpdateCaptureRegion();
-            if (ImageBoundsChanged != null) ImageBoundsChanged(previous);
+            UpdateDocumentViewport(DocumentOffsetX + previous.Left - ImageBounds.Left, DocumentOffsetY + previous.Top - ImageBounds.Top);
+            if (ImageBoundsChanged != null) ImageBoundsChanged();
         }
 
         private Rectangle CropClientBounds(Rectangle bounds)

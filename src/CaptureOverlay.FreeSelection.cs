@@ -69,7 +69,7 @@ namespace ShotInk
         {
             if (!selection.Contains(point)) return false;
             if (selectionOutline == null) return true;
-            using (var path = FreeSelectionGeometry.Path(canvas == null ? selectionOutline : canvas.VisibleCaptureOutline, selection)) return path.IsVisible(point);
+            using (var path = FreeSelectionGeometry.Path(selectionOutline, selection)) return path.IsVisible(point);
         }
         private void PaintFreeStroke(Graphics g)
         {

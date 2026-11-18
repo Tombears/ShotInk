@@ -71,7 +71,6 @@ namespace ShotInk
         internal Color Ink = Color.FromArgb(244, 75, 95);
         internal float Stroke = 3;
         internal float Zoom = 1;
-        private Size documentFrame;
         private VScrollBar documentScroll;
         internal float DocumentOffsetY { get; private set; }
         private Mark active;
@@ -143,9 +142,9 @@ namespace ShotInk
             CommitTextEdit();
             float offset = DocumentOffsetY;
             Zoom = Math.Max(0.05F, Math.Min(3F, value));
-            Size = documentFrame.IsEmpty ? new Size(Math.Max(1, (int)Math.Ceiling(ImageBounds.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(ImageBounds.Height * Zoom))) : documentFrame;
-            if (documentScroll != null)
-                UpdateDocumentViewport(DocumentOffsetX, offset);
+            if (documentScroll == null)
+                Size = new Size(Math.Max(1, (int)Math.Ceiling(Image.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(Image.Height * Zoom)));
+            else UpdateDocumentViewport(DocumentOffsetX, offset);
             Invalidate();
         }
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -304,8 +303,6 @@ namespace ShotInk
             Revision++; ClearTextRecognition();
             var unique = new HashSet<Mark>(Marks);
             foreach (var state in undo) unique.UnionWith(state.Marks);
-            // Resizing the desktop selection invalidates crop rectangles from the former image.
-            foreach (var state in redo) if (!state.Crop.IsEmpty) { redo.Clear(); break; }
             foreach (var state in redo) unique.UnionWith(state.Marks);
             foreach (var mark in unique)
                 for (int i = 0; i < mark.Points.Count; i++) mark.Points[i] = new PointF(mark.Points[i].X + shift.X, mark.Points[i].Y + shift.Y);
@@ -321,9 +318,6 @@ namespace ShotInk
             var bounds = ImageBounds;
             e.Graphics.TranslateTransform(-DocumentOffsetX - bounds.Left, -DocumentOffsetY - bounds.Top);
             e.Graphics.SetClip(bounds, CombineMode.Intersect);
-            if (IsCropping && captureOutline != null)
-                using (var outline = FreeSelectionGeometry.Path(captureOutline, new Rectangle(Point.Empty, Image.Size)))
-                    e.Graphics.SetClip(outline, CombineMode.Intersect);
             if (Zoom == 1) e.Graphics.DrawImageUnscaled(Image, Point.Empty);
             else e.Graphics.DrawImage(Image, new Rectangle(0, 0, Image.Width, Image.Height));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -371,12 +365,12 @@ namespace ShotInk
             var result = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(result))
             {
+                g.DrawImageUnscaled(Image, -bounds.Left, -bounds.Top);
                 g.TranslateTransform(-bounds.Left, -bounds.Top);
-                g.DrawImageUnscaled(Image, Point.Empty);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 foreach (var mark in Marks) DrawMark(g, mark);
             }
-            if (captureOutline != null) FreeSelectionGeometry.Mask(result, VisibleCaptureOutline);
+            if (captureOutline != null) FreeSelectionGeometry.Mask(result, captureOutline);
             return result;
         }
         internal void DrawAnnotations(Graphics graphics)
@@ -394,9 +388,6 @@ namespace ShotInk
         private readonly List<Button> toolButtons = new List<Button>();
         private readonly AnnotationOptions toolOptions;
         private readonly Panel toolArea;
-        private readonly FlowLayoutPanel tools;
-        private readonly ToolOptionButton cropButton;
-        private readonly CropActions cropActions;
 #if !SHOTINK_LITE
         private readonly OcrSelectionActions textActions;
 #endif
@@ -423,7 +414,7 @@ namespace ShotInk
             Font = new Font("Microsoft YaHei UI", 9);
             AutoScaleMode = AutoScaleMode.Dpi;
             KeyPreview = true;
-            tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 106, Padding = new Padding(9), BackColor = Color.White, WrapContents = true };
+            var tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 106, Padding = new Padding(9), BackColor = Color.White, WrapContents = true };
             string[] labels = { "矩形", "椭圆", "箭头", "画笔", "文字", "马赛克", "荧光笔", "橡皮擦" };
             for (int i = 0; i < labels.Length; i++)
             {
@@ -432,18 +423,6 @@ namespace ShotInk
                 button.Click += delegate { toolOptions.UseDefaultMode(selectedTool); SelectTool(selectedTool); };
                 toolButtons.Add(button); tools.Controls.Add(button);
             }
-            cropButton = new ToolOptionButton { Name = "crop-image", AccessibleName = "裁剪图片", IconName = "crop", Size = new Size(39, 34), Margin = new Padding(3, 6, 3, 3) };
-            var cropHint = new ToolTip();
-            cropHint.SetToolTip(cropButton, "裁剪图片：拖动四条边，点击完成");
-            cropButton.Click += delegate
-            {
-                canvas.BeginCrop();
-                tools.Hide(); toolOptions.Hide();
-                cropActions.Show();
-                toolArea.Height = cropActions.Bottom + 6;
-                canvas.Focus();
-            };
-            tools.Controls.Add(cropButton);
 #if !SHOTINK_LITE
             var recognize = Theme.Button("文字识别", false, 88);
             recognize.Click += async delegate { await recognition.RecognizeAsync(); };
@@ -492,16 +471,10 @@ namespace ShotInk
             };
 #endif
             toolArea.Controls.Add(tools); toolArea.Controls.Add(toolOptions);
-            cropActions = new CropActions { Location = new Point(9, 6), Visible = false };
-            cropActions.Finished += EndCrop;
-            toolArea.Controls.Add(cropActions);
 #if !SHOTINK_LITE
             toolArea.Controls.Add(textActions);
 #endif
             Controls.Add(viewport); Controls.Add(status); Controls.Add(toolArea);
-            RefreshCropSkin();
-            Skins.Changed += RefreshCropSkin;
-            Disposed += delegate { Skins.Changed -= RefreshCropSkin; cropHint.Dispose(); };
             SelectTool(DrawTool.Rectangle);
             Shown += delegate { Fit(); UpdateStatus("截图已复制；编辑后可再次复制或保存"); };
             FormClosing += delegate(object sender, FormClosingEventArgs e)
@@ -535,21 +508,9 @@ namespace ShotInk
             }
             canvas.Focus();
         }
-        private void RefreshCropSkin()
-        {
-            cropButton.AccentColor = ToolAppearance.Accent("crop");
-            cropButton.Invalidate();
-            cropActions.RefreshSkin();
-        }
-        private void EndCrop(bool apply)
-        {
-            canvas.EndCrop(apply);
-            cropActions.Hide(); tools.Show();
-            SelectTool(canvas.Tool);
-        }
         private void Zoom(float value) { canvas.SetZoom(value); zoomLabel.Text = Math.Round(canvas.Zoom * 100) + "%"; }
-        private void Fit() { Zoom(Math.Min(1, (viewport.ClientSize.Width - 60F) / canvas.ImageBounds.Width)); }
-        private void UpdateStatus(string message) { status.Text = canvas.ImageBounds.Width + " × " + canvas.ImageBounds.Height + " px  ·  " + message + "  ·  Ctrl+S 保存 / Ctrl+C 复制 / Ctrl+Z 撤销"; }
+        private void Fit() { Zoom(Math.Min(1, (viewport.ClientSize.Width - 60F) / canvas.Image.Width)); }
+        private void UpdateStatus(string message) { status.Text = canvas.Image.Width + " × " + canvas.Image.Height + " px  ·  " + message + "  ·  Ctrl+S 保存 / Ctrl+C 复制 / Ctrl+Z 撤销"; }
         private void CopyImage()
         {
             using (var image = canvas.Render()) Clipboard.SetDataObject(image, true, 5, 100);
@@ -568,19 +529,8 @@ namespace ShotInk
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法保存图片"); return false; }
         }
-        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-        {
-            if (canvas.IsCropping && (keyData == Keys.Enter || keyData == Keys.Escape))
-            { EndCrop(keyData == Keys.Enter); return true; }
-            return base.ProcessCmdKey(ref msg, keyData);
-        }
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (canvas.IsCropping)
-            {
-                if (e.KeyData == Keys.Enter || e.KeyData == Keys.Escape) EndCrop(e.KeyData == Keys.Enter);
-                e.SuppressKeyPress = true; return;
-            }
 #if !SHOTINK_LITE
             if (textSearch.HandleKey(e)) return;
 #endif

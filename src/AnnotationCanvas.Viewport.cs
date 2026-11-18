@@ -6,6 +6,7 @@ namespace ShotInk
 {
     internal sealed partial class AnnotationCanvas
     {
+        private Size documentFrame;
         private HScrollBar documentHorizontal;
         private Size documentClient;
         internal float DocumentOffsetX { get; private set; }
@@ -24,10 +25,12 @@ namespace ShotInk
         {
             int barWidth = SystemInformation.VerticalScrollBarWidth, barHeight = SystemInformation.HorizontalScrollBarHeight;
             int imageWidth = (int)Math.Ceiling(ImageBounds.Width * Zoom), imageHeight = (int)Math.Ceiling(ImageBounds.Height * Zoom);
-            bool vertical = imageHeight > Height;
-            bool horizontal = imageWidth > Width - (vertical ? barWidth : 0);
-            vertical = imageHeight > Height - (horizontal ? barHeight : 0);
-            horizontal = imageWidth > Width - (vertical ? barWidth : 0);
+            bool vertical = imageHeight > documentFrame.Height;
+            bool horizontal = imageWidth > documentFrame.Width - (vertical ? barWidth : 0);
+            vertical = imageHeight > documentFrame.Height - (horizontal ? barHeight : 0);
+            horizontal = imageWidth > documentFrame.Width - (vertical ? barWidth : 0);
+            Size = new Size(Math.Min(documentFrame.Width, imageWidth + (vertical ? barWidth : 0)),
+                Math.Min(documentFrame.Height, imageHeight + (horizontal ? barHeight : 0)));
             documentClient = new Size(Math.Max(1, Width - (vertical ? barWidth : 0)), Math.Max(1, Height - (horizontal ? barHeight : 0)));
             documentScroll.SetBounds(Width - barWidth, 0, barWidth, documentClient.Height);
             documentHorizontal.SetBounds(0, Height - barHeight, documentClient.Width, barHeight);

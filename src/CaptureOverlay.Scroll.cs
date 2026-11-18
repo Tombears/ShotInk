@@ -115,19 +115,12 @@ namespace ShotInk
         {
             var previous = canvas;
             var next = new AnnotationCanvas(image) { Tool = DrawTool.None };
-            var source = previous.ImageBounds;
-            foreach (var mark in previous.Marks)
-            {
-                var copy = mark.Clone();
-                for (int i = 0; i < copy.Points.Count; i++)
-                    copy.Points[i] = new PointF(copy.Points[i].X - source.Left, copy.Points[i].Y - source.Top);
-                next.Marks.Add(copy);
-            }
+            foreach (var mark in previous.Marks) next.Marks.Add(mark.Clone());
             longViewport = new LongImageViewport { Name = "long-image-viewport", Bounds = selection, BackColor = Color.White };
             next.UseDocumentViewport(selection.Size);
             next.Location = Point.Empty; canvas = next; longViewport.Controls.Add(next); Controls.Add(longViewport);
             next.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
-            next.ImageBoundsChanged += delegate { UpdateSelectionChrome(); };
+            next.ImageBoundsChanged += UpdateLongPreviewBounds;
 #if !SHOTINK_LITE
             next.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
 #endif
@@ -143,7 +136,15 @@ namespace ShotInk
 #endif
             Controls.Remove(previous); previous.Dispose(); ResetRecognitionSession();
             SyncSettings(); toolbar.SetLongPreview(true); toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo);
-            UpdateSelectionChrome(); PositionToolbar(); canvas.Focus();
+            UpdateLongPreviewBounds(); canvas.Focus();
+        }
+        private void UpdateLongPreviewBounds()
+        {
+            selection = SelectionGeometry.Move(new Rectangle(selection.Location, canvas.Size), Point.Empty, ClientRectangle);
+            longViewport.Bounds = selection;
+            UpdateSelectionChrome();
+            PositionToolbar();
+            Invalidate(true);
         }
         private sealed class LongImageViewport : Panel
         {

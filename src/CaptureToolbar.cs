@@ -16,6 +16,7 @@ namespace ShotInk
         private readonly ToolStripButton redo;
         private readonly ToolStripButton recognize;
         private readonly ToolStripButton scroll;
+        private readonly ToolStripButton crop;
         private readonly ToolStripButton gif, video;
         private readonly Control dragGrip;
         private bool movingToolbar;
@@ -81,9 +82,10 @@ namespace ShotInk
             AddTool("mosaic", "马赛克", DrawTool.Mosaic);
             AddTool("text", "文字：单击输入，拖边框移动，拖角点缩放，顶部手柄旋转，双击 / F2 编辑", DrawTool.Text);
             AddTool("eraser", "橡皮擦：画笔 / 选框", DrawTool.Eraser);
-            var crop = Button("crop", "裁剪图片：拖动四条边，点击完成", delegate { if (CropClicked != null) CropClicked(); });
+            crop = Button("crop", "裁剪长截图：拖动四条边，点击完成", delegate { if (crop.Available && CropClicked != null) CropClicked(); });
             crop.Name = "crop-image";
-            crop.AccessibleName = "裁剪图片";
+            crop.AccessibleName = "裁剪长截图";
+            crop.Available = false;
 #if !SHOTINK_LITE
             recognize = Button("ocr", "文字识别：在图片上选择并复制文字", delegate { if (RecognitionClicked != null) RecognitionClicked(); });
             recognize.Name = "recognize-text";
@@ -105,7 +107,7 @@ namespace ShotInk
             Button("save", "保存 PNG (Ctrl+S)", delegate { Finish(CaptureAction.Save); });
             Button("copy", "复制并完成 (Enter / Ctrl+C)", delegate { Finish(CaptureAction.Copy); });
             int width = strip.Padding.Horizontal + 2;
-            foreach (ToolStripItem item in strip.Items) { item.Margin = Padding.Empty; if (item is ToolStripSeparator) { item.AutoSize = false; item.Width = 5; } width += item.Width; }
+            foreach (ToolStripItem item in strip.Items) { item.Margin = Padding.Empty; if (item is ToolStripSeparator) { item.AutoSize = false; item.Width = 5; } if (item.Available) width += item.Width; }
             strip.Width = width;
             Controls.Add(strip);
             options = new AnnotationOptions(settings) { Location = new Point(1, 30), Width = width + 14, Visible = false };
@@ -154,7 +156,15 @@ namespace ShotInk
             else { options.ShowTool(currentTool); Height = currentTool == DrawTool.None ? 30 : options.Bottom + 1; }
             if (LayoutChanged != null) LayoutChanged();
         }
-        internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = video.Enabled = !enabled; }
+        internal void SetLongPreview(bool enabled)
+        {
+            scroll.Enabled = gif.Enabled = video.Enabled = !enabled;
+            if (crop.Available == enabled) return;
+            crop.Available = enabled;
+            strip.Width += enabled ? crop.Width : -crop.Width;
+            options.Width = textActions.Width = strip.Width + 14;
+            if (strip.Visible) Width = strip.Width + 16;
+        }
         internal void SetFreeSelection(bool enabled) { scroll.Enabled = gif.Enabled = video.Enabled = !enabled; }
         internal void SetRecordingText(string text) { finishScroll.Text = text; }
         internal void ConfigureForGif(bool videoEditor = false)
