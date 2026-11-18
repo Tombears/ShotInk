@@ -70,13 +70,23 @@ namespace ShotInk
     internal sealed partial class AnnotationCanvas
     {
         private PointF[] captureOutline;
+        internal PointF[] VisibleCaptureOutline
+        {
+            get
+            {
+                if (captureOutline == null || !HasCrop) return captureOutline;
+                var bounds = ImageBounds;
+                return Array.ConvertAll(captureOutline, point => new PointF((point.X * Image.Width - bounds.Left) / bounds.Width,
+                    (point.Y * Image.Height - bounds.Top) / bounds.Height));
+            }
+        }
         internal void SetCaptureOutline(PointF[] outline)
         { captureOutline = outline == null ? null : (PointF[])outline.Clone(); UpdateCaptureRegion(); Invalidate(); }
         private void UpdateCaptureRegion()
         {
             Region next = null;
-            if (captureOutline != null && Width > 0 && Height > 0)
-                using (var path = FreeSelectionGeometry.Path(captureOutline, ClientRectangle)) next = new Region(path);
+            if (captureOutline != null && !IsCropping && Width > 0 && Height > 0)
+                using (var path = FreeSelectionGeometry.Path(VisibleCaptureOutline, ClientRectangle)) next = new Region(path);
             var previous = Region; Region = next; if (previous != null) previous.Dispose();
         }
         protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); if (captureOutline != null) UpdateCaptureRegion(); }

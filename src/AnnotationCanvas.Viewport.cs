@@ -23,7 +23,7 @@ namespace ShotInk
         private void UpdateDocumentViewport(float offsetX, float offsetY)
         {
             int barWidth = SystemInformation.VerticalScrollBarWidth, barHeight = SystemInformation.HorizontalScrollBarHeight;
-            int imageWidth = (int)Math.Ceiling(Image.Width * Zoom), imageHeight = (int)Math.Ceiling(Image.Height * Zoom);
+            int imageWidth = (int)Math.Ceiling(ImageBounds.Width * Zoom), imageHeight = (int)Math.Ceiling(ImageBounds.Height * Zoom);
             bool vertical = imageHeight > Height;
             bool horizontal = imageWidth > Width - (vertical ? barWidth : 0);
             vertical = imageHeight > Height - (horizontal ? barHeight : 0);

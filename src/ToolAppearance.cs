@@ -74,6 +74,7 @@ namespace ShotInk
                 case "mosaic": case "pin": return Color.FromArgb(124, 79, 202);
                 case "text": return Color.FromArgb(21, 134, 103);
                 case "eraser": return Color.FromArgb(190, 67, 140);
+                case "crop": return Color.FromArgb(37, 106, 208);
                 case "ocr": return Color.FromArgb(8, 130, 161);
                 case "scroll": return Color.FromArgb(87, 93, 206);
                 case "video": return Color.FromArgb(211, 71, 87);

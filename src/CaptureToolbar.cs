@@ -23,6 +23,7 @@ namespace ShotInk
         private Bitmap surface;
         internal bool UserPlaced { get; private set; }
         private readonly Button finishScroll;
+        private readonly CropActions cropActions;
 #if !SHOTINK_LITE
         private readonly OcrSelectionActions textActions;
 #else
@@ -49,6 +50,8 @@ namespace ShotInk
         internal event Action GifClicked;
         internal event Action VideoClicked;
         internal event Action ToolbarMoved;
+        internal event Action CropClicked;
+        internal event Action<bool> CropFinished;
 
         internal CaptureToolbar(AppSettings settings = null)
         {
@@ -78,6 +81,9 @@ namespace ShotInk
             AddTool("mosaic", "马赛克", DrawTool.Mosaic);
             AddTool("text", "文字：单击输入，拖边框移动，拖角点缩放，顶部手柄旋转，双击 / F2 编辑", DrawTool.Text);
             AddTool("eraser", "橡皮擦：画笔 / 选框", DrawTool.Eraser);
+            var crop = Button("crop", "裁剪图片：拖动四条边，点击完成", delegate { if (CropClicked != null) CropClicked(); });
+            crop.Name = "crop-image";
+            crop.AccessibleName = "裁剪图片";
 #if !SHOTINK_LITE
             recognize = Button("ocr", "文字识别：在图片上选择并复制文字", delegate { if (RecognitionClicked != null) RecognitionClicked(); });
             recognize.Name = "recognize-text";
@@ -123,6 +129,9 @@ namespace ShotInk
             finishScroll = new ToolOptionButton { Name = "finish-scroll-capture", Text = "完成", Size = new Size(100, 30), Visible = false,
                 AccentColor = ToolAppearance.Accent("scroll"), Selected = true };
             finishScroll.Click += delegate { if (ScrollFinishClicked != null) ScrollFinishClicked(); }; Controls.Add(finishScroll);
+            cropActions = new CropActions { Location = new Point(15, 2), Visible = false };
+            cropActions.Finished += delegate(bool apply) { if (CropFinished != null) CropFinished(apply); };
+            Controls.Add(cropActions);
             Size = new Size(width + 16, 30);
             Skins.Changed += RefreshSkin;
         }
@@ -136,6 +145,15 @@ namespace ShotInk
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetScrollFinishing() { finishScroll.Enabled = false; finishScroll.Text = "完成中…"; }
+        internal void SetCropMode(bool cropping)
+        {
+            strip.Visible = !cropping;
+            cropActions.Visible = cropping;
+            Width = cropping ? cropActions.Right + 4 : strip.Width + 16;
+            if (cropping) { options.Hide(); textActions.Hide(); Height = 32; }
+            else { options.ShowTool(currentTool); Height = currentTool == DrawTool.None ? 30 : options.Bottom + 1; }
+            if (LayoutChanged != null) LayoutChanged();
+        }
         internal void SetLongPreview(bool enabled) { scroll.Enabled = !enabled; gif.Enabled = video.Enabled = !enabled; }
         internal void SetFreeSelection(bool enabled) { scroll.Enabled = gif.Enabled = video.Enabled = !enabled; }
         internal void SetRecordingText(string text) { finishScroll.Text = text; }
@@ -182,7 +200,7 @@ namespace ShotInk
                 if (pair.Key.IsDisposed) continue;
                 pair.Key.Tag = ToolAppearance.Accent(pair.Value); UpdateIcon(pair.Key, false);
             }
-            Skins.Apply(options); Skins.Apply(textActions); Invalidate(true);
+            Skins.Apply(options); Skins.Apply(textActions); cropActions.RefreshSkin(); Invalidate(true);
         }
         internal void SelectTool(DrawTool tool)
         {
@@ -448,6 +466,9 @@ namespace ShotInk
                     case "eraser":
                         g.DrawPolygon(pen, new[] { new Point(3, 12), new Point(11, 4), new Point(17, 10), new Point(10, 17), new Point(8, 17) });
                         g.DrawLine(pen, 7, 8, 13, 14); g.DrawLine(pen, 10, 17, 18, 17); break;
+                    case "crop":
+                        DrawCropIcon(g, pen, brush, color);
+                        break;
                     case "ocr":
                         g.DrawLines(pen, new[] { new Point(6, 2), new Point(2, 2), new Point(2, 6) });
                         g.DrawLines(pen, new[] { new Point(14, 2), new Point(18, 2), new Point(18, 6) });
@@ -477,6 +498,28 @@ namespace ShotInk
                 }
             }
             });
+        }
+
+        private static void DrawCropIcon(Graphics g, Pen pen, Brush brush, Color color)
+        {
+            var kind = Skins.Current.Kind;
+            if (kind == SkinKind.Pixel)
+            {
+                g.SmoothingMode = SmoothingMode.None;
+                g.FillRectangle(brush, 4, 2, 2, 14); g.FillRectangle(brush, 4, 14, 14, 2);
+                g.FillRectangle(brush, 14, 4, 2, 14); g.FillRectangle(brush, 2, 4, 14, 2);
+                return;
+            }
+            Point[] lower = { new Point(5, 2), new Point(5, 15), new Point(18, 15) };
+            Point[] upper = { new Point(2, 5), new Point(15, 5), new Point(15, 18) };
+            if (kind == SkinKind.Duotone || kind == SkinKind.Clay || kind == SkinKind.Glass)
+                using (var fill = new SolidBrush(Color.FromArgb(58, color))) g.FillRectangle(fill, 5, 5, 10, 10);
+            if (kind == SkinKind.Neon || kind == SkinKind.Ink || kind == SkinKind.Clay)
+                using (var halo = new Pen(Color.FromArgb(50, color), 3.8F) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+                { g.DrawLines(halo, lower); g.DrawLines(halo, upper); }
+            g.DrawLines(pen, lower);
+            if (kind == SkinKind.Duotone || kind == SkinKind.Glass || kind == SkinKind.Clay) pen.Color = ToolAppearance.Tint(color, .28F);
+            g.DrawLines(pen, upper);
         }
     }
 }

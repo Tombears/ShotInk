@@ -34,6 +34,7 @@ namespace ShotInk
         private Bitmap longDragPreview;
         private AnnotationCanvas canvas;
         private CaptureToolbar toolbar;
+        private bool CanReframeSelection { get { return longViewport == null && canvas != null && !canvas.IsCropping && !canvas.HasCrop; } }
 #if !SHOTINK_LITE
         private OcrSearchPanel textSearch;
 #endif
@@ -122,9 +123,10 @@ namespace ShotInk
             if (dragging && dragMode == -3) { PaintFreeStroke(g); return; }
             if (selection.Width > 0 && selection.Height > 0)
             {
+                var visibleOutline = selectionOutline == null || canvas == null ? selectionOutline : canvas.VisibleCaptureOutline;
                 var surfaceState = g.Save();
-                if (selectionOutline != null)
-                    using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) g.SetClip(outline, CombineMode.Intersect);
+                if (visibleOutline != null)
+                    using (var outline = FreeSelectionGeometry.Path(visibleOutline, selection)) g.SetClip(outline, CombineMode.Intersect);
                 g.SetClip(selection, CombineMode.Intersect);
                 g.DrawImageUnscaled(desktop, Point.Empty);
                 if (dragging && longDragPreview != null) g.DrawImageUnscaled(longDragPreview, selection.Location);
@@ -137,8 +139,8 @@ namespace ShotInk
                 g.Restore(surfaceState);
                 using (var pen = new Pen(Color.FromArgb(38, 139, 255), 2))
                 {
-                    if (selectionOutline == null) g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
-                    else using (var outline = FreeSelectionGeometry.Path(selectionOutline, selection)) { g.SmoothingMode = SmoothingMode.AntiAlias; g.DrawPath(pen, outline); }
+                    if (visibleOutline == null || canvas.HasCrop) g.DrawRectangle(pen, selection.Left - 1, selection.Top - 1, selection.Width + 1, selection.Height + 1);
+                    else using (var outline = FreeSelectionGeometry.Path(visibleOutline, selection)) { g.SmoothingMode = SmoothingMode.AntiAlias; g.DrawPath(pen, outline); }
                 }
                 if (keyboardEdge >= 0)
                 {
@@ -169,6 +171,7 @@ namespace ShotInk
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (canvas != null && canvas.IsCropping) return;
             if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
             if (e.Button != MouseButtons.Left) return;
             // The capture region stays fixed until the scrolling session ends.
@@ -195,7 +198,8 @@ namespace ShotInk
 
         private void BeginAdjust(int handle, Point location)
         {
-            if (!ready || scrollSession != null || gifSession != null || (longViewport != null && handle != -1)) return;
+            if (!ready || scrollSession != null || gifSession != null || canvas.IsCropping) return;
+            if (longViewport == null ? !CanReframeSelection : handle != -1) return;
             edgeHold.Stop(); keyboardEdge = -1;
             if (handle >= 0 && handle % 2 == 1) edgeHold.Start();
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
@@ -329,6 +333,8 @@ namespace ShotInk
             toolbar.RedoClicked += delegate { canvas.Redo(); };
             toolbar.CancelClicked += delegate { Close(); };
             toolbar.FinishClicked += Finish;
+            toolbar.CropClicked += BeginCrop;
+            toolbar.CropFinished += EndCrop;
             toolbar.LayoutChanged += PositionToolbar;
             ResetRecognitionSession();
             toolbar.ScrollClicked += StartLongCapture;
@@ -344,8 +350,30 @@ namespace ShotInk
             canvas.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
 #endif
             canvas.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
+            canvas.ImageBoundsChanged += delegate(Rectangle previous)
+            {
+                var bounds = canvas.ImageBounds;
+                selection = new Rectangle(selection.X + bounds.Left - previous.Left, selection.Y + bounds.Top - previous.Top, bounds.Width, bounds.Height);
+                canvas.Location = selection.Location;
+                UpdateSelectionChrome(); PositionToolbar(); Invalidate(true);
+            };
             Controls.Add(toolbar);
             SyncSettings();
+            canvas.Focus();
+        }
+
+        private void BeginCrop()
+        {
+            canvas.BeginCrop();
+            toolbar.SetCropMode(true);
+            UpdateSelectionChrome();
+        }
+
+        private void EndCrop(bool apply)
+        {
+            canvas.EndCrop(apply);
+            toolbar.SetCropMode(false);
+            UpdateSelectionChrome();
             canvas.Focus();
         }
 
@@ -386,7 +414,8 @@ namespace ShotInk
         private void UpdateSelectionChrome()
         {
             sizeHint.Visible = selection.Width > 0 && selection.Height > 0;
-            sizeHint.Text = (longViewport == null ? selection.Width : canvas.Image.Width) + " × " + (longViewport == null ? selection.Height : canvas.Image.Height) + " px";
+            var size = longViewport == null ? selection.Size : canvas.ImageBounds.Size;
+            sizeHint.Text = size.Width + " × " + size.Height + " px";
             if (longLimitReached) sizeHint.Text += " · 达到上限，已自动完成";
             else if (longAlignmentLost) sizeHint.Text += " · 页面变化过大，已保留可拼接部分";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));
@@ -397,7 +426,7 @@ namespace ShotInk
             for (int i = 0; i < edgeTargets.Length; i++)
             {
                 var edge = edgeTargets[i];
-                edge.Visible = ready && longViewport == null && scrollSession == null && gifSession == null;
+                edge.Visible = ready && CanReframeSelection && scrollSession == null && gifSession == null;
                 edge.BackColor = keyboardEdge == i * 2 + 1 ? Color.DarkOrange : Color.FromArgb(38, 139, 255);
                 edge.Bounds = i == 0 ? new Rectangle(selection.Left + 5, selection.Top - 1, Math.Max(1, selection.Width - 10), 2)
                     : i == 1 ? new Rectangle(selection.Right - 1, selection.Top + 5, 2, Math.Max(1, selection.Height - 10))
@@ -407,7 +436,7 @@ namespace ShotInk
             }
             for (int i = 0; i < grips.Length; i++)
             {
-                grips[i].Visible = ready && longViewport == null && scrollSession == null && gifSession == null;
+                grips[i].Visible = ready && CanReframeSelection && scrollSession == null && gifSession == null;
                 grips[i].Location = new Point(points[i].X - 4, points[i].Y - 4);
                 grips[i].BringToFront();
             }
@@ -458,7 +487,7 @@ namespace ShotInk
 
         private void Finish(CaptureAction action)
         {
-            if (!ready || completed || videoMode || scrollSession != null || gifSession != null) return;
+            if (!ready || completed || videoMode || scrollSession != null || gifSession != null || canvas.IsCropping) return;
             var image = canvas.Render();
             if (action == CaptureAction.Save)
             {
@@ -483,12 +512,14 @@ namespace ShotInk
         }
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (canvas != null && canvas.IsCropping && (keyData == Keys.Enter || keyData == Keys.Escape))
+            { EndCrop(keyData == Keys.Enter); return true; }
             if (NudgeSelection(keyData)) return true;
             return base.ProcessCmdKey(ref msg, keyData);
         }
         private bool NudgeSelection(Keys key)
         {
-            if (!ready || scrollSession != null || gifSession != null || longViewport != null || KeyboardEditorFocused(this)
+            if (!ready || scrollSession != null || gifSession != null || !CanReframeSelection || KeyboardEditorFocused(this)
                 || (key != Keys.Left && key != Keys.Right && key != Keys.Up && key != Keys.Down)) return false;
             if (dragging && keyboardEdge < 0) return false;
             int dx = key == Keys.Left ? -1 : key == Keys.Right ? 1 : 0;
@@ -509,6 +540,11 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (canvas != null && canvas.IsCropping)
+            {
+                if (e.KeyData == Keys.Enter || e.KeyData == Keys.Escape) EndCrop(e.KeyData == Keys.Enter);
+                e.SuppressKeyPress = true; return;
+            }
             if (videoMode && !videoStarting && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; StartVideoFromKey(); return; }
             if (e.KeyData == Keys.L && !KeyboardEditorFocused(this) && !dragging && scrollSession == null && gifSession == null && longViewport == null)
             { SetSelectionMode(!freeSelectionMode); e.SuppressKeyPress = true; return; }
@@ -580,13 +616,13 @@ namespace ShotInk
         {
             return new Rectangle(Math.Max(bounds.Left, Math.Min(original.Left + delta.X, bounds.Right - original.Width)), Math.Max(bounds.Top, Math.Min(original.Top + delta.Y, bounds.Bottom - original.Height)), original.Width, original.Height);
         }
-        internal static Rectangle Resize(Rectangle original, int handle, Point delta, Rectangle bounds)
+        internal static Rectangle Resize(Rectangle original, int handle, Point delta, Rectangle bounds, int minimum = 8)
         {
             int left = original.Left, top = original.Top, right = original.Right, bottom = original.Bottom;
-            if (handle == 0 || handle == 6 || handle == 7) left = Math.Max(bounds.Left, Math.Min(right - 8, left + delta.X));
-            if (handle == 0 || handle == 1 || handle == 2) top = Math.Max(bounds.Top, Math.Min(bottom - 8, top + delta.Y));
-            if (handle == 2 || handle == 3 || handle == 4) right = Math.Min(bounds.Right, Math.Max(left + 8, right + delta.X));
-            if (handle == 4 || handle == 5 || handle == 6) bottom = Math.Min(bounds.Bottom, Math.Max(top + 8, bottom + delta.Y));
+            if (handle == 0 || handle == 6 || handle == 7) left = Math.Max(bounds.Left, Math.Min(right - minimum, left + delta.X));
+            if (handle == 0 || handle == 1 || handle == 2) top = Math.Max(bounds.Top, Math.Min(bottom - minimum, top + delta.Y));
+            if (handle == 2 || handle == 3 || handle == 4) right = Math.Min(bounds.Right, Math.Max(left + minimum, right + delta.X));
+            if (handle == 4 || handle == 5 || handle == 6) bottom = Math.Min(bounds.Bottom, Math.Max(top + minimum, bottom + delta.Y));
             return Rectangle.FromLTRB(left, top, right, bottom);
         }
         internal static Point[] Handles(Rectangle r)

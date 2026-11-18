@@ -80,6 +80,7 @@ namespace ShotInk
                     return 0;
                 }
                 if (args.Length == 1 && args[0] == "--capture-tests") { CaptureWorkflowTests.Run(); return 0; }
+                if (args.Length == 1 && args[0] == "--crop-tests") { CaptureWorkflowTests.CropScreenshot(); return 0; }
                 SkinTests.Run();
                 CaptureWorkflowTests.Run();
                 Run("renamed app preserves existing history and settings", TestDataRoot);
@@ -151,6 +152,7 @@ namespace ShotInk
                 Run("selection resize and toolbar stay within display bounds", TestSelectionGeometry);
                 Run("cancelled selection does not export a screenshot", TestSelectionCancel);
                 Run("right-button cancellation waits for release across overlay, canvas and long preview", TestRightCancel);
+                CaptureWorkflowTests.CropScreenshot();
                 if (args.Length == 2 && args[0] == "--preview")
                 {
                     Run("native screen capture reads a known test window", TestScreenCapture);
@@ -2193,7 +2195,9 @@ namespace ShotInk
                 var options = Field<AnnotationOptions>(toolbar, "options");
                 var strip = Field<ToolStrip>(toolbar, "strip");
                 var recognize = Field<ToolStripButton>(toolbar, "recognize");
-                Assert(strip.Items.IndexOf(recognize) == strip.Items.IndexOf(tools[DrawTool.Eraser]) + 1, "OCR button is not immediately right of the eraser.");
+                var crop = strip.Items["crop-image"];
+                Assert(crop != null && strip.Items.IndexOf(crop) == strip.Items.IndexOf(tools[DrawTool.Eraser]) + 1
+                    && strip.Items.IndexOf(recognize) == strip.Items.IndexOf(crop) + 1, "Crop and OCR are out of order after the eraser.");
                 int requests = 0;
                 using (var isolated = new CaptureToolbar())
                 {

@@ -122,10 +122,10 @@ namespace ShotInk
         private Font textEditorFont;
         private bool selectingAnnotationText;
         private int annotationTextAnchor;
-        private List<Mark> beforeTextEdit;
+        private CanvasState beforeTextEdit;
         private Mark editOriginal;
         private bool newText;
-        private List<Mark> beforeTextTransform;
+        private CanvasState beforeTextTransform;
         private Mark transformOriginal;
         private PointF transformAnchor;
         private int textHandle = -2; // -2: idle, -1: move, 0..3: scale, 4: rotate.
@@ -234,8 +234,8 @@ namespace ShotInk
             var display = EditingTextMark(); selectedText.TextSize = TextGeometry.Measure(display); display.TextSize = selectedText.TextSize;
             int caret = textEditor.SelectionStart + textEditor.Composition.Length;
             var position = TextGeometry.World(display, TextGeometry.Caret(display, caret));
-            textEditor.Bounds = new Rectangle(Math.Max(0, Math.Min(Width - 1, (int)Math.Round((position.X - DocumentOffsetX) * Zoom))),
-                Math.Max(0, Math.Min(Height - 1, (int)Math.Round((position.Y - DocumentOffsetY) * Zoom))), 1, Math.Max(1, (int)Math.Ceiling(TextGeometry.LineHeight(display) * Zoom)));
+            textEditor.Bounds = new Rectangle(Math.Max(0, Math.Min(Width - 1, (int)Math.Round((position.X - ImageBounds.Left - DocumentOffsetX) * Zoom))),
+                Math.Max(0, Math.Min(Height - 1, (int)Math.Round((position.Y - ImageBounds.Top - DocumentOffsetY) * Zoom))), 1, Math.Max(1, (int)Math.Ceiling(TextGeometry.LineHeight(display) * Zoom)));
             textEditor.PositionIme();
         }
         private Mark EditingTextMark()
@@ -260,7 +260,7 @@ namespace ShotInk
         {
             if (textEditor == null) return;
             var state = beforeTextEdit; var editor = textEditor; textEditor = null; Controls.Remove(editor); editor.Dispose(); textEditorFont.Dispose(); textEditorFont = null;
-            Marks.Clear(); Marks.AddRange(state); selectedText = null; beforeTextEdit = null; editOriginal = null; newText = false; NotifyChanged(); Focus();
+            Restore(state); selectedText = null; beforeTextEdit = null; editOriginal = null; newText = false; NotifyChanged(); Focus();
         }
         private void TextMouseMove(MouseEventArgs e)
         {

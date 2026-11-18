@@ -115,11 +115,19 @@ namespace ShotInk
         {
             var previous = canvas;
             var next = new AnnotationCanvas(image) { Tool = DrawTool.None };
-            foreach (var mark in previous.Marks) next.Marks.Add(mark.Clone());
+            var source = previous.ImageBounds;
+            foreach (var mark in previous.Marks)
+            {
+                var copy = mark.Clone();
+                for (int i = 0; i < copy.Points.Count; i++)
+                    copy.Points[i] = new PointF(copy.Points[i].X - source.Left, copy.Points[i].Y - source.Top);
+                next.Marks.Add(copy);
+            }
             longViewport = new LongImageViewport { Name = "long-image-viewport", Bounds = selection, BackColor = Color.White };
             next.UseDocumentViewport(selection.Size);
             next.Location = Point.Empty; canvas = next; longViewport.Controls.Add(next); Controls.Add(longViewport);
             next.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
+            next.ImageBoundsChanged += delegate { UpdateSelectionChrome(); };
 #if !SHOTINK_LITE
             next.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
 #endif

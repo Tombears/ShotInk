@@ -9,7 +9,7 @@ namespace ShotInk
     internal sealed partial class AnnotationCanvas
     {
         private Mark selectedMosaic, mosaicOriginal;
-        private List<Mark> mosaicUndo;
+        private CanvasState mosaicUndo;
         private PointF mosaicAnchor;
         private int mosaicHandle;
         internal event Action<Mark> MosaicAnnotationSelected;

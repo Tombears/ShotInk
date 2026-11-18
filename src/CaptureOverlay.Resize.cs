@@ -10,7 +10,7 @@ namespace ShotInk
         {
             const int setCursor = 0x20, mouseMove = 0x200, leftDown = 0x201, leftDoubleClick = 0x203;
             if (message.Msg != setCursor && message.Msg != mouseMove && message.Msg != leftDown && message.Msg != leftDoubleClick) return false;
-            if (!Visible || !ready || dragging || longViewport != null || scrollSession != null || gifSession != null) return false;
+            if (!Visible || !ready || dragging || !CanReframeSelection || scrollSession != null || gifSession != null) return false;
             if (canvas != null && canvas.Capture) return false;
             var target = Control.FromHandle(message.Msg == setCursor ? message.WParam : message.HWnd);
             // Toolbar controls and text inputs keep their own mouse handling.
