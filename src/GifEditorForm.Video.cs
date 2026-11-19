@@ -43,12 +43,13 @@ namespace ShotInk
         private async Task ExportVideoAsync(bool copying, int first, int last)
         {
             string destination = null;
+            bool manualSave = !copying && settings.AskSaveLocation;
             if (!copying)
             {
                 string name = "录屏_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".mp4";
-                if (settings.AskSaveLocation)
+                if (manualSave)
                 {
-                    using (var dialog = new SaveFileDialog { Filter = "MP4 视频 (*.mp4)|*.mp4", FileName = name, DefaultExt = "mp4", AddExtension = true, InitialDirectory = settings.SaveDirectory, RestoreDirectory = true })
+                    using (var dialog = new SaveFileDialog { Filter = "MP4 视频 (*.mp4)|*.mp4", FileName = name, DefaultExt = "mp4", AddExtension = true, InitialDirectory = settings.ManualSaveDirectory, RestoreDirectory = true })
                     { if (dialog.ShowDialog(this) != DialogResult.OK) { SetStatus("已取消保存。"); return; } destination = dialog.FileName; }
                 }
                 else { Directory.CreateDirectory(settings.SaveDirectory); destination = Path.Combine(settings.SaveDirectory, name); }
@@ -62,7 +63,12 @@ namespace ShotInk
                 var data = new DataObject(); data.SetFileDropList(new StringCollection { cached });
                 Clipboard.SetDataObject(data, true, 5, 100); SetStatus("MP4 已复制，可粘贴到支持视频文件的应用。");
             }
-            else { File.Copy(path, destination, true); SetStatus("MP4 已保存。"); }
+            else
+            {
+                File.Copy(path, destination, true);
+                if (manualSave) settings.RememberManualSave(destination);
+                SetStatus("MP4 已保存。");
+            }
         }
     }
 }

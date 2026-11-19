@@ -221,8 +221,13 @@ namespace ShotInk
         internal static bool Save(IWin32Window owner, byte[] bytes, AppSettings settings)
         {
             if (!settings.AskSaveLocation) { WriteNew(bytes, settings.SaveDirectory); return true; }
-            using (var dialog = new SaveFileDialog { Filter = "GIF 动图 (*.gif)|*.gif", DefaultExt = "gif", AddExtension = true, FileName = "录屏_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gif", InitialDirectory = settings.SaveDirectory, RestoreDirectory = true })
-            { if (dialog.ShowDialog(owner) != DialogResult.OK) return false; File.WriteAllBytes(dialog.FileName, bytes); return true; }
+            using (var dialog = new SaveFileDialog { Filter = "GIF 动图 (*.gif)|*.gif", DefaultExt = "gif", AddExtension = true, FileName = "录屏_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gif", InitialDirectory = settings.ManualSaveDirectory, RestoreDirectory = true })
+            {
+                if (dialog.ShowDialog(owner) != DialogResult.OK) return false;
+                File.WriteAllBytes(dialog.FileName, bytes);
+                settings.RememberManualSave(dialog.FileName);
+                return true;
+            }
         }
     }
 }

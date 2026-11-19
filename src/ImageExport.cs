@@ -13,10 +13,13 @@ namespace ShotInk
             settings.Validate(); path = null;
             if (!settings.AskSaveLocation) { path = SaveToDirectory(image, settings.SaveDirectory); return true; }
             using (var dialog = new SaveFileDialog { Filter = "PNG 图片 (*.png)|*.png", FileName = Name(), DefaultExt = "png", AddExtension = true,
-                RestoreDirectory = true, InitialDirectory = settings.SaveDirectory, OverwritePrompt = true })
+                RestoreDirectory = true, InitialDirectory = settings.ManualSaveDirectory, OverwritePrompt = true })
             {
                 if (dialog.ShowDialog(owner) != DialogResult.OK) return false;
-                image.Save(dialog.FileName, ImageFormat.Png); path = dialog.FileName; return true;
+                image.Save(dialog.FileName, ImageFormat.Png);
+                path = dialog.FileName;
+                settings.RememberManualSave(path);
+                return true;
             }
         }
         private static string Name() { return "截图_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".png"; }

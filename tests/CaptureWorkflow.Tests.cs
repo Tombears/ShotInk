@@ -414,6 +414,38 @@ namespace ShotInk
             Console.WriteLine("PASS: long-screenshot-only crop, four edges with scrolling, exact export, no empty preview area, and undo/redo");
         }
 
+        private static void ManualSaveLocation(string root)
+        {
+            string configured = Path.Combine(root, "默认保存");
+            string chosen = Path.Combine(root, "手动保存=图片");
+            string profile = Path.Combine(root, "save-location.ini");
+            Directory.CreateDirectory(chosen);
+            File.WriteAllText(profile, "save-directory=" + configured);
+            var settings = AppSettings.Load(profile);
+            Check(settings.ManualSaveDirectory == configured, "First manual save did not use the configured directory");
+
+            int changes = 0;
+            settings.Changed += delegate { changes++; };
+            settings.RememberManualSave(Path.Combine(chosen, "截图.png"));
+            settings.RememberManualSave(Path.Combine(chosen, "录屏.mp4"));
+            Check(changes == 1 && settings.ManualSaveDirectory == chosen, "Manual save did not record the selected directory once");
+            settings.Save(profile);
+
+            var restored = AppSettings.Load(profile).Clone();
+            Check(restored.ManualSaveDirectory == chosen, "Manual save directory did not survive restart or settings cloning");
+            restored.AskSaveLocation = false;
+            using (var image = new Bitmap(20, 20))
+            {
+                string path;
+                Check(ImageExport.Save(null, image, restored, out path) && Path.GetDirectoryName(path) == configured,
+                    "Direct save did not use the configured directory");
+            }
+            Check(restored.ManualSaveDirectory == chosen, "Direct save replaced the last manual directory");
+            Directory.Delete(chosen);
+            Check(restored.ManualSaveDirectory == configured, "Unavailable manual save directory did not fall back to configuration");
+            Console.WriteLine("PASS: manual save directory preference, restart persistence, and fallback");
+        }
+
         internal static void Run()
         {
             CompactToolbar();
@@ -442,6 +474,7 @@ namespace ShotInk
             Directory.CreateDirectory(root);
             try
             {
+                ManualSaveLocation(root);
                 SelectionModePersistence(root);
                 var settings = new AppSettings();
                 var window = new Rectangle(40, 30, 180, 120);

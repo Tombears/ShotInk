@@ -40,6 +40,11 @@ namespace ShotInk
         internal bool AskSaveLocation = true;
         internal bool StartWithWindows;
         internal string SaveDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        private string lastManualSaveDirectory = "";
+        internal string ManualSaveDirectory
+        {
+            get { return Directory.Exists(lastManualSaveDirectory) && AbsolutePath(lastManualSaveDirectory) ? lastManualSaveDirectory : SaveDirectory; }
+        }
         internal Keys QuickCopyShortcut = Keys.Control | Keys.Alt | Keys.Q;
         internal Keys QuickEditShortcut = Keys.Control | Keys.Alt | Keys.E;
         internal Keys FullScreenShortcut = Keys.Control | Keys.Alt | Keys.A;
@@ -61,10 +66,18 @@ namespace ShotInk
         }
         internal Keys[] Shortcuts { get { return new[] { CaptureShortcut, PinShortcut, ScrollShortcut, QuickCopyShortcut, QuickEditShortcut, FullScreenShortcut }; } }
         internal void NotifyChanged() { if (Changed != null) Changed(); }
+        internal void RememberManualSave(string path)
+        {
+            string directory = Path.GetDirectoryName(path);
+            if (lastManualSaveDirectory == directory) return;
+            lastManualSaveDirectory = directory;
+            NotifyChanged();
+        }
         internal AppSettings Clone() { var copy = new AppSettings(); copy.CopyFrom(this); return copy; }
         internal void CopyFrom(AppSettings other)
         {
             AutoHistory = other.AutoHistory; HistoryLimit = other.HistoryLimit; AskSaveLocation = other.AskSaveLocation; SaveDirectory = other.SaveDirectory;
+            lastManualSaveDirectory = other.lastManualSaveDirectory;
             StartWithWindows = other.StartWithWindows; Skin = other.Skin; RecordMicrophoneDevice = other.RecordMicrophoneDevice; RecordMicrophoneGain = other.RecordMicrophoneGain;
             RandomSkin = other.RandomSkin; RandomSkinMask = other.RandomSkinMask;
             GifFramesPerSecond = other.GifFramesPerSecond;
@@ -105,7 +118,7 @@ namespace ShotInk
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var line in File.ReadAllLines(path))
                 { int at = line.IndexOf('='); if (at > 0) values[line.Substring(0, at).Trim()] = line.Substring(at + 1).Trim(); }
-                var knownKeys = new[] { "record-microphone-device", "record-microphone-gain", "skin", "random-skin", "random-skin-mask", "save", "history-limit", "gif-fps", "gif-target-mb", "gif-delete-current", "gif-delete-selected", "gif-undo", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
+                var knownKeys = new[] { "record-microphone-device", "record-microphone-gain", "skin", "random-skin", "random-skin-mask", "save", "history-limit", "gif-fps", "gif-target-mb", "gif-delete-current", "gif-delete-selected", "gif-undo", "ask-save-location", "start-with-windows", "check-updates", "save-directory", "last-manual-save-directory", "hotkey-capture", "hotkey-pin", "hotkey-scroll", "hotkey-quick-copy", "hotkey-quick-edit", "hotkey-fullscreen", "last-capture-region", "free-selection-mode" };
                 if (!values.Keys.Any(key => knownKeys.Contains(key, StringComparer.OrdinalIgnoreCase) || key.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException("设置文件为空或内容无效。");
                 string value; int skin;
@@ -138,6 +151,7 @@ namespace ShotInk
                     if (!AbsolutePath(value)) throw new InvalidDataException("保存文件夹配置无效。");
                     Path.GetFullPath(value); settings.SaveDirectory = value;
                 }
+                if (values.TryGetValue("last-manual-save-directory", out value)) settings.lastManualSaveDirectory = value;
                 settings.CaptureShortcut = ReadShortcut(values, "hotkey-capture", settings.CaptureShortcut);
                 settings.PinShortcut = ReadShortcut(values, "hotkey-pin", settings.PinShortcut);
                 settings.ScrollShortcut = ReadShortcut(values, "hotkey-scroll", settings.ScrollShortcut);
@@ -216,7 +230,8 @@ namespace ShotInk
                 "record-guide-seen=" + (RecordingGuideSeen ? "1" : "0"), "record-microphone=" + (RecordMicrophone ? "1" : "0"),
                 "record-speaker=" + (RecordSpeaker ? "1" : "0"), "record-pointer=" + (RecordPointer ? "1" : "0"),
                 "gif-delete-current=" + (int)GifDeleteCurrentShortcut, "gif-delete-selected=" + (int)GifDeleteSelectedShortcut, "gif-undo=" + (int)GifUndoShortcut,
-                "save-directory=" + SaveDirectory, "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut,
+                "save-directory=" + SaveDirectory, "last-manual-save-directory=" + lastManualSaveDirectory,
+                "hotkey-capture=" + (int)CaptureShortcut, "hotkey-pin=" + (int)PinShortcut, "hotkey-scroll=" + (int)ScrollShortcut,
                 "hotkey-quick-copy=" + (int)QuickCopyShortcut, "hotkey-quick-edit=" + (int)QuickEditShortcut, "hotkey-fullscreen=" + (int)FullScreenShortcut,
                 "free-selection-mode=" + (FreeSelectionMode ? "1" : "0"),
                 "last-capture-region=" + string.Join(",", new[] { LastCaptureRegion.X, LastCaptureRegion.Y, LastCaptureRegion.Width, LastCaptureRegion.Height }) };
