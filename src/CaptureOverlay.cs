@@ -409,6 +409,7 @@ namespace ShotInk
             sizeHint.Visible = selection.Width > 0 && selection.Height > 0;
             var size = longViewport == null ? selection.Size : canvas.ImageBounds.Size;
             sizeHint.Text = size.Width + " × " + size.Height + " px";
+            if (longViewport != null && canvas.Zoom != 1F) sizeHint.Text += " · " + Math.Round(canvas.Zoom * 100) + "%";
             if (longLimitReached) sizeHint.Text += " · 达到上限，已自动完成";
             else if (longAlignmentLost) sizeHint.Text += " · 页面变化过大，已保留可拼接部分";
             sizeHint.Location = new Point(Math.Max(0, Math.Min(selection.Left, Width - sizeHint.PreferredWidth)), Math.Max(0, selection.Top - sizeHint.PreferredHeight - 3));

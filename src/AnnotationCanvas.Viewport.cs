@@ -10,6 +10,7 @@ namespace ShotInk
         private HScrollBar documentHorizontal;
         private Size documentClient;
         internal float DocumentOffsetX { get; private set; }
+        internal event Action DocumentViewportChanged;
         internal void UseDocumentViewport(Size frame)
         {
             documentFrame = frame;
@@ -41,6 +42,7 @@ namespace ShotInk
             SetScrollValue(documentHorizontal, (int)Math.Round(offsetX * Zoom));
             DocumentOffsetY = documentScroll.Value / Zoom; DocumentOffsetX = documentHorizontal.Value / Zoom;
             documentScroll.Visible = vertical; documentHorizontal.Visible = horizontal;
+            if (DocumentViewportChanged != null) DocumentViewportChanged();
         }
         private static void SetScrollValue(ScrollBar bar, int value)
         { bar.Value = Math.Max(0, Math.Min(Math.Max(0, bar.Maximum - bar.LargeChange + 1), value)); }

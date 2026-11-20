@@ -137,25 +137,35 @@ namespace ShotInk
             SetZoom(1);
         }
 
-        internal void SetZoom(float value)
+        internal void SetZoom(float value, Point anchor = default(Point))
         {
             CommitTextEdit();
-            float offset = DocumentOffsetY;
+            float previousZoom = Zoom;
             Zoom = Math.Max(0.05F, Math.Min(3F, value));
             if (documentScroll == null)
                 Size = new Size(Math.Max(1, (int)Math.Ceiling(Image.Width * Zoom)), Math.Max(1, (int)Math.Ceiling(Image.Height * Zoom)));
-            else UpdateDocumentViewport(DocumentOffsetX, offset);
+            else UpdateDocumentViewport(DocumentOffsetX + anchor.X / previousZoom - anchor.X / Zoom,
+                DocumentOffsetY + anchor.Y / previousZoom - anchor.Y / Zoom);
             Invalidate();
         }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             if (documentScroll != null)
             {
-                if ((ModifierKeys & Keys.Shift) != 0) ScrollDocumentHorizontal(-e.Delta / 120 * 80);
-                else ScrollDocument(-e.Delta / 120 * 80);
+                NavigateDocument(e, ModifierKeys);
                 var handled = e as HandledMouseEventArgs; if (handled != null) handled.Handled = true;
             }
             base.OnMouseWheel(e);
+        }
+        private void NavigateDocument(MouseEventArgs e, Keys modifiers)
+        {
+            if ((modifiers & Keys.Control) != 0)
+            {
+                if (!Capture && new Rectangle(Point.Empty, documentClient).Contains(e.Location))
+                    SetZoom(Zoom * (float)Math.Pow(1.25, e.Delta / 120.0), e.Location);
+            }
+            else if ((modifiers & Keys.Shift) != 0) ScrollDocumentHorizontal(-e.Delta / 120 * 80);
+            else ScrollDocument(-e.Delta / 120 * 80);
         }
         private PointF ImagePoint(Point p)
         {

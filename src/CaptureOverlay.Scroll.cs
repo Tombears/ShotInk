@@ -120,7 +120,7 @@ namespace ShotInk
             next.UseDocumentViewport(selection.Size);
             next.Location = Point.Empty; canvas = next; longViewport.Controls.Add(next); Controls.Add(longViewport);
             next.Changed += delegate { toolbar.UpdateHistory(canvas.CanUndo, canvas.CanRedo); };
-            next.ImageBoundsChanged += UpdateLongPreviewBounds;
+            next.DocumentViewportChanged += UpdateLongPreviewBounds;
 #if !SHOTINK_LITE
             next.TextSelectionChanged += delegate { toolbar.SetTextSelection(canvas.HasTextRecognition, canvas.HasSelectedText); };
 #endif

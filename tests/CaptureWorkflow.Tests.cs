@@ -358,6 +358,39 @@ namespace ShotInk
                 finally { Skins.Select(previousSkin); }
                 using (var original = canvas.Render())
                 {
+                    canvas.ScrollDocumentHorizontal(8);
+                    canvas.ScrollDocument(76);
+                    var visibleSize = Field<Size>(canvas, "documentClient");
+                    var midpoint = new Point(visibleSize.Width / 2, visibleSize.Height / 2);
+                    int offsetX = (int)canvas.DocumentOffsetX, offsetY = (int)canvas.DocumentOffsetY;
+                    crop.PerformClick();
+                    Mouse(canvas, "OnMouseDown", midpoint.X, 0); Mouse(canvas, "OnMouseUp", midpoint.X, 0);
+                    Check(Field<Rectangle>(canvas, "cropPreview") == canvas.ImageBounds, "Clicking a clipped crop edge moved it");
+                    Mouse(canvas, "OnMouseDown", 0, midpoint.Y); Mouse(canvas, "OnMouseUp", 15, midpoint.Y);
+                    Mouse(canvas, "OnMouseDown", midpoint.X, 0); Mouse(canvas, "OnMouseUp", midpoint.X, 12);
+                    Mouse(canvas, "OnMouseDown", visibleSize.Width - 1, midpoint.Y);
+                    Mouse(canvas, "OnMouseUp", visibleSize.Width - 21, midpoint.Y);
+                    Mouse(canvas, "OnMouseDown", midpoint.X, visibleSize.Height - 1);
+                    Mouse(canvas, "OnMouseUp", midpoint.X, visibleSize.Height - 17);
+                    var visibleCrop = Rectangle.FromLTRB(offsetX + 15, offsetY + 12, offsetX + visibleSize.Width - 20, offsetY + visibleSize.Height - 16);
+                    Check(Field<Rectangle>(canvas, "cropPreview") == visibleCrop, "Could not drag all four clipped crop edges from the middle of a scrolled image");
+                    ((Button)toolbar.Controls.Find("cancel-crop", true).Single()).PerformClick();
+
+                    Call(canvas, "NavigateDocument", new MouseEventArgs(MouseButtons.None, 0, midpoint.X, midpoint.Y, 120), Keys.Control);
+                    Check(canvas.Zoom == 1.25F && Math.Abs(canvas.DocumentOffsetX + midpoint.X / canvas.Zoom - (offsetX + midpoint.X)) <= 1F
+                        && Math.Abs(canvas.DocumentOffsetY + midpoint.Y / canvas.Zoom - (offsetY + midpoint.Y)) <= 1F, "Long preview zoom lost the document point under the cursor");
+                    for (int step = 0; step < 5; step++)
+                        Call(canvas, "NavigateDocument", new MouseEventArgs(MouseButtons.None, 0, midpoint.X, midpoint.Y, -120), Keys.Control);
+                    Check(canvas.Zoom < 1F && viewport.Size == canvas.Size && canvas.Width < selection.Width && canvas.Height < selection.Height,
+                        "Zoom out left a full-sized viewport around the preview");
+                    using (var zoomed = canvas.Render())
+                    {
+                        Check(zoomed.Size == original.Size, "Preview zoom resized the exported image");
+                        Check(zoomed.GetPixel(90, 200) == original.GetPixel(90, 200), "Preview zoom resampled the exported image");
+                    }
+                    canvas.SetZoom(1);
+                    canvas.ScrollDocumentHorizontal(-image.Width);
+                    canvas.ScrollDocument(-image.Height);
                     crop.PerformClick();
                     Check(canvas.IsCropping && !strip.Visible, "Crop action did not open crop mode");
                     Mouse(canvas, "OnMouseDown", 0, 60); Mouse(canvas, "OnMouseUp", 15, 60);
@@ -411,7 +444,7 @@ namespace ShotInk
                     toolbar.ConfigureForGif(video);
                     Check(Field<ToolStrip>(toolbar, "strip").Items["crop-image"] == null, "Recording editor exposed crop");
                 }
-            Console.WriteLine("PASS: long-screenshot-only crop, four edges with scrolling, exact export, no empty preview area, and undo/redo");
+            Console.WriteLine("PASS: long screenshot crop edges remain draggable while scrolled, preview zoom preserves source pixels, and undo/redo");
         }
 
         private static void ManualSaveLocation(string root)
