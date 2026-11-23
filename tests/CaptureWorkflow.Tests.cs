@@ -479,6 +479,25 @@ namespace ShotInk
             Console.WriteLine("PASS: manual save directory preference, restart persistence, and fallback");
         }
 
+        internal static void SmallPinSize()
+        {
+            foreach (var size in new[] { new Size(16, 16), new Size(24, 55), new Size(55, 18) })
+            {
+                using (var pin = new PinForm(new Bitmap(size.Width, size.Height)))
+                {
+                    pin.Show();
+                    Application.DoEvents();
+                    Check(pin.ClientSize == size, "Showing a small pin imposed a minimum window size and stretched the image: " + pin.ClientSize);
+                    Call(pin, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0, 0, 0, 120));
+                    var scaled = new Size((int)Math.Round(size.Width * 1.1F), (int)Math.Round(size.Height * 1.1F));
+                    Check(pin.ClientSize == scaled, "A small pin did not zoom proportionally");
+                    pin.ContextMenuStrip.Items[1].PerformClick();
+                    Check(pin.ClientSize == size, "Resetting the zoom stretched a small pin");
+                }
+            }
+            Console.WriteLine("PASS: small desktop pins keep the image dimensions on display, zoom and reset");
+        }
+
         internal static void Run()
         {
             CompactToolbar();

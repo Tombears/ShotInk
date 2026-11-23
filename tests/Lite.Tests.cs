@@ -17,6 +17,7 @@ namespace ShotInk
                 System.Threading.Tasks.Task.Run(new Action(UpdatePartsTests.Run)).GetAwaiter().GetResult();
                 if (args.Length == 1 && args[0] == "--skin-tests") { SkinTests.Run(); return 0; }
                 if (args.Length == 1 && args[0] == "--crop-tests") { CaptureWorkflowTests.CropScreenshot(); return 0; }
+                if (args.Length == 1 && args[0] == "--small-pin-tests") { CaptureWorkflowTests.SmallPinSize(); return 0; }
                 if (args.Length == 2 && args[0] == "--skin-previews") { SkinTests.Previews(args[1]); return 0; }
                 if (args.Length == 2 && args[0] == "--update-live")
                 {
@@ -38,6 +39,7 @@ namespace ShotInk
                 CaptureWorkflowTests.Run();
                 GifToolsTests.Run();
                 CaptureWorkflowTests.CropScreenshot();
+                CaptureWorkflowTests.SmallPinSize();
                 Console.WriteLine("PASS: lite build omits OCR logic and controls; shared GIF tools, scopes, undo and export work"); return 0;
             }
             catch (Exception error) { Console.Error.WriteLine(error); return 1; }

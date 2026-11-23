@@ -81,6 +81,7 @@ namespace ShotInk
                 }
                 if (args.Length == 1 && args[0] == "--capture-tests") { CaptureWorkflowTests.Run(); return 0; }
                 if (args.Length == 1 && args[0] == "--crop-tests") { CaptureWorkflowTests.CropScreenshot(); return 0; }
+                if (args.Length == 1 && args[0] == "--small-pin-tests") { CaptureWorkflowTests.SmallPinSize(); return 0; }
                 SkinTests.Run();
                 CaptureWorkflowTests.Run();
                 Run("renamed app preserves existing history and settings", TestDataRoot);
@@ -153,6 +154,7 @@ namespace ShotInk
                 Run("cancelled selection does not export a screenshot", TestSelectionCancel);
                 Run("right-button cancellation waits for release across overlay, canvas and long preview", TestRightCancel);
                 CaptureWorkflowTests.CropScreenshot();
+                CaptureWorkflowTests.SmallPinSize();
                 if (args.Length == 2 && args[0] == "--preview")
                 {
                     Run("native screen capture reads a known test window", TestScreenCapture);

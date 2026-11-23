@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ShotInk
@@ -15,6 +16,11 @@ namespace ShotInk
         private int resizeEdges, hoverEdges;
         private bool dragging;
         private float zoom = 1;
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MinMaxInfo
+        {
+            internal Point Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
+        }
         internal PinForm(Bitmap image)
         {
             this.image = image;
@@ -38,6 +44,17 @@ namespace ShotInk
         }
         private Size ZoomSize(float value) { return new Size(Math.Max(1, (int)Math.Round(image.Width * value)), Math.Max(1, (int)Math.Round(image.Height * value))); }
         private void SetZoom(float value) { zoom = Math.Max(0.05F, Math.Min(3, value)); ClientSize = ZoomSize(zoom); Invalidate(); }
+        protected override void WndProc(ref Message message)
+        {
+            const int getMinMaxInfo = 0x0024;
+            base.WndProc(ref message);
+            if (message.Msg != getMinMaxInfo) return;
+            // A borderless pin can be smaller than the system's default track size.
+            var limits = (MinMaxInfo)Marshal.PtrToStructure(message.LParam, typeof(MinMaxInfo));
+            limits.MinTrackSize = new Point(1, 1);
+            Marshal.StructureToPtr(limits, message.LParam, false);
+            message.Result = IntPtr.Zero;
+        }
         // Bits: left, right, top, bottom. Corner zones combine two edges.
         private int HitEdges(Point point)
         {
