@@ -15,6 +15,7 @@ namespace ShotInk
         private static void Call(object target, string name, params object[] args) { target.GetType().GetMethod(name, Private).Invoke(target, args); }
         private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
         private static void Mouse(Control target, string action, int x, int y) { Call(target, action, new MouseEventArgs(MouseButtons.Left, 1, x, y, 0)); }
+        private static IntPtr PackedPoint(Point point) { return new IntPtr((point.Y << 16) | (point.X & 0xffff)); }
         private static void Wait(Func<bool> done)
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -173,52 +174,74 @@ namespace ShotInk
             Console.WriteLine("PASS: pixel nudging, held edge expansion/shrinking/repeat, release reset and keyboard input isolation");
         }
 
-        private static void EdgeResizeTargets()
+        internal static void EdgeResizeTargets()
         {
             var region = new Rectangle(100, 100, 500, 300);
             var handles = SelectionGeometry.Handles(region);
+            var inward = new[] { new Point(0, 1), new Point(-1, 0), new Point(0, -1), new Point(1, 0) };
             for (int index = 0; index < 8; index++)
             {
-                Check(SelectionGeometry.ResizeHandleAt(region, handles[index], 6) == index, "Resize handle lost priority.");
+                Check(SelectionGeometry.ResizeHandleAt(region, handles[index], 6, 1) == index, "Resize handle lost priority.");
                 if (index % 2 == 0) continue;
-                foreach (int offset in new[] { -6, -5, 5, 6 })
+                var direction = inward[(index - 1) / 2];
+                foreach (int offset in new[] { -7, -6, -5, 1, 2, 6 })
                 {
                     var point = handles[index];
-                    point.Offset(index == 3 || index == 7 ? offset : 0, index == 1 || index == 5 ? offset : 0);
-                    Check(SelectionGeometry.ResizeHandleAt(region, point, 6) == index, "Resize band misses points beside the edge.");
+                    point.Offset(direction.X * offset, direction.Y * offset);
+                    int expected = offset >= -6 && offset <= 1 ? index : -1;
+                    Check(SelectionGeometry.ResizeHandleAt(region, point, 6, 1) == expected, "Unexpected hit inside or outside the resize band.");
                 }
             }
-            Check(SelectionGeometry.ResizeHandleAt(region, new Point(350, 250), 6) == -1 &&
-                SelectionGeometry.ResizeHandleAt(region, new Point(350, 93), 6) == -1, "Resize band swallowed the center or distant background.");
-            Check(SelectionGeometry.ResizeHandleAt(region, new Point(350, 88), 12) == 1 &&
-                SelectionGeometry.ResizeHandleAt(region, new Point(94, 94), 6) == 0, "Scaled edge tolerance or expanded corner priority was lost.");
+            Check(SelectionGeometry.ResizeHandleAt(region, new Point(350, 250), 6, 1) == -1 &&
+                SelectionGeometry.ResizeHandleAt(region, new Point(103, 103), 6, 1) == -1, "Resize band swallowed the center or the space inside a corner.");
+            Check(SelectionGeometry.ResizeHandleAt(region, new Point(350, 88), 12, 2) == 1 &&
+                SelectionGeometry.ResizeHandleAt(region, new Point(350, 102), 12, 2) == 1 &&
+                SelectionGeometry.ResizeHandleAt(region, new Point(94, 94), 6, 1) == 0, "Scaled edge tolerance or expanded corner priority was lost.");
             using (var overlay = new CaptureOverlay(false, new Bitmap(900, 650), new Rectangle(-300, 20, 900, 650)))
             {
                 overlay.Show();
+                int innerRadius = Math.Max(1, (int)Math.Round(overlay.DeviceDpi / 96.0));
                 foreach (int handle in new[] { 1, 3, 5, 7 })
-                foreach (int offset in new[] { -5, 5 })
+                foreach (int offset in new[] { -5, innerRadius })
                 {
                     overlay.SelectRegion(new Rectangle(region.X - 300, region.Y + 20, region.Width, region.Height));
                     var point = handles[handle];
-                    point.Offset(handle == 3 || handle == 7 ? offset : 0, handle == 1 || handle == 5 ? offset : 0);
+                    var direction = inward[(handle - 1) / 2];
+                    point.Offset(direction.X * offset, direction.Y * offset);
                     var target = region.Contains(point) ? (Control)Field<AnnotationCanvas>(overlay, "canvas") : overlay;
                     var local = target.PointToClient(overlay.PointToScreen(point));
-                    var hover = Message.Create(target.Handle, 0x200, IntPtr.Zero, new IntPtr((local.Y << 16) | (local.X & 0xffff)));
+                    var hover = Message.Create(target.Handle, 0x200, IntPtr.Zero, PackedPoint(local));
                     Check(overlay.PreFilterMessage(ref hover) && Cursor.Current.Handle == (handle == 1 || handle == 5 ? Cursors.SizeNS : Cursors.SizeWE).Handle,
                         "Hovering near an edge did not show its resize cursor.");
                     Cursor.Current = target.Cursor;
-                    var message = Message.Create(target.Handle, 0x201, new IntPtr(1), new IntPtr((local.Y << 16) | (local.X & 0xffff)));
+                    var message = Message.Create(target.Handle, 0x201, new IntPtr(1), PackedPoint(local));
                     Check(overlay.PreFilterMessage(ref message) && Field<int>(overlay, "dragMode") == handle, "Native edge click moved the whole selection or missed the canvas edge.");
                     var end = new Point(point.X + (handle == 3 || handle == 7 ? 10 : 0), point.Y + (handle == 1 || handle == 5 ? 10 : 0));
                     Mouse(overlay, "OnMouseMove", end.X, end.Y); Mouse(overlay, "OnMouseUp", end.X, end.Y);
                     Check(Field<Rectangle>(overlay, "selection") == SelectionGeometry.Resize(region, handle, new Point(end.X - point.X, end.Y - point.Y), overlay.ClientRectangle), "Edge dragging resized the wrong side.");
                 }
                 var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                overlay.SelectRegion(new Rectangle(region.X - 300, region.Y + 20, region.Width, region.Height));
+                toolbar.SelectTool(DrawTool.Pen);
+                var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                var grip = (Control)Field<Array>(overlay, "grips").GetValue(0);
+                var insideCorner = new Point(region.Left + innerRadius + 1, region.Top + innerRadius + 1);
+                var hitTest = new object[] { Message.Create(grip.Handle, 0x84, IntPtr.Zero, PackedPoint(overlay.PointToScreen(insideCorner))) };
+                Call(grip, "WndProc", hitTest);
+                Check(((Message)hitTest[0]).Result.ToInt64() == -1, "The visible corner grip blocked drawing outside the inner resize band.");
+                var localCorner = new Point(insideCorner.X - region.Left, insideCorner.Y - region.Top);
+                var drawing = Message.Create(canvas.Handle, 0x201, new IntPtr(1), PackedPoint(localCorner));
+                Check(!overlay.PreFilterMessage(ref drawing), "Clicking just inside the corner was intercepted.");
+                Mouse(canvas, "OnMouseDown", localCorner.X, localCorner.Y);
+                var crossing = Message.Create(canvas.Handle, 0x200, new IntPtr(1), PackedPoint(new Point(0, 0)));
+                Check(!overlay.PreFilterMessage(ref crossing), "Moving an active stroke over the border was intercepted.");
+                Mouse(canvas, "OnMouseMove", 0, 0); Mouse(canvas, "OnMouseUp", 0, 0);
+                Check(canvas.Marks.Count == 1 && Field<Rectangle>(overlay, "selection") == region, "Drawing near the corner resized the selection.");
                 var cursorMessage = Message.Create(overlay.Handle, 0x20, toolbar.Handle, new IntPtr(1));
                 Check(!overlay.PreFilterMessage(ref cursorMessage), "Parent cursor forwarding intercepted toolbar controls.");
                 overlay.Close();
             }
-            Console.WriteLine("PASS: expanded inner/outer edge targets, corner priority and native resize routing across virtual-screen origins");
+            Console.WriteLine("PASS: outer resize band, narrow inner band, corner click-through and uninterrupted drawing at the edge");
         }
 
         private static void FreeSelection()

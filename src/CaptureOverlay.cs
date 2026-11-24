@@ -89,7 +89,7 @@ namespace ShotInk
             for (int i = 0; i < grips.Length; i++)
             {
                 int index = i;
-                var grip = new ResizeGrip { Visible = false, Size = new Size(9, 9), Cursor = HandleCursor(i) };
+                var grip = new ResizeGrip(this, index) { Visible = false, Size = new Size(9, 9), Cursor = HandleCursor(i) };
                 grip.MouseDown += delegate(object sender, MouseEventArgs e)
                 {
                     if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
@@ -585,15 +585,34 @@ namespace ShotInk
 
         private sealed class ResizeGrip : Control
         {
-            internal ResizeGrip() { SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); BackColor = Color.Transparent; }
+            private readonly CaptureOverlay overlay;
+            private readonly int index;
+            internal ResizeGrip(CaptureOverlay overlay, int index)
+            {
+                this.overlay = overlay; this.index = index;
+                SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+                BackColor = Color.Transparent;
+            }
+            protected override void WndProc(ref Message message)
+            {
+                const int hitTest = 0x0084, transparent = -1;
+                if (message.Msg == hitTest && overlay.ResizeHandleAt(overlay.PointToClient(MouseMessagePoint(message.LParam))) != index)
+                {
+                    // Let the canvas or adjacent edge receive clicks under the visible grip.
+                    message.Result = new IntPtr(transparent);
+                    return;
+                }
+                base.WndProc(ref message);
+            }
             protected override void OnPaint(PaintEventArgs e) { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using (var b = new SolidBrush(Color.FromArgb(38, 139, 255))) e.Graphics.FillEllipse(b, 1, 1, 7, 7); e.Graphics.DrawEllipse(Pens.White, 1, 1, 7, 7); }
         }
     }
 
     internal static class SelectionGeometry
     {
-        internal static int ResizeHandleAt(Rectangle bounds, Point point, int radius)
+        internal static int ResizeHandleAt(Rectangle bounds, Point point, int outerRadius, int innerRadius)
         {
+            int radius = bounds.Contains(point) ? innerRadius : outerRadius;
             if (point.X < bounds.Left - radius || point.X > bounds.Right + radius || point.Y < bounds.Top - radius || point.Y > bounds.Bottom + radius) return -1;
             var handles = Handles(bounds);
             for (int index = 0; index < 8; index += 2)

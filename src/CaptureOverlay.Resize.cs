@@ -17,18 +17,25 @@ namespace ShotInk
             if (target != this && target != canvas) return false;
             Point point;
             if (message.Msg == setCursor) point = PointToClient(Cursor.Position);
-            else
-            {
-                long packed = message.LParam.ToInt64();
-                var local = new Point(unchecked((short)(packed & 0xffff)), unchecked((short)((packed >> 16) & 0xffff)));
-                point = PointToClient(target.PointToScreen(local));
-            }
-            int radius = Math.Max(6, (int)Math.Round(6 * DeviceDpi / 96.0));
-            int handle = SelectionGeometry.ResizeHandleAt(selection, point, radius);
+            else point = PointToClient(target.PointToScreen(MouseMessagePoint(message.LParam)));
+            int handle = ResizeHandleAt(point);
             if (handle < 0) return false;
             if (message.Msg == setCursor || message.Msg == mouseMove) Cursor.Current = HandleCursor(handle);
             else BeginAdjust(handle, point);
             return true;
+        }
+
+        private int ResizeHandleAt(Point point)
+        {
+            int outerRadius = Math.Max(6, (int)Math.Round(6 * DeviceDpi / 96.0));
+            int innerRadius = Math.Max(1, (int)Math.Round(DeviceDpi / 96.0));
+            return SelectionGeometry.ResizeHandleAt(selection, point, outerRadius, innerRadius);
+        }
+
+        private static Point MouseMessagePoint(IntPtr parameter)
+        {
+            long packed = parameter.ToInt64();
+            return new Point(unchecked((short)(packed & 0xffff)), unchecked((short)((packed >> 16) & 0xffff)));
         }
     }
 }
