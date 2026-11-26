@@ -11,6 +11,12 @@ namespace ShotInk
         internal static Color Ink { get { return Skins.Current.Ink; } }
         internal static Color Muted { get { return Skins.Current.Muted; } }
         internal static Color Border { get { return Skins.Current.Border; } }
+        internal static void UseToolbarCursor(Control control)
+        {
+            control.Cursor = Cursors.Arrow;
+            foreach (Control child in control.Controls) UseToolbarCursor(child);
+        }
+
         internal static readonly Font Font = new Font("Microsoft YaHei UI", 9F);
         internal static readonly Font HeadingFont = new Font(Font, FontStyle.Bold);
         internal static Bitmap RenderSmooth(Size size, Action<Graphics> paint)

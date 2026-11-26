@@ -15,17 +15,16 @@ namespace ShotInk
         private double freeDistance;
         private Rectangle freeDamage;
         private SelectionModePicker modePicker;
-        private Cursor SelectionCursor { get { return freeSelectionMode ? ToolCursors.Get("lasso") : ToolCursors.For(DrawTool.Rectangle); } }
         private void RefreshSelectionCursor()
         {
-            if (!dragging || dragMode < -1) Cursor = SelectionCursor;
+            if (!dragging || dragMode < -1) Cursor = ToolCursors.Crosshair;
             else if (dragMode == -1) Cursor = ToolCursors.For(DrawTool.None);
         }
         private void SetupSelectionModes()
         {
             modePicker = new SelectionModePicker();
             freeSelectionMode = !scrolling && settings.FreeSelectionMode;
-            Cursor = SelectionCursor;
+            Cursor = ToolCursors.Crosshair;
             Skins.Changed += RefreshSelectionCursor;
             Disposed += delegate { Skins.Changed -= RefreshSelectionCursor; };
             modePicker.SetMode(freeSelectionMode);
@@ -38,7 +37,7 @@ namespace ShotInk
         {
             if (videoMode || scrolling || scrollSession != null || gifSession != null || longViewport != null) return;
             ClearSelection(); freeSelectionMode = free;
-            Cursor = SelectionCursor;
+            Cursor = ToolCursors.Crosshair;
             if (settings.FreeSelectionMode != free) { settings.FreeSelectionMode = free; settings.NotifyChanged(); }
             modePicker.SetMode(free); modePicker.Show(); modePicker.BringToFront();
             Focus(); Invalidate(true);
@@ -116,6 +115,7 @@ namespace ShotInk
             BackColor = Color.White;
             rectangle = Add("selection-rectangle", "shape-rectangle", "矩形选框 (L 切换)", 5, false);
             free = Add("selection-free", "lasso", "自定义选框：画笔圈选，靠近起点吸附完成 (L 切换)", 37, true);
+            ToolAppearance.UseToolbarCursor(this);
             SetMode(false);
         }
         private ToolOptionButton Add(string name, string icon, string hint, int x, bool value)

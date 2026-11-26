@@ -16,26 +16,19 @@ namespace ShotInk
         private static readonly Lazy<byte[][]> penDark = new Lazy<byte[][]>(delegate { return ReadSkinFrames("sample-dark"); });
         private static readonly Lazy<byte[][]> penLight = new Lazy<byte[][]>(delegate { return ReadSkinFrames("sample-light"); });
 
-        internal static Cursor For(DrawTool tool, bool blur = false)
+        internal static Cursor Crosshair { get { return Get("crosshair"); } }
+
+        internal static Cursor For(DrawTool tool)
         {
             switch (tool)
             {
-                case DrawTool.Rectangle: return Get("rectangle");
-                case DrawTool.Ellipse: return Get("ellipse");
-                case DrawTool.Arrow: return Get("arrow");
-                case DrawTool.Line: return Get("line");
-                case DrawTool.Polyline: return Get("polyline");
-                case DrawTool.ArrowPolyline: return Get("arrow-polyline");
-                case DrawTool.Pen: return Get("pen");
                 case DrawTool.Text: return Get("text");
-                case DrawTool.Mosaic: return Get(blur ? "blur" : "mosaic");
-                case DrawTool.Highlight: return Get("highlight");
-                case DrawTool.Eraser: return Get("eraser");
-                default: return Get("move");
+                case DrawTool.None: return Get("move");
+                default: return Crosshair;
             }
         }
 
-        internal static Cursor Get(string name)
+        private static Cursor Get(string name)
         {
             var skin = Skins.Current.Kind;
             string key = skin + "/" + name;

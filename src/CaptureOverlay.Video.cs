@@ -28,7 +28,9 @@ namespace ShotInk
                 var start = new ToolOptionButton { Text = "开始录屏", Location = new Point(106, 2), Size = new Size(96, 26),
                     AccentColor = ToolAppearance.Accent("video"), Selected = true };
                 start.Click += async delegate { await CaptureVideoAsync(); };
-                recordingOptions.Controls.Add(start); Controls.Add(recordingOptions);
+                recordingOptions.Controls.Add(start);
+                ToolAppearance.UseToolbarCursor(recordingOptions);
+                Controls.Add(recordingOptions);
             }
             freeSelectionMode = false; modePicker.Hide(); PositionVideoOptions(); Invalidate(true);
         }
@@ -87,7 +89,7 @@ namespace ShotInk
         {
             var image = ToolbarIcons.Create("grip");
             var grip = new Label { Name = "recording-drag", Image = image,
-                BackColor = Skins.Current.Surface, Cursor = Cursors.SizeAll, Location = new Point(1, 2), Size = new Size(14, 26), AccessibleName = "拖动录屏功能条" };
+                BackColor = Skins.Current.Surface, Location = new Point(1, 2), Size = new Size(14, 26), AccessibleName = "拖动录屏功能条" };
             Point anchor = Point.Empty;
             grip.MouseDown += delegate(object sender, MouseEventArgs args) {
                 if (args.Button != MouseButtons.Left) return;
@@ -149,7 +151,9 @@ namespace ShotInk
                 recordingTip.SetToolTip(stop, "结束录制 (Esc)");
                 pause.Click += delegate { paused = !paused; session.SetPaused(paused); pause.IconName = paused ? "play" : "pause"; pause.Invalidate(); pause.AccessibleName = paused ? "继续录屏" : "暂停录屏"; };
                 stop.Click += delegate { pause.Enabled = stop.Enabled = false; session.Finish(); };
-                recordingNavigation.Controls.AddRange(new Control[] { pause, time, stop }); Controls.Add(recordingNavigation);
+                recordingNavigation.Controls.AddRange(new Control[] { pause, time, stop });
+                ToolAppearance.UseToolbarCursor(recordingNavigation);
+                Controls.Add(recordingNavigation);
                 recordingNavigation.Location = CaptureToolbar.Place(selection, ToolbarWorkArea(), recordingNavigation.Size); recordingNavigation.BringToFront();
                 captureChromeExcluded = Native.ExcludeFromCapture(Handle, true);
                 if (!captureChromeExcluded && recordingNavigation.Bounds.IntersectsWith(selection)) throw new InvalidOperationException("请缩小选区，为录制导航留出屏幕空间。");

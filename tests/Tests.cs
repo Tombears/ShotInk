@@ -84,6 +84,7 @@ namespace ShotInk
                 if (args.Length == 1 && args[0] == "--small-pin-tests") { CaptureWorkflowTests.SmallPinSize(); return 0; }
                 if (args.Length == 1 && args[0] == "--selection-edge-tests") { CaptureWorkflowTests.EdgeResizeTargets(); return 0; }
                 if (args.Length > 0 && args[0] == "--color-picker-tests") { CaptureWorkflowTests.AnnotationCursors(); CaptureWorkflowTests.ColorPicker(args.Length > 1 ? args[1] : null); return 0; }
+                if (args.Length == 1 && args[0] == "--tool-cursor-tests") { CaptureWorkflowTests.ToolbarCursors(); CaptureWorkflowTests.AnnotationCursors(); return 0; }
                 SkinTests.Run();
                 CaptureWorkflowTests.Run();
                 Run("renamed app preserves existing history and settings", TestDataRoot);

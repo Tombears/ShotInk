@@ -65,7 +65,7 @@ namespace ShotInk
                 BackColor = Skins.Current.Surface, Renderer = new ToolStripProfessionalRenderer(new ToolbarColors()) };
             strip.Renderer = new ToolbarRenderer();
             strip.Tag = new SkinInteraction(strip);
-            dragGrip = new ToolbarGrip { Name = "toolbar-drag", Location = new Point(1, 1), Size = new Size(14, 26), Cursor = Cursors.SizeAll };
+            dragGrip = new ToolbarGrip { Name = "toolbar-drag", Location = new Point(1, 1), Size = new Size(14, 26) };
             dragGrip.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { movingToolbar = true; moveAnchor = MousePosition; moveOrigin = Location; dragGrip.Capture = true; } };
             dragGrip.MouseMove += delegate { if (movingToolbar && Parent != null) { var delta = new Point(MousePosition.X - moveAnchor.X, MousePosition.Y - moveAnchor.Y); Location = Clamp(new Point(moveOrigin.X + delta.X, moveOrigin.Y + delta.Y), Parent.ClientRectangle, Size); UserPlaced = true; if (ToolbarMoved != null) ToolbarMoved(); } };
             dragGrip.MouseUp += delegate { movingToolbar = false; dragGrip.Capture = false; };
@@ -137,6 +137,7 @@ namespace ShotInk
             cropActions = new CropActions { Location = new Point(15, 2), Visible = false };
             cropActions.Finished += delegate(bool apply) { if (CropFinished != null) CropFinished(apply); };
             Controls.Add(cropActions);
+            ToolAppearance.UseToolbarCursor(this);
             Size = new Size(width + 16, 30);
             Skins.Changed += RefreshSkin;
         }

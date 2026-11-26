@@ -55,6 +55,7 @@ namespace ShotInk
             { if (e.Button == MouseButtons.Right && frameCanvas != null) frameCanvas.CancelColorPicker(); };
             scope = new GifScopeSelector { Name = "gif-tool-scope", Anchor = AnchorStyles.Top | AnchorStyles.Right };
             row.Controls.Add(toolbar); row.Controls.Add(scope);
+            ToolAppearance.UseToolbarCursor(row);
             Action positionTools = delegate { scope.Location = new Point(Math.Max(toolbar.Right + 8, row.ClientSize.Width - scope.Width), 0); };
             row.Resize += delegate { positionTools(); };
             toolbar.LayoutChanged += delegate { layout.RowStyles[1].Height = toolbar.Height + 4; positionTools(); };

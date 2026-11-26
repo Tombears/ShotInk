@@ -19,6 +19,7 @@ namespace ShotInk
             internal IntPtr Mask, Color;
         }
         [DllImport("user32.dll")] private static extern bool GetIconInfo(IntPtr cursor, out CursorInfo info);
+        [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr word, IntPtr value);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr bitmap);
 
         private static Bitmap NativeCursorPixels(Cursor cursor)
@@ -47,6 +48,29 @@ namespace ShotInk
                         if (Math.Abs(pixel.R - expected.R) + Math.Abs(pixel.G - expected.G) + Math.Abs(pixel.B - expected.B) <= 20) return true;
                     }
             return false;
+        }
+
+        private static void CheckCursorWithoutSideIcon(Cursor cursor, Point hotspot)
+        {
+            Check(cursor.HotSpot == hotspot, "Simplified cursor moved its hotspot.");
+            using (var rendered = new Bitmap(32, 32, PixelFormat.Format24bppRgb))
+            {
+                var background = Color.MediumVioletRed;
+                using (var graphics = Graphics.FromImage(rendered))
+                {
+                    graphics.Clear(background);
+                    cursor.Draw(graphics, new Rectangle(Point.Empty, rendered.Size));
+                }
+                bool visible = false;
+                for (int y = 0; y < rendered.Height; y++)
+                    for (int x = 0; x < rendered.Width; x++)
+                    {
+                        if (rendered.GetPixel(x, y).ToArgb() == background.ToArgb()) continue;
+                        Check(x < 16, "A tool icon was drawn next to a simplified cursor.");
+                        visible = true;
+                    }
+                Check(visible, "The simplified cursor had no visible marker.");
+            }
         }
 
         private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance;
@@ -169,6 +193,45 @@ namespace ShotInk
                 }
             }
             Console.WriteLine("PASS: single row icon options and toolbar repaint");
+        }
+
+        internal static void ToolbarCursors()
+        {
+            using (var host = new Form { Cursor = ToolCursors.Crosshair })
+            using (var canvas = new AnnotationCanvas(new Bitmap(80, 80)))
+            using (var toolbar = new CaptureToolbar())
+            {
+                host.Controls.Add(canvas);
+                host.Controls.Add(toolbar);
+                toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; };
+                foreach (var tool in new[] { DrawTool.Arrow, DrawTool.Text, DrawTool.Mosaic, DrawTool.Eraser, DrawTool.ColorPicker })
+                {
+                    toolbar.SelectTool(tool);
+                    CheckToolbarCursor(toolbar);
+                }
+                var strip = Field<ToolStrip>(toolbar, "strip");
+                var previousCursor = Cursor.Current;
+                try
+                {
+                    var hit = new IntPtr((0x200 << 16) | 1); // WM_MOUSEMOVE and HTCLIENT
+                    SendMessage(canvas.Handle, 0x20, canvas.Handle, hit);
+                    Check(Cursor.Current == canvas.Cursor, "Canvas did not use the sampling pen.");
+                    SendMessage(strip.Handle, 0x20, strip.Handle, hit);
+                    Check(Cursor.Current == Cursors.Arrow, "Moving from the canvas to the toolbar kept the sampling pen.");
+                    SendMessage(canvas.Handle, 0x20, canvas.Handle, hit);
+                    Check(Cursor.Current == canvas.Cursor, "Moving back from the toolbar did not restore the sampling pen.");
+                }
+                finally { Cursor.Current = previousCursor; }
+            }
+            using (var editor = new EditorForm(new Bitmap(40, 40), delegate(Bitmap image) { image.Dispose(); }))
+                CheckToolbarCursor(Field<Panel>(editor, "toolArea"));
+            Console.WriteLine("PASS: toolbar arrow and canvas cursor switching in native mouse messages");
+        }
+
+        private static void CheckToolbarCursor(Control control)
+        {
+            Check(control.Cursor == Cursors.Arrow, "The toolbar exposed a non-arrow cursor: " + control.Name);
+            foreach (Control child in control.Controls) CheckToolbarCursor(child);
         }
 
         private static void KeyboardSelection()
@@ -677,32 +740,29 @@ namespace ShotInk
                 using (var canvas = new AnnotationCanvas(new Bitmap(80, 80)))
                 {
                     var tools = new[] { DrawTool.Rectangle, DrawTool.Ellipse, DrawTool.Arrow, DrawTool.Line, DrawTool.Polyline,
-                        DrawTool.ArrowPolyline, DrawTool.Pen, DrawTool.Highlight, DrawTool.Mosaic, DrawTool.Eraser, DrawTool.Text, DrawTool.None };
+                        DrawTool.ArrowPolyline, DrawTool.Pen, DrawTool.Highlight, DrawTool.Mosaic, DrawTool.Eraser };
                     var handles = new System.Collections.Generic.HashSet<IntPtr>();
                     foreach (var skin in Skins.All)
                     {
                         canvas.Tool = DrawTool.Rectangle;
                         Skins.Select(skin.Kind);
-                        Check(canvas.Cursor == ToolCursors.For(DrawTool.Rectangle), "Changing skins did not refresh the active cursor.");
+                        Check(canvas.Cursor == ToolCursors.Crosshair && handles.Add(canvas.Cursor.Handle),
+                            "Changing skins did not refresh the active crosshair.");
+                        CheckCursorWithoutSideIcon(canvas.Cursor, new Point(9, 9));
                         canvas.MosaicEffect = MosaicEffect.Pixelate;
                         foreach (var tool in tools)
                         {
                             canvas.Tool = tool;
-                            Check(canvas.Cursor == ToolCursors.For(tool) && handles.Add(canvas.Cursor.Handle),
-                                "Annotation tool did not use its own themed cursor: " + skin.Kind + "/" + tool);
-                            using (NativeCursorPixels(canvas.Cursor)) { }
+                            Check(canvas.Cursor == ToolCursors.Crosshair, "Drawing tool did not use the plain crosshair: " + tool);
                         }
-                        canvas.Tool = DrawTool.Pen;
-                        var fixedPen = canvas.Cursor;
-                        canvas.Ink = Color.Lime;
-                        canvas.UpdateToolCursor();
-                        Check(ReferenceEquals(canvas.Cursor, fixedPen) && CursorHasColor(fixedPen, ToolAppearance.Accent(DrawTool.Pen)),
-                            "The ordinary pen changed with the ink setting or lost its theme color.");
                         canvas.Tool = DrawTool.Mosaic;
                         canvas.MosaicEffect = MosaicEffect.GaussianBlur;
                         canvas.UpdateToolCursor();
-                        Check(canvas.Cursor == ToolCursors.For(DrawTool.Mosaic, true) && handles.Add(canvas.Cursor.Handle),
-                            "Gaussian blur shared the pixelation cursor or used another skin.");
+                        Check(canvas.Cursor == ToolCursors.Crosshair, "Gaussian blur did not use the plain crosshair.");
+                        canvas.Tool = DrawTool.Text;
+                        Check(canvas.Cursor == ToolCursors.For(DrawTool.Text) && handles.Add(canvas.Cursor.Handle),
+                            "Text cursor did not use its own themed I-beam.");
+                        CheckCursorWithoutSideIcon(canvas.Cursor, new Point(9, 13));
                         using (var pen = ToolCursors.CreateSamplingPen(Color.OrangeRed))
                             Check(pen.View.HotSpot == new Point(5, 27) && CursorHasColor(pen.View, Color.OrangeRed),
                                 "The themed pen moved its hotspot or discarded the sample in " + skin.Kind);
@@ -716,12 +776,13 @@ namespace ShotInk
                 }
             }
             finally { Skins.Select(previous); }
-            Console.WriteLine("PASS: native color bitmaps and sampling pen color in all eight cursor themes");
+            Console.WriteLine("PASS: badge-free drawing and text cursors, and a color sampling pen in all eight themes");
         }
 
         internal static void Run()
         {
             CompactToolbar();
+            ToolbarCursors();
             AnnotationCursors();
             ColorPicker();
             using (var overlay = new CaptureOverlay(false, new Bitmap(900, 650), new Rectangle(0, 0, 900, 650)))

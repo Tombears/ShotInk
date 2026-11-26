@@ -159,6 +159,7 @@ namespace ShotInk
 
                 }
             }
+            ToolAppearance.UseToolbarCursor(this);
             Height = tool == DrawTool.Mosaic || tool == DrawTool.Eraser ? SliderAppearance.Height + 6 : 34;
             Visible = HasOptions(tool);
             ResumeLayout();

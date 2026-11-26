@@ -269,7 +269,7 @@ namespace ShotInk
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
             keyboardEdge = -1;
             dragging = false; Capture = false;
-            Cursor = SelectionCursor;
+            Cursor = ToolCursors.Crosshair;
             if (longViewport == null && (selection.Width < 8 || selection.Height < 8)) { ClearSelection(); Invalidate(); return; }
             if (!ready) PrepareEditor();
             else if (canvas != null)
@@ -455,7 +455,7 @@ namespace ShotInk
                 edgeHold.Stop();
                 keyboardEdge = -1;
                 dragging = false;
-                Cursor = SelectionCursor;
+                Cursor = ToolCursors.Crosshair;
                 if (ready)
                 {
                     selection = dragOriginal;

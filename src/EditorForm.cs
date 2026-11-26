@@ -192,11 +192,11 @@ namespace ShotInk
         private float CurrentBrushSize { get { return Tool == DrawTool.Eraser ? EraserBrushSize : MosaicBrushSize; } }
         internal void UpdateToolCursor()
         {
-            if (IsCropping) Cursor = ToolCursors.Get("crop");
+            if (IsCropping) Cursor = ToolCursors.Crosshair;
             else if (Tool == DrawTool.ColorPicker) SetSamplingCursor(samplingCursorColor);
             else
             {
-                Cursor = HasTextRecognition ? ToolCursors.Get("ocr") : ToolCursors.For(Tool, MosaicEffect == MosaicEffect.GaussianBlur);
+                Cursor = ToolCursors.For(HasTextRecognition ? DrawTool.Text : Tool);
                 DisposeSamplingCursor();
             }
             Invalidate();
@@ -522,6 +522,7 @@ namespace ShotInk
 #if !SHOTINK_LITE
             toolArea.Controls.Add(textActions);
 #endif
+            ToolAppearance.UseToolbarCursor(toolArea);
             Controls.Add(viewport); Controls.Add(status); Controls.Add(toolArea);
             SelectTool(DrawTool.Rectangle);
             Shown += delegate { Fit(); UpdateStatus("截图已复制；编辑后可再次复制或保存"); };

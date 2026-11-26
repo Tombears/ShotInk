@@ -119,6 +119,7 @@ namespace ShotInk
             panel.Location = new Point(Math.Max(8, Math.Min(form.ClientSize.Width - width - 8, left)),
                 Math.Max(8, Math.Min(form.ClientSize.Height - panel.Height - 8, top)));
             expandedPanel = panel; panel.Controls.Add(expandedSlider);
+            if (Cursor == Cursors.Arrow) ToolAppearance.UseToolbarCursor(panel);
             var liveSlider = expandedSlider;
             expandedSlider.ValueChanged += delegate { Value = liveSlider.Value; };
             expandedSlider.MouseUp += delegate { QueueCloseExpansion(); };
