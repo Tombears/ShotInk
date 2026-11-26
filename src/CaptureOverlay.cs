@@ -173,6 +173,7 @@ namespace ShotInk
             if (canvas != null && canvas.IsCropping) return;
             if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
             if (e.Button != MouseButtons.Left) return;
+            if (canvas != null && canvas.Tool == DrawTool.ColorPicker) return;
             // The capture region stays fixed until the scrolling session ends.
             // Clicking the surrounding overlay must not clear or restart that session.
             if (scrollSession != null || gifSession != null) return;
@@ -191,6 +192,7 @@ namespace ShotInk
 
         private void BeginRightCancel()
         {
+            if (canvas != null && canvas.CancelColorPicker()) return;
             // Keep the overlay alive and capture the matching release, even if the pointer moves.
             rightCancelPending = true; Capture = true;
         }
@@ -313,6 +315,7 @@ namespace ShotInk
         {
             ready = true;
             canvas = new AnnotationCanvas(desktop.Clone(selection, desktop.PixelFormat)) { Location = selection.Location, Tool = DrawTool.None, Cursor = Cursors.SizeAll };
+            canvas.ColorPickerCancelled += delegate { toolbar.SelectTool(DrawTool.None); };
             canvas.MouseDown += delegate(object sender, MouseEventArgs e)
             {
                 if (e.Button == MouseButtons.Right) { BeginRightCancel(); return; }
@@ -326,7 +329,12 @@ namespace ShotInk
             Controls.Add(textSearch);
 #endif
             toolbar = new CaptureToolbar(settings);
-            toolbar.ToolChanged += delegate(DrawTool tool) { canvas.Tool = tool; canvas.Cursor = tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; SyncSettings(); canvas.Focus(); };
+            toolbar.ToolChanged += delegate(DrawTool tool)
+            {
+                bool updateEdges = tool == DrawTool.ColorPicker || canvas.Tool == DrawTool.ColorPicker;
+                canvas.Tool = tool; SyncSettings(); canvas.Focus();
+                if (updateEdges) UpdateSelectionChrome();
+            };
             toolbar.SettingsChanged += delegate { SyncSettings(); };
             toolbar.UndoClicked += delegate { canvas.Undo(); };
             toolbar.RedoClicked += delegate { canvas.Redo(); };
@@ -417,10 +425,11 @@ namespace ShotInk
             if (dragging) return;
             PositionVideoOptions();
             var points = SelectionGeometry.Handles(selection);
+            bool showHandles = ready && CanReframeSelection && scrollSession == null && gifSession == null && canvas.Tool != DrawTool.ColorPicker;
             for (int i = 0; i < edgeTargets.Length; i++)
             {
                 var edge = edgeTargets[i];
-                edge.Visible = ready && CanReframeSelection && scrollSession == null && gifSession == null;
+                edge.Visible = showHandles;
                 edge.BackColor = keyboardEdge == i * 2 + 1 ? Color.DarkOrange : Color.FromArgb(38, 139, 255);
                 edge.Bounds = i == 0 ? new Rectangle(selection.Left + 5, selection.Top - 1, Math.Max(1, selection.Width - 10), 2)
                     : i == 1 ? new Rectangle(selection.Right - 1, selection.Top + 5, 2, Math.Max(1, selection.Height - 10))
@@ -430,7 +439,7 @@ namespace ShotInk
             }
             for (int i = 0; i < grips.Length; i++)
             {
-                grips[i].Visible = ready && CanReframeSelection && scrollSession == null && gifSession == null;
+                grips[i].Visible = showHandles;
                 grips[i].Location = new Point(points[i].X - 4, points[i].Y - 4);
                 grips[i].BringToFront();
             }
@@ -508,6 +517,7 @@ namespace ShotInk
         {
             if (canvas != null && canvas.IsCropping && (keyData == Keys.Enter || keyData == Keys.Escape))
             { EndCrop(keyData == Keys.Enter); return true; }
+            if (keyData == Keys.Escape && canvas != null && canvas.CancelColorPicker()) return true;
             if (NudgeSelection(keyData)) return true;
             return base.ProcessCmdKey(ref msg, keyData);
         }

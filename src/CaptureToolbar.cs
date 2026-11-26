@@ -81,6 +81,9 @@ namespace ShotInk
             AddTool("highlight", "荧光笔", DrawTool.Highlight);
             AddTool("mosaic", "马赛克", DrawTool.Mosaic);
             AddTool("text", "文字：单击输入，拖边框移动，拖角点缩放，顶部手柄旋转，双击 / F2 编辑", DrawTool.Text);
+            AddTool("color-picker", "取色：左键复制 HEX 色值，Ctrl+左键逐行追加，右键退出", DrawTool.ColorPicker);
+            tools[DrawTool.ColorPicker].Name = "color-picker";
+            tools[DrawTool.ColorPicker].AccessibleName = "取色";
             AddTool("eraser", "橡皮擦：画笔 / 选框", DrawTool.Eraser);
             crop = Button("crop", "裁剪长截图：拖动四条边，点击完成", delegate { if (crop.Available && CropClicked != null) CropClicked(); });
             crop.Name = "crop-image";
@@ -153,7 +156,7 @@ namespace ShotInk
             cropActions.Visible = cropping;
             Width = cropping ? cropActions.Right + 4 : strip.Width + 16;
             if (cropping) { options.Hide(); textActions.Hide(); Height = 32; }
-            else { options.ShowTool(currentTool); Height = currentTool == DrawTool.None ? 30 : options.Bottom + 1; }
+            else { options.ShowTool(currentTool); Height = AnnotationOptions.HasOptions(currentTool) ? options.Bottom + 1 : 30; }
             if (LayoutChanged != null) LayoutChanged();
         }
         internal void SetLongPreview(bool enabled)
@@ -225,7 +228,7 @@ namespace ShotInk
                 var button = tools[tool] as ToolStripButton; if (button != null) button.Checked = true;
             }
             options.ShowTool(tool);
-            Height = tool == DrawTool.None ? 30 : options.Bottom + 1;
+            Height = AnnotationOptions.HasOptions(tool) ? options.Bottom + 1 : 30;
             if (ToolChanged != null) ToolChanged(tool);
             if (LayoutChanged != null) LayoutChanged();
         }
@@ -245,7 +248,7 @@ namespace ShotInk
             {
                 textSelection = false; if (recognize != null) recognize.Checked = false; textActions.Hide(); options.ShowTool(currentTool);
                 if (tools.ContainsKey(currentTool)) ((ToolStripButton)tools[currentTool]).Checked = true;
-                Height = currentTool == DrawTool.None ? 30 : options.Bottom + 1;
+                Height = AnnotationOptions.HasOptions(currentTool) ? options.Bottom + 1 : 30;
             }
             if (LayoutChanged != null) LayoutChanged();
 #endif
@@ -412,6 +415,11 @@ namespace ShotInk
                     case "blur-radius": case "mosaic-gaussian":
                         for (int i = 15; i >= 3; i -= 4) using (var haze = new SolidBrush(Color.FromArgb(65, color))) g.FillEllipse(haze, 10 - i / 2F, 10 - i / 2F, i, i); break;
                     case "mosaic-brush-size": case "eraser-brush-size": g.DrawEllipse(pen, 3, 3, 14, 14); g.FillEllipse(brush, 8, 8, 4, 4); break;
+                    case "color-picker":
+                        g.DrawLines(pen, new[] { new Point(10, 7), new Point(4, 13), new Point(3, 17), new Point(7, 16), new Point(13, 10) });
+                        g.DrawLine(pen, 9, 6, 14, 11);
+                        g.DrawBezier(pen, 11, 7, 17, -1, 21, 4, 13, 9);
+                        break;
                     case "custom-color":
                         using (var red = new SolidBrush(Color.Coral)) g.FillEllipse(red, 2, 2, 10, 10);
                         using (var blue = new SolidBrush(Color.DodgerBlue)) g.FillEllipse(blue, 8, 3, 10, 10);

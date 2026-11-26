@@ -51,6 +51,8 @@ namespace ShotInk
             var row = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             toolbar = new CaptureToolbar(settings) { Name = "gif-tools", Location = Point.Empty };
             toolbar.ConfigureForGif(clip.Recording != null);
+            viewport.MouseDown += delegate(object sender, MouseEventArgs e)
+            { if (e.Button == MouseButtons.Right && frameCanvas != null) frameCanvas.CancelColorPicker(); };
             scope = new GifScopeSelector { Name = "gif-tool-scope", Anchor = AnchorStyles.Top | AnchorStyles.Right };
             row.Controls.Add(toolbar); row.Controls.Add(scope);
             Action positionTools = delegate { scope.Location = new Point(Math.Max(toolbar.Right + 8, row.ClientSize.Width - scope.Width), 0); };
@@ -85,6 +87,7 @@ namespace ShotInk
             boundFrame = clip.Frames[frameIndex];
             var canvas = new AnnotationCanvas(boundFrame.DecodeOriginal()) { Name = "gif-frame-canvas", BackColor = viewport.BackColor };
             canvas.Marks.AddRange(boundFrame.Annotations.Select(mark => mark.Clone())); canvas.Tool = activeTool;
+            canvas.ColorPickerCancelled += delegate { toolbar.SelectTool(DrawTool.None); };
             frameCanvas = canvas; toolbar.ApplyTo(canvas); canvas.Changed += FrameAnnotationChanged;
 #if !SHOTINK_LITE
             canvas.TextSelectionChanged += delegate
@@ -176,6 +179,7 @@ namespace ShotInk
             if (toolbar.ContainsFocus && (keyData == Keys.Left || keyData == Keys.Right)) return false;
             if (frameCanvas != null)
             {
+                if (keyData == Keys.Escape && frameCanvas.CancelColorPicker()) return true;
                 var key = new KeyEventArgs(keyData);
                 if (frameCanvas.HandleGestureKey(key) || frameCanvas.HandleTextKey(key) || frameCanvas.HandleRecognitionKey(key))
                     return key.SuppressKeyPress || frameCanvas.EditingInlineText;

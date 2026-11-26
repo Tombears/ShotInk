@@ -45,6 +45,7 @@ namespace ShotInk
                 boundCanvas = canvas; canvas.TextAnnotationSelected += ReadTextSettings;
                 canvas.MosaicAnnotationSelected += ReadMosaicSettings;
             }
+            if (currentTool == DrawTool.ColorPicker) return;
             canvas.Ink = Ink; canvas.Stroke = Stroke;
             canvas.ApplyTextSettings(TextFontSize, TextFontStyle, Ink);
             canvas.MosaicMode = MosaicMode; canvas.EraserMode = EraserMode;
@@ -73,6 +74,8 @@ namespace ShotInk
             if (tool == DrawTool.Eraser) EraserMode = ApplyMode.Brush;
         }
 
+        internal static bool HasOptions(DrawTool tool) { return tool != DrawTool.None && tool != DrawTool.ColorPicker; }
+
         internal void ShowTool(DrawTool tool)
         {
             currentTool = tool;
@@ -96,7 +99,7 @@ namespace ShotInk
                 Slider("画笔大小", mosaic ? "mosaic-brush-size" : "eraser-brush-size", 4, 160, mosaic ? MosaicBrushSize : EraserBrushSize, mode == ApplyMode.Brush,
                     delegate(int value) { if (mosaic) MosaicBrushSize = value; else EraserBrushSize = value; NotifySettings(); });
             }
-            else if (tool != DrawTool.None)
+            else if (HasOptions(tool))
             {
                 if (tool == DrawTool.Text)
                 {
@@ -157,7 +160,7 @@ namespace ShotInk
                 }
             }
             Height = tool == DrawTool.Mosaic || tool == DrawTool.Eraser ? SliderAppearance.Height + 6 : 34;
-            Visible = tool != DrawTool.None;
+            Visible = HasOptions(tool);
             ResumeLayout();
         }
 

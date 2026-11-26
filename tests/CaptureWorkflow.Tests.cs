@@ -521,9 +521,87 @@ namespace ShotInk
             Console.WriteLine("PASS: small desktop pins keep the image dimensions on display, zoom and reset");
         }
 
+        internal static void ColorPicker(string previewPath = null)
+        {
+            var previousClipboard = Clipboard.GetDataObject();
+            var screen = Screen.PrimaryScreen.Bounds;
+            var bounds = new Rectangle(screen.X, screen.Y, 640, 480);
+            var bitmap = new Bitmap(bounds.Width, bounds.Height);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.FromArgb(31, 105, 150));
+                g.FillRectangle(Brushes.Coral, 88, 88, 22, 22);
+                g.FillRectangle(Brushes.MediumSeaGreen, 102, 100, 20, 20);
+            }
+            bitmap.SetPixel(100, 100, Color.FromArgb(18, 52, 86));
+            try
+            {
+                using (var overlay = new CaptureOverlay(false, bitmap, bounds))
+                {
+                    overlay.Show(); overlay.SelectRegion(new Rectangle(bounds.X + 40, bounds.Y + 40, 300, 250));
+                    var toolbar = Field<CaptureToolbar>(overlay, "toolbar");
+                    var canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                    var strip = Field<ToolStrip>(toolbar, "strip");
+                    var picker = (ToolStripButton)strip.Items["color-picker"];
+                    picker.PerformClick();
+                    Check(picker.Checked && toolbar.Height == 30 && canvas.Tool == DrawTool.ColorPicker, "Color picker toolbar entry did not enter sampling mode.");
+                    Check(canvas.Cursor.Handle != Cursors.Cross.Handle && canvas.Cursor.HotSpot == new Point(4, 27),
+                        "Color picker did not use an eyedropper with its tip as the cursor hotspot.");
+                    Check(!((Control)Field<Array>(overlay, "grips").GetValue(0)).Visible, "Resize grip blocked the source pixel at the corner.");
+                    Mouse(canvas, "OnMouseMove", 60, 60);
+                    var preview = Field<ColorPickerPreview>(canvas, "colorPreview");
+                    int radius = ColorPickerPreview.Radius;
+                    Check(preview.Visible && preview.Owner == overlay && preview.Pixels.GetPixel(radius, radius).ToArgb() == Color.FromArgb(18, 52, 86).ToArgb() &&
+                        preview.Pixels.GetPixel(radius - 1, radius).ToArgb() == Color.Coral.ToArgb() &&
+                        preview.Pixels.GetPixel(radius + 2, radius).ToArgb() == Color.MediumSeaGreen.ToArgb(),
+                        "Magnifier center or neighboring pixels did not match the screenshot.");
+                    Mouse(canvas, "OnMouseDown", 60, 60);
+                    Check(Clipboard.GetText() == "#123456" && picker.Checked && preview.Visible, "Left click did not copy HEX or keep sampling active.");
+                    Call(canvas, "PreviewColorAt", new Point(61, 60), true, true);
+                    Call(canvas, "PreviewColorAt", new Point(62, 60), true, true);
+                    Check(Clipboard.GetText() == string.Join(Environment.NewLine, "#123456", "#FF7F50", "#3CB371"),
+                        "Ctrl+click did not append each color on its own line in click order.");
+                    if (previewPath != null)
+                        using (var image = new Bitmap(preview.Width, preview.Height))
+                        { preview.DrawToBitmap(image, preview.ClientRectangle); image.Save(previewPath, ImageFormat.Png); }
+                    Mouse(canvas, "OnMouseDown", 60, 60);
+                    Check(Clipboard.GetText() == "#123456", "A plain left click did not reset the current color list.");
+                    Mouse(canvas, "OnMouseMove", 0, 0);
+                    Check(preview.Pixels.GetPixel(radius, radius).ToArgb() == Color.FromArgb(31, 105, 150).ToArgb() &&
+                        preview.Pixels.GetPixel(radius - 1, radius).A == 0, "Magnifier sampled beyond the image or shifted the center at the corner.");
+                    var edge = Message.Create(canvas.Handle, 0x201, new IntPtr(1), PackedPoint(Point.Empty));
+                    Check(!overlay.PreFilterMessage(ref edge), "Selection resize intercepted a color picker click.");
+                    Call(canvas, "OnMouseDown", new MouseEventArgs(MouseButtons.Right, 1, 0, 0, 0));
+                    Check(overlay.Visible && !preview.Visible && !picker.Checked && canvas.Tool == DrawTool.None && canvas.Cursor == Cursors.SizeAll && !canvas.CanUndo,
+                        "Right click closed the capture, left the picker active or added an annotation.");
+                    picker.PerformClick();
+                    Call(canvas, "PreviewColorAt", new Point(61, 60), true, true);
+                    Check(Clipboard.GetText() == "#FF7F50", "A new color picker session appended colors from the previous session.");
+                    canvas.CancelColorPicker();
+
+                    var document = new Bitmap(600, 500);
+                    document.SetPixel(61, 54, Color.Lime);
+                    overlay.ShowLongPreview(document);
+                    canvas = Field<AnnotationCanvas>(overlay, "canvas");
+                    canvas.ScrollDocumentHorizontal(28);
+                    canvas.ScrollDocument(20);
+                    canvas.BeginCrop();
+                    canvas.GetType().GetField("cropPreview", Private).SetValue(canvas, new Rectangle(20, 15, 560, 450));
+                    canvas.EndCrop(true);
+                    canvas.SetZoom(2);
+                    picker.PerformClick();
+                    Mouse(canvas, "OnMouseDown", 66, 68);
+                    Check(Clipboard.GetText() == "#00FF00", "Zoomed, scrolled, cropped long image copied the wrong source pixel.");
+                }
+            }
+            finally { if (previousClipboard != null) Clipboard.SetDataObject(previousClipboard, true, 5, 100); else Clipboard.Clear(); }
+            Console.WriteLine("PASS: color picker preview, corner sampling, single and multiline clipboard, right-click exit and long-image coordinates");
+        }
+
         internal static void Run()
         {
             CompactToolbar();
+            ColorPicker();
             using (var overlay = new CaptureOverlay(false, new Bitmap(900, 650), new Rectangle(0, 0, 900, 650)))
             {
                 overlay.EnableWindowSelection(new Rectangle[0]); overlay.Show(); Application.DoEvents();

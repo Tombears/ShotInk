@@ -8,7 +8,7 @@ using System.Windows.Forms;
 
 namespace ShotInk
 {
-    internal enum DrawTool { Rectangle, Ellipse, Arrow, Pen, Text, Mosaic, Highlight, Eraser, None, Line, Polyline, ArrowPolyline }
+    internal enum DrawTool { Rectangle, Ellipse, Arrow, Pen, Text, Mosaic, Highlight, Eraser, None, Line, Polyline, ArrowPolyline, ColorPicker }
     internal enum ApplyMode { Brush, Rectangle }
     internal enum MosaicEffect { Pixelate, GaussianBlur }
 
@@ -59,7 +59,13 @@ namespace ShotInk
         internal DrawTool Tool
         {
             get { return tool; }
-            set { CommitTextEdit(); CompletePolyline(); CancelMosaicTransform(); selectedMosaic = null; EndTextTransform(); selectedText = null; CancelGesture(); tool = value; ClearTextRecognition(); UpdateToolCursor(); }
+            set
+            {
+                CommitTextEdit(); CompletePolyline(); CancelMosaicTransform(); selectedMosaic = null; EndTextTransform(); selectedText = null;
+                CancelGesture(); HideColorPreview();
+                if (tool != value) copiedColors = "";
+                tool = value; ClearTextRecognition(); UpdateToolCursor();
+            }
         }
         internal ApplyMode MosaicMode = ApplyMode.Brush;
         internal ApplyMode EraserMode = ApplyMode.Brush;
@@ -87,7 +93,7 @@ namespace ShotInk
         internal void SetTextRecognition(OcrDocument document)
         {
             if (document.Width != ImageBounds.Width || document.Height != ImageBounds.Height) throw new InvalidOperationException("文字坐标与图片尺寸不匹配。");
-            CommitTextEdit(); selectedText = null; CancelGesture(); tool = DrawTool.None; recognition = new OcrSelectionModel(document); recognition.SelectAll(); UpdateToolCursor(); NotifyTextSelection();
+            CommitTextEdit(); selectedText = null; CancelGesture(); HideColorPreview(); tool = DrawTool.None; recognition = new OcrSelectionModel(document); recognition.SelectAll(); UpdateToolCursor(); NotifyTextSelection();
         }
         private void ClearTextRecognition()
         { if (recognition == null) return; recognition = null; selectingText = false; NotifyTextSelection(); }
@@ -140,6 +146,7 @@ namespace ShotInk
         internal void SetZoom(float value, Point anchor = default(Point))
         {
             CommitTextEdit();
+            HideColorPreview();
             float previousZoom = Zoom;
             Zoom = Math.Max(0.05F, Math.Min(3F, value));
             if (documentScroll == null)
@@ -153,6 +160,7 @@ namespace ShotInk
             if (documentScroll != null)
             {
                 NavigateDocument(e, ModifierKeys);
+                if (Tool == DrawTool.ColorPicker && !IsCropping) PreviewColorAt(e.Location, false);
                 var handled = e as HandledMouseEventArgs; if (handled != null) handled.Handled = true;
             }
             base.OnMouseWheel(e);
@@ -181,12 +189,24 @@ namespace ShotInk
         private bool BrushTool
         { get { return Tool == DrawTool.Mosaic && MosaicMode == ApplyMode.Brush || Tool == DrawTool.Eraser && EraserMode == ApplyMode.Brush; } }
         private float CurrentBrushSize { get { return Tool == DrawTool.Eraser ? EraserBrushSize : MosaicBrushSize; } }
-        internal void UpdateToolCursor() { Cursor = HasTextRecognition || Tool == DrawTool.Text ? Cursors.IBeam : Tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross; Invalidate(); }
+        internal void UpdateToolCursor()
+        {
+            if (HasTextRecognition || Tool == DrawTool.Text) Cursor = Cursors.IBeam;
+            else if (Tool == DrawTool.ColorPicker) Cursor = ColorPickerCursor.Value;
+            else Cursor = Tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross;
+            Invalidate();
+        }
         private void CancelGesture() { active = null; selectingText = false; Capture = false; Invalidate(); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (IsCropping) { CropMouseDown(e); return; }
+            if (Tool == DrawTool.ColorPicker)
+            {
+                if (e.Button == MouseButtons.Left) PreviewColorAt(e.Location, true, (ModifierKeys & Keys.Control) != 0);
+                else if (e.Button == MouseButtons.Right) CancelColorPicker();
+                return;
+            }
             if (MosaicMouseDown(e)) return;
             if (PolylineMouseDown(e)) return;
             if (e.Button == MouseButtons.Left && Tool == DrawTool.Text) { TextMouseDown(e); return; }
@@ -217,6 +237,7 @@ namespace ShotInk
         {
             base.OnMouseMove(e);
             if (IsCropping) { CropMouseMove(e.Location); return; }
+            if (Tool == DrawTool.ColorPicker) { PreviewColorAt(e.Location, false); return; }
             if (MosaicMouseMove(e)) return;
             if (Tool == DrawTool.Text) { TextMouseMove(e); return; }
             hoverPoint = ImagePoint(e.Location); hovering = true;
@@ -233,7 +254,7 @@ namespace ShotInk
             if (active != null || BrushTool) Invalidate();
         }
         protected override void OnMouseLeave(EventArgs e)
-        { base.OnMouseLeave(e); hovering = false; Invalidate(); }
+        { base.OnMouseLeave(e); hovering = false; HideColorPreview(); Invalidate(); }
         protected override void OnMouseCaptureChanged(EventArgs e)
         {
             base.OnMouseCaptureChanged(e);
@@ -271,7 +292,7 @@ namespace ShotInk
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
-            if (IsCropping) return;
+            if (IsCropping || Tool == DrawTool.ColorPicker) return;
             base.OnMouseDoubleClick(e);
             if (Tool == DrawTool.Text && e.Button == MouseButtons.Left && selectedText != null) BeginTextEdit(selectedText);
 #if !SHOTINK_LITE
@@ -318,7 +339,7 @@ namespace ShotInk
                 for (int i = 0; i < mark.Points.Count; i++) mark.Points[i] = new PointF(mark.Points[i].X + shift.X, mark.Points[i].Y + shift.Y);
             ClearMosaicCache(); var previous = Image; Image = image; previous.Dispose(); SetZoom(Zoom);
         }
-        private void NotifyChanged() { Revision++; ClearTextRecognition(); Invalidate(); if (Changed != null) Changed(); }
+        private void NotifyChanged() { Revision++; ClearTextRecognition(); HideColorPreview(); Invalidate(); if (Changed != null) Changed(); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -386,7 +407,17 @@ namespace ShotInk
         internal void DrawAnnotations(Graphics graphics)
         { graphics.SmoothingMode = SmoothingMode.AntiAlias; foreach (var mark in Marks) DrawMark(graphics, mark); }
 
-        protected override void Dispose(bool disposing) { if (disposing) { ClearMosaicCache(); if (textEditorFont != null) { textEditorFont.Dispose(); textEditorFont = null; } Image.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (colorPreview != null) { colorPreview.Dispose(); colorPreview = null; }
+                ClearMosaicCache();
+                if (textEditorFont != null) { textEditorFont.Dispose(); textEditorFont = null; }
+                Image.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 
     internal sealed class EditorForm : Form
@@ -395,7 +426,7 @@ namespace ShotInk
         private readonly Panel viewport;
         private readonly Label status;
         private readonly Label zoomLabel;
-        private readonly List<Button> toolButtons = new List<Button>();
+        private readonly Dictionary<DrawTool, SkinButton> toolButtons = new Dictionary<DrawTool, SkinButton>();
         private readonly AnnotationOptions toolOptions;
         private readonly Panel toolArea;
 #if !SHOTINK_LITE
@@ -428,11 +459,9 @@ namespace ShotInk
             string[] labels = { "矩形", "椭圆", "箭头", "画笔", "文字", "马赛克", "荧光笔", "橡皮擦" };
             for (int i = 0; i < labels.Length; i++)
             {
-                var selectedTool = (DrawTool)i;
-                var button = Theme.Button(labels[i], i == 0, 69);
-                button.Click += delegate { toolOptions.UseDefaultMode(selectedTool); SelectTool(selectedTool); };
-                toolButtons.Add(button); tools.Controls.Add(button);
+                AddToolButton(tools, labels[i], (DrawTool)i);
             }
+            AddToolButton(tools, "取色", DrawTool.ColorPicker);
 #if !SHOTINK_LITE
             var recognize = Theme.Button("文字识别", false, 88);
             recognize.Click += async delegate { await recognition.RecognizeAsync(); };
@@ -450,6 +479,8 @@ namespace ShotInk
             AddButton(tools, "适应宽度", false, 95, delegate { Fit(); });
             viewport = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20), BackColor = Color.FromArgb(229, 233, 241) };
             canvas = new AnnotationCanvas(image) { Location = new Point(20, 20) };
+            canvas.ColorPickerCancelled += delegate { SelectTool(DrawTool.None); };
+            viewport.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Right) canvas.CancelColorPicker(); };
             canvas.Changed += delegate { dirty = true; UpdateStatus("已编辑"); };
             viewport.Controls.Add(canvas);
 #if !SHOTINK_LITE
@@ -498,6 +529,13 @@ namespace ShotInk
 
         private void AddButton(FlowLayoutPanel panel, string text, bool primary, int width, Action action)
         { var b = Theme.Button(text, primary, width); b.Click += delegate { action(); }; panel.Controls.Add(b); }
+        private void AddToolButton(FlowLayoutPanel panel, string label, DrawTool tool)
+        {
+            var button = (SkinButton)Theme.Button(label, false, 69);
+            button.Click += delegate { toolOptions.UseDefaultMode(tool); SelectTool(tool); };
+            toolButtons.Add(tool, button);
+            panel.Controls.Add(button);
+        }
 #if !SHOTINK_LITE
         private void PositionSearch()
         { textSearch.Location = new Point(viewport.Left + Math.Max(8, viewport.ClientSize.Width - textSearch.Width - 8), viewport.Top + 8); textSearch.BringToFront(); }
@@ -509,12 +547,13 @@ namespace ShotInk
             textActions.Hide();
 #endif
             toolOptions.ShowTool(tool); toolOptions.ApplyTo(canvas);
-            toolArea.Height = 110 + toolOptions.Height;
-            for (int i = 0; i < toolButtons.Count; i++)
+            toolArea.Height = AnnotationOptions.HasOptions(tool) ? 110 + toolOptions.Height : 110;
+            foreach (var pair in toolButtons)
             {
-                bool chosen = i == (int)tool || (tool == DrawTool.Line || tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline) && i == (int)DrawTool.Arrow;
-                ((SkinButton)toolButtons[i]).Primary = chosen;
-                toolButtons[i].BackColor = chosen ? ToolAppearance.Accent((DrawTool)i) : Color.White; toolButtons[i].ForeColor = chosen ? Color.White : Theme.Ink;
+                bool chosen = pair.Key == tool || (tool == DrawTool.Line || tool == DrawTool.Polyline || tool == DrawTool.ArrowPolyline) && pair.Key == DrawTool.Arrow;
+                pair.Value.Primary = chosen;
+                pair.Value.BackColor = chosen ? ToolAppearance.Accent(pair.Key) : Color.White;
+                pair.Value.ForeColor = chosen ? Color.White : Theme.Ink;
             }
             canvas.Focus();
         }
@@ -541,6 +580,7 @@ namespace ShotInk
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (e.KeyCode == Keys.Escape && canvas.CancelColorPicker()) { e.SuppressKeyPress = true; return; }
 #if !SHOTINK_LITE
             if (textSearch.HandleKey(e)) return;
 #endif

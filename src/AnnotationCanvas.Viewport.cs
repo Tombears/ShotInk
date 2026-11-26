@@ -16,8 +16,8 @@ namespace ShotInk
             documentFrame = frame;
             documentScroll = new VScrollBar { Name = "long-image-scrollbar" };
             documentHorizontal = new HScrollBar { Name = "long-image-horizontal-scrollbar" };
-            documentScroll.ValueChanged += delegate { DocumentOffsetY = documentScroll.Value / Zoom; Invalidate(); };
-            documentHorizontal.ValueChanged += delegate { DocumentOffsetX = documentHorizontal.Value / Zoom; Invalidate(); };
+            documentScroll.ValueChanged += delegate { DocumentOffsetY = documentScroll.Value / Zoom; HideColorPreview(); Invalidate(); };
+            documentHorizontal.ValueChanged += delegate { DocumentOffsetX = documentHorizontal.Value / Zoom; HideColorPreview(); Invalidate(); };
             Controls.Add(documentScroll); Controls.Add(documentHorizontal);
             // Keep the screenshot's pixels intact; scrollbars must never shrink the document.
             SetZoom(1);

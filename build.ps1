@@ -37,6 +37,7 @@ $references += '/r:' + (Join-Path $buildRoot 'NAudio.dll')
 $references += @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll') | ForEach-Object { '/r:' + (Join-Path $buildRoot $_) }
 $skinResources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'assets\skins') -Filter '*.png' | ForEach-Object { '/resource:' + $_.FullName + ',ShotInk.Skins.' + $_.Name })
 $common = @('/nologo', '/utf8output', '/codepage:65001', '/optimize+', '/platform:anycpu', '/warn:4') + $references + $skinResources
+$common += '/resource:' + (Join-Path $projectRoot 'assets\color-picker.cur') + ',ShotInk.ColorPickerCursor'
 if ($Lite) { $common += '/define:SHOTINK_LITE' }
 $appPath = Join-Path $distRoot 'ShotInk.exe'
 & $compiler @common '/target:winexe' ('/out:' + $appPath) ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest')) ('/win32icon:' + (Join-Path $projectRoot 'assets\shotink.ico')) ('/resource:' + (Join-Path $projectRoot 'assets\shotink.ico') + ',ShotInk.ApplicationIcon') @sources

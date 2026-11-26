@@ -115,6 +115,7 @@ namespace ShotInk
         {
             var previous = canvas;
             var next = new AnnotationCanvas(image) { Tool = DrawTool.None };
+            next.ColorPickerCancelled += delegate { toolbar.SelectTool(DrawTool.None); };
             foreach (var mark in previous.Marks) next.Marks.Add(mark.Clone());
             longViewport = new LongImageViewport { Name = "long-image-viewport", Bounds = selection, BackColor = Color.White };
             next.UseDocumentViewport(selection.Size);

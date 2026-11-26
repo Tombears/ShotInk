@@ -56,6 +56,7 @@ namespace ShotInk
                 case DrawTool.Mosaic: return Accent("mosaic");
                 case DrawTool.Text: return Accent("text");
                 case DrawTool.Eraser: return Accent("eraser");
+                case DrawTool.ColorPicker: return Accent("color-picker");
                 default: return Accent("move");
             }
         }
@@ -67,7 +68,7 @@ namespace ShotInk
         {
             switch (name)
             {
-                case "shape": case "copy": return Color.FromArgb(47, 111, 220);
+                case "shape": case "copy": case "color-picker": return Color.FromArgb(47, 111, 220);
                 case "arrow": return Color.FromArgb(194, 101, 29);
                 case "pen": return Color.FromArgb(211, 71, 87);
                 case "highlight": return Color.FromArgb(157, 117, 12);
