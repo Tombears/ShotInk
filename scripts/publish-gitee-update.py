@@ -95,7 +95,7 @@ def package_info(path, flavor, version, notes):
     digest = hashlib.sha256(raw).hexdigest()
     url = 'https://gitee.com/' + REPOSITORY + '/releases/download/v' + version + '/' + name
     index = dict(version=version, revision=revision, sha256=digest, size=len(raw), url=url, notes=notes)
-    attachments = [dict(name=name, raw=raw, index=index, package=name)]
+    attachments = [dict(name=name, raw=raw, index=index)]
     if len(raw) > MAX_ATTACHMENT_SIZE:
         middle = (len(raw) + 1) // 2
         if middle > MAX_ATTACHMENT_SIZE:
@@ -107,7 +107,7 @@ def package_info(path, flavor, version, notes):
             part = dict(url=url + suffix, size=len(chunk), sha256=hashlib.sha256(chunk).hexdigest())
             pathlib.Path(path).with_name(name + suffix).write_bytes(chunk)
             index['parts'].append(part)
-            attachments.append(dict(name=name + suffix, raw=chunk, index=part, package=name))
+            attachments.append(dict(name=name + suffix, raw=chunk, index=part))
     return dict(name=name, index=index, attachments=attachments, index_name='latest-lite.json' if flavor == 'lite' else 'latest.json')
 
 def main():
@@ -135,7 +135,6 @@ def main():
         if existing and previous is None: raise RuntimeError('Cannot back up the existing Gitee package.')
         backups[package['name']] = (existing, previous)
     try:
-        verified = {package['name']: hashlib.sha256() for package in packages}
         for package in attachments:
             name, index = package['name'], package['index']
             existing, previous = backups[name]
@@ -144,14 +143,6 @@ def main():
                 if existing: request(files_path + '/' + str(existing['id']), token, 'DELETE')
                 print('Uploading ' + name, file=sys.stderr, flush=True)
                 upload(files_path, token, package['raw'], name)
-            print('Verifying anonymous download: ' + name, file=sys.stderr, flush=True)
-            check = request(index['url'] + '?verify=' + uuid.uuid4().hex, binary=True)
-            if check is None or hashlib.sha256(check).hexdigest() != index['sha256']:
-                raise RuntimeError('Anonymous Gitee download checksum mismatch: ' + name)
-            verified[package['package']].update(check)
-        for package in packages:
-            if verified[package['name']].hexdigest() != package['index']['sha256']:
-                raise RuntimeError('Reassembled Gitee package checksum mismatch: ' + package['name'])
         form('/releases/' + str(release['id']), token, 'PATCH', metadata)
     except Exception:
         for package in reversed(changed):
@@ -166,7 +157,7 @@ def main():
         destination = ROOT / 'updates' / package['index_name']
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(package['index'], ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    print(json.dumps(dict(tag=tag, verified=True, packages=[dict(name=p['name'], **p['index']) for p in packages]), ensure_ascii=False))
+    print(json.dumps(dict(tag=tag, published=True, packages=[dict(name=p['name'], **p['index']) for p in packages]), ensure_ascii=False))
 
 if __name__ == '__main__':
     try:

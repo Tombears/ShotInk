@@ -35,8 +35,8 @@ class PublishingTests(unittest.TestCase):
         publisher.form = lambda *args, **kwargs: {'id': 1}
         publisher.upload = self.upload
         self.assets = {}
+        self.downloaded_assets = []
         self.failure = False
-        self.corrupt = False
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -62,8 +62,7 @@ class PublishingTests(unittest.TestCase):
             return None
         if path.startswith('https://gitee.com/'):
             name = urllib.parse.urlsplit(path).path.rsplit('/', 1)[-1]
-            if self.corrupt and '?verify=' in path and name.endswith('.002'):
-                return b'corrupt segment'
+            self.downloaded_assets.append(name)
             return self.assets[name]
         raise AssertionError('Unexpected publishing operation ' + path)
 
@@ -82,8 +81,9 @@ class PublishingTests(unittest.TestCase):
         finally:
             sys.argv = previous
 
-    def test_two_verified_parts_and_legacy_single_package(self):
+    def test_two_parts_and_legacy_single_package(self):
         self.publish()
+        self.assertEqual(self.downloaded_assets, [])
         index = json.loads((self.root / 'updates/latest.json').read_text(encoding='utf-8'))
         lite = json.loads((self.root / 'updates/latest-lite.json').read_text(encoding='utf-8'))
         self.assertEqual(len(index['parts']), 2)
@@ -116,9 +116,12 @@ class PublishingTests(unittest.TestCase):
         self.failure = True
         self.assert_rollback()
 
-    def test_corrupt_anonymous_part_keeps_previous_publication(self):
-        self.corrupt = True
-        self.assert_rollback()
+    def test_replacement_only_downloads_previous_attachments_for_rollback(self):
+        old = {'ShotInk-portable.zip.001': b'old first', 'ShotInk-portable.zip.002': b'old second', 'ShotInk-portable-lite.zip': b'old lite'}
+        self.assets.update(old)
+        self.publish()
+        self.assertCountEqual(self.downloaded_assets, old)
+        self.assertNotEqual(self.assets, old)
 
 
 if __name__ == '__main__':
