@@ -61,7 +61,6 @@ namespace ShotInk
             ShowInTaskbar = false;
             SetStyle(ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
             KeyPreview = true;
-            Cursor = Cursors.Cross;
             sizeHint = new Label { AutoSize = true, ForeColor = Color.White, BackColor = Color.FromArgb(25, 28, 33),
                 Font = new Font("Consolas", 10), Padding = new Padding(4, 2, 4, 2), Visible = false };
             Controls.Add(sizeHint);
@@ -204,6 +203,7 @@ namespace ShotInk
             edgeHold.Stop(); keyboardEdge = -1;
             if (handle >= 0 && handle % 2 == 1) edgeHold.Start();
             anchor = location; dragOriginal = selection; dragMode = handle; dragging = true;
+            Cursor = handle < 0 ? ToolCursors.For(DrawTool.None) : HandleCursor(handle);
             if (longViewport != null)
             {
                 ClearLongDragPreview();
@@ -269,6 +269,7 @@ namespace ShotInk
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, e.X, e.Y, 0));
             keyboardEdge = -1;
             dragging = false; Capture = false;
+            Cursor = SelectionCursor;
             if (longViewport == null && (selection.Width < 8 || selection.Height < 8)) { ClearSelection(); Invalidate(); return; }
             if (!ready) PrepareEditor();
             else if (canvas != null)
@@ -314,7 +315,7 @@ namespace ShotInk
         private void PrepareEditor()
         {
             ready = true;
-            canvas = new AnnotationCanvas(desktop.Clone(selection, desktop.PixelFormat)) { Location = selection.Location, Tool = DrawTool.None, Cursor = Cursors.SizeAll };
+            canvas = new AnnotationCanvas(desktop.Clone(selection, desktop.PixelFormat)) { Location = selection.Location, Tool = DrawTool.None };
             canvas.ColorPickerCancelled += delegate { toolbar.SelectTool(DrawTool.None); };
             canvas.MouseDown += delegate(object sender, MouseEventArgs e)
             {
@@ -454,6 +455,7 @@ namespace ShotInk
                 edgeHold.Stop();
                 keyboardEdge = -1;
                 dragging = false;
+                Cursor = SelectionCursor;
                 if (ready)
                 {
                     selection = dragOriginal;

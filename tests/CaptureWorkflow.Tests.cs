@@ -545,11 +545,12 @@ namespace ShotInk
                     var picker = (ToolStripButton)strip.Items["color-picker"];
                     picker.PerformClick();
                     Check(picker.Checked && toolbar.Height == 30 && canvas.Tool == DrawTool.ColorPicker, "Color picker toolbar entry did not enter sampling mode.");
-                    Check(canvas.Cursor.Handle != Cursors.Cross.Handle && canvas.Cursor.HotSpot == new Point(4, 27),
-                        "Color picker did not use an eyedropper with its tip as the cursor hotspot.");
+                    Check(canvas.Cursor.Handle != Cursors.Cross.Handle && canvas.Cursor.HotSpot == new Point(5, 27),
+                        "Color picker did not align the sampling pen tip with the cursor hotspot.");
                     Check(!((Control)Field<Array>(overlay, "grips").GetValue(0)).Visible, "Resize grip blocked the source pixel at the corner.");
                     Mouse(canvas, "OnMouseMove", 60, 60);
                     var preview = Field<ColorPickerPreview>(canvas, "colorPreview");
+                    var firstCursor = canvas.Cursor;
                     int radius = ColorPickerPreview.Radius;
                     Check(preview.Visible && preview.Owner == overlay && preview.Pixels.GetPixel(radius, radius).ToArgb() == Color.FromArgb(18, 52, 86).ToArgb() &&
                         preview.Pixels.GetPixel(radius - 1, radius).ToArgb() == Color.Coral.ToArgb() &&
@@ -558,12 +559,21 @@ namespace ShotInk
                     Mouse(canvas, "OnMouseDown", 60, 60);
                     Check(Clipboard.GetText() == "#123456" && picker.Checked && preview.Visible, "Left click did not copy HEX or keep sampling active.");
                     Call(canvas, "PreviewColorAt", new Point(61, 60), true, true);
+                    Check(!ReferenceEquals(canvas.Cursor, firstCursor) && canvas.Cursor.HotSpot == new Point(5, 27),
+                        "Sampling a new color did not refresh the pen or moved its tip.");
+                    var coralCursor = canvas.Cursor;
+                    Mouse(canvas, "OnMouseMove", 61, 60);
+                    Check(ReferenceEquals(canvas.Cursor, coralCursor), "Hovering over the same color rebuilt the pen.");
                     Call(canvas, "PreviewColorAt", new Point(62, 60), true, true);
                     Check(Clipboard.GetText() == string.Join(Environment.NewLine, "#123456", "#FF7F50", "#3CB371"),
                         "Ctrl+click did not append each color on its own line in click order.");
-                    if (previewPath != null)
-                        using (var image = new Bitmap(preview.Width, preview.Height))
-                        { preview.DrawToBitmap(image, preview.ClientRectangle); image.Save(previewPath, ImageFormat.Png); }
+                    using (var image = preview.RenderPreview())
+                    {
+                        Check(image.GetPixel(0, 0).A == 0 && image.GetPixel(image.Width / 2, image.Height / 3).A == 255 &&
+                            image.GetPixel(image.Width / 2, image.Height * 86 / 100).A == 255,
+                            "Lens and color capsule did not render as a transparent circular overlay.");
+                        if (previewPath != null) image.Save(previewPath, ImageFormat.Png);
+                    }
                     Mouse(canvas, "OnMouseDown", 60, 60);
                     Check(Clipboard.GetText() == "#123456", "A plain left click did not reset the current color list.");
                     Mouse(canvas, "OnMouseMove", 0, 0);
@@ -572,7 +582,7 @@ namespace ShotInk
                     var edge = Message.Create(canvas.Handle, 0x201, new IntPtr(1), PackedPoint(Point.Empty));
                     Check(!overlay.PreFilterMessage(ref edge), "Selection resize intercepted a color picker click.");
                     Call(canvas, "OnMouseDown", new MouseEventArgs(MouseButtons.Right, 1, 0, 0, 0));
-                    Check(overlay.Visible && !preview.Visible && !picker.Checked && canvas.Tool == DrawTool.None && canvas.Cursor == Cursors.SizeAll && !canvas.CanUndo,
+                    Check(overlay.Visible && !preview.Visible && !picker.Checked && canvas.Tool == DrawTool.None && canvas.Cursor == ToolCursors.For(DrawTool.None) && !canvas.CanUndo,
                         "Right click closed the capture, left the picker active or added an annotation.");
                     picker.PerformClick();
                     Call(canvas, "PreviewColorAt", new Point(61, 60), true, true);
@@ -598,9 +608,31 @@ namespace ShotInk
             Console.WriteLine("PASS: color picker preview, corner sampling, single and multiline clipboard, right-click exit and long-image coordinates");
         }
 
+        internal static void AnnotationCursors()
+        {
+            using (var canvas = new AnnotationCanvas(new Bitmap(80, 80)))
+            {
+                var tools = new[] { DrawTool.Rectangle, DrawTool.Ellipse, DrawTool.Arrow, DrawTool.Line, DrawTool.Polyline,
+                    DrawTool.ArrowPolyline, DrawTool.Pen, DrawTool.Highlight, DrawTool.Mosaic, DrawTool.Eraser, DrawTool.Text, DrawTool.None };
+                var handles = new System.Collections.Generic.HashSet<IntPtr>();
+                foreach (var tool in tools)
+                {
+                    canvas.Tool = tool;
+                    Check(canvas.Cursor == ToolCursors.For(tool) && handles.Add(canvas.Cursor.Handle),
+                        "Annotation tool did not use its own cursor: " + tool);
+                }
+                canvas.Tool = DrawTool.Mosaic;
+                canvas.MosaicEffect = MosaicEffect.GaussianBlur;
+                canvas.UpdateToolCursor();
+                Check(canvas.Cursor == ToolCursors.For(DrawTool.Mosaic, true) && handles.Add(canvas.Cursor.Handle),
+                    "Gaussian blur shared the mosaic pixelation cursor.");
+            }
+        }
+
         internal static void Run()
         {
             CompactToolbar();
+            AnnotationCursors();
             ColorPicker();
             using (var overlay = new CaptureOverlay(false, new Bitmap(900, 650), new Rectangle(0, 0, 900, 650)))
             {

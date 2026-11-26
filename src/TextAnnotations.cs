@@ -274,7 +274,7 @@ namespace ShotInk
             if (textHandle == -2 || selectedText == null)
             {
                 int hit = HitTextHandle(point);
-                Cursor = hit == 4 ? Cursors.Hand : hit >= 0 ? Cursors.SizeNWSE : hit == -1 ? Cursors.SizeAll : Cursors.IBeam;
+                Cursor = hit == 4 ? Cursors.Hand : hit >= 0 ? Cursors.SizeNWSE : hit == -1 ? ToolCursors.For(DrawTool.None) : ToolCursors.For(DrawTool.Text);
                 return;
             }
             if (!textTransformed && Distance(point, transformAnchor) < 2 / Zoom) return;

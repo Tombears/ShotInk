@@ -24,7 +24,7 @@ namespace ShotInk
             Tool = Tool;
             Revision++; // Invalidate OCR requests started before entering crop mode.
             cropPreview = ImageBounds;
-            Cursor = Cursors.Default;
+            Cursor = ToolCursors.Get("crop");
             Focus();
             Invalidate();
         }
@@ -109,7 +109,7 @@ namespace ShotInk
             int handle = cropHandle;
             Rectangle visible;
             if (handle < 0 && VisibleCropFrame(CropClientBounds(cropPreview), out visible)) handle = CropHandleAt(location, visible);
-            Cursor = handle < 0 ? Cursors.Default : handle == 1 || handle == 5 ? Cursors.SizeNS : Cursors.SizeWE;
+            Cursor = handle < 0 ? ToolCursors.Get("crop") : handle == 1 || handle == 5 ? Cursors.SizeNS : Cursors.SizeWE;
             if (cropHandle < 0) return;
             bool horizontal = cropHandle == 1 || cropHandle == 5;
             float movement = horizontal ? (location.Y - cropAnchor.Y) / Zoom + DocumentOffsetY - cropAnchorOffsetY

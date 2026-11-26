@@ -63,7 +63,7 @@ namespace ShotInk
                 Invalidate(); return true;
             }
             int hit = HitMosaic(point);
-            Cursor = hit >= 0 ? MosaicHandleCursor(hit) : hit == -1 ? Cursors.SizeAll : Cursors.Cross;
+            Cursor = hit >= 0 ? MosaicHandleCursor(hit) : hit == -1 ? ToolCursors.For(DrawTool.None) : ToolCursors.For(Tool, MosaicEffect == MosaicEffect.GaussianBlur);
             return false;
         }
         private static Cursor MosaicHandleCursor(int handle)

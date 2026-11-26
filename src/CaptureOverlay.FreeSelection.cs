@@ -15,10 +15,12 @@ namespace ShotInk
         private double freeDistance;
         private Rectangle freeDamage;
         private SelectionModePicker modePicker;
+        private Cursor SelectionCursor { get { return freeSelectionMode ? ToolCursors.Get("lasso") : ToolCursors.For(DrawTool.Rectangle); } }
         private void SetupSelectionModes()
         {
             modePicker = new SelectionModePicker();
             freeSelectionMode = !scrolling && settings.FreeSelectionMode;
+            Cursor = SelectionCursor;
             modePicker.SetMode(freeSelectionMode);
             modePicker.ModeChanged += SetSelectionMode;
             var work = Screen.FromPoint(Cursor.Position).WorkingArea; work.Offset(-screenBounds.X, -screenBounds.Y);
@@ -29,6 +31,7 @@ namespace ShotInk
         {
             if (videoMode || scrolling || scrollSession != null || gifSession != null || longViewport != null) return;
             ClearSelection(); freeSelectionMode = free;
+            Cursor = SelectionCursor;
             if (settings.FreeSelectionMode != free) { settings.FreeSelectionMode = free; settings.NotifyChanged(); }
             modePicker.SetMode(free); modePicker.Show(); modePicker.BringToFront();
             Focus(); Invalidate(true);

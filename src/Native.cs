@@ -32,6 +32,17 @@ namespace ShotInk
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AlphaBlend
+        {
+            internal byte Operation, Flags, Opacity, Format;
+        }
+        [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr window, IntPtr targetDc,
+            ref Point destination, ref Size size, IntPtr sourceDc, ref Point source, int colorKey, ref AlphaBlend blend, int flags);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr handle);
+        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr handle);
         [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
         [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, int message, IntPtr word, IntPtr value);
         [DllImport("dwmapi.dll")] private static extern int DwmFlush();
@@ -64,6 +75,29 @@ namespace ShotInk
         internal static bool PostWheel(IntPtr window, Point point, int delta)
         { return PostMessage(window, 0x020A, new IntPtr(unchecked(delta << 16)), new IntPtr(unchecked((point.Y << 16) | (point.X & 0xFFFF)))); }
         internal static void RaiseWithoutActivation(IntPtr window) { SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x13); }
+        internal static bool PresentLayer(IntPtr window, Bitmap image, Point location)
+        {
+            var dc = CreateCompatibleDC(IntPtr.Zero);
+            if (dc == IntPtr.Zero) return false;
+            try
+            {
+                var bitmap = image.GetHbitmap(Color.Transparent);
+                try
+                {
+                    var previous = SelectObject(dc, bitmap);
+                    try
+                    {
+                        var source = Point.Empty;
+                        var size = image.Size;
+                        var blend = new AlphaBlend { Opacity = 255, Format = 1 };
+                        return UpdateLayeredWindow(window, IntPtr.Zero, ref location, ref size, dc, ref source, 0, ref blend, 2);
+                    }
+                    finally { SelectObject(dc, previous); }
+                }
+                finally { DeleteObject(bitmap); }
+            }
+            finally { DeleteDC(dc); }
+        }
         internal static bool ExcludeFromCapture(IntPtr window, bool excluded)
         { try { return SetWindowDisplayAffinity(window, excluded ? 0x11U : 0U); } catch (EntryPointNotFoundException) { return false; } }
 

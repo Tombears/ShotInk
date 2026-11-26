@@ -19,8 +19,8 @@ function Get-ShotInkBuildSignature {
     if (Test-Path -LiteralPath $skins) { $inputs += @(Get-ChildItem -LiteralPath $skins -Filter '*.png' | ForEach-Object { 'assets\skins\' + $_.Name }) }
     $icon = Join-Path $ProjectRoot 'assets\shotink.ico'
     if (Test-Path -LiteralPath $icon) { $inputs += 'assets\shotink.ico' }
-    $cursor = Join-Path $ProjectRoot 'assets\color-picker.cur'
-    if (Test-Path -LiteralPath $cursor) { $inputs += 'assets\color-picker.cur' }
+    $cursors = Join-Path $ProjectRoot 'assets\cursors'
+    if (Test-Path -LiteralPath $cursors) { $inputs += @(Get-ChildItem -LiteralPath $cursors -Filter '*.cur' | ForEach-Object { 'assets\cursors\' + $_.Name }) }
     $hashes = foreach ($relative in ($inputs | Sort-Object)) {
         $digest = Get-FileHash -LiteralPath (Join-Path $ProjectRoot $relative) -Algorithm SHA256
         $relative + ':' + $digest.Hash

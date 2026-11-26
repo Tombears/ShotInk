@@ -138,7 +138,7 @@ namespace ShotInk
         {
             Image = image;
             DoubleBuffered = true;
-            Cursor = Cursors.Cross;
+            UpdateToolCursor();
             BackColor = Color.White;
             SetZoom(1);
         }
@@ -191,9 +191,12 @@ namespace ShotInk
         private float CurrentBrushSize { get { return Tool == DrawTool.Eraser ? EraserBrushSize : MosaicBrushSize; } }
         internal void UpdateToolCursor()
         {
-            if (HasTextRecognition || Tool == DrawTool.Text) Cursor = Cursors.IBeam;
-            else if (Tool == DrawTool.ColorPicker) Cursor = ColorPickerCursor.Value;
-            else Cursor = Tool == DrawTool.None ? Cursors.SizeAll : Cursors.Cross;
+            if (Tool == DrawTool.ColorPicker) SetSamplingCursor(samplingCursorColor);
+            else
+            {
+                Cursor = HasTextRecognition ? ToolCursors.Get("ocr") : ToolCursors.For(Tool, MosaicEffect == MosaicEffect.GaussianBlur);
+                DisposeSamplingCursor();
+            }
             Invalidate();
         }
         private void CancelGesture() { active = null; selectingText = false; Capture = false; Invalidate(); }
@@ -412,6 +415,7 @@ namespace ShotInk
             if (disposing)
             {
                 if (colorPreview != null) { colorPreview.Dispose(); colorPreview = null; }
+                DisposeSamplingCursor();
                 ClearMosaicCache();
                 if (textEditorFont != null) { textEditorFont.Dispose(); textEditorFont = null; }
                 Image.Dispose();

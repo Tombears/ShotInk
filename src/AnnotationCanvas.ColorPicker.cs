@@ -1,6 +1,8 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -8,14 +10,28 @@ namespace ShotInk
 {
     internal sealed partial class AnnotationCanvas
     {
-        private static readonly Lazy<Cursor> ColorPickerCursor = new Lazy<Cursor>(delegate
-        {
-            using (var stream = typeof(AnnotationCanvas).Assembly.GetManifestResourceStream("ShotInk.ColorPickerCursor"))
-                return new Cursor(stream);
-        });
         private ColorPickerPreview colorPreview;
+        private Cursor samplingCursor;
+        private Color samplingCursorColor = Color.FromArgb(91, 127, 242);
         private string copiedColors = "";
         internal event Action ColorPickerCancelled;
+
+        private void SetSamplingCursor(Color color)
+        {
+            if (samplingCursor != null && samplingCursorColor.ToArgb() == color.ToArgb()) return;
+            var previous = samplingCursor;
+            samplingCursor = ToolCursors.CreateSamplingPen(color);
+            samplingCursorColor = color;
+            Cursor = samplingCursor;
+            if (previous != null) previous.Dispose();
+        }
+
+        private void DisposeSamplingCursor()
+        {
+            if (samplingCursor == null) return;
+            samplingCursor.Dispose();
+            samplingCursor = null;
+        }
 
         internal bool CancelColorPicker()
         {
@@ -45,6 +61,7 @@ namespace ShotInk
             if (colorPreview == null) colorPreview = new ColorPickerPreview();
             RenderColorSample(colorPreview.Pixels, point);
             var color = colorPreview.Pixels.GetPixel(ColorPickerPreview.Radius, ColorPickerPreview.Radius);
+            SetSamplingCursor(color);
             string hex = string.Format("#{0:X2}{1:X2}{2:X2}", color.R, color.G, color.B);
             string feedback = "";
             if (copy)
@@ -99,10 +116,15 @@ namespace ShotInk
     {
         internal const int Radius = 5;
         private const int SampleSize = Radius * 2 + 1;
+        private const int LensSize = 108;
+        private const int CapsuleWidth = 108;
+        private const int WidthAt96Dpi = 120;
+        private const int HeightAt96Dpi = 150;
+        private const int LensLeft = (WidthAt96Dpi - LensSize) / 2;
+        private static readonly Font HexFont = new Font("Consolas", 13, FontStyle.Bold, GraphicsUnit.Pixel);
+        private static readonly Font StatusFont = new Font("Microsoft YaHei UI", 12, GraphicsUnit.Pixel);
         internal readonly Bitmap Pixels = new Bitmap(SampleSize, SampleSize);
-        private int cell = 12;
-        private int padding = 6;
-        private int row = 23;
+        private float scale = 1;
         private Color color;
         private string hex = "";
         private string feedback = "";
@@ -113,7 +135,6 @@ namespace ShotInk
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
-            DoubleBuffered = true;
         }
 
         internal void Present(Form owner, Point pointer, int dpi, Color color, string hex, string feedback)
@@ -121,53 +142,91 @@ namespace ShotInk
             this.color = color;
             this.hex = hex;
             this.feedback = feedback;
-            cell = Math.Max(8, 12 * dpi / 96);
-            padding = Math.Max(4, 6 * dpi / 96);
-            row = Math.Max(19, 23 * dpi / 96);
-            int width = cell * SampleSize + 2 * padding;
+            scale = dpi / 96F;
+            int width = (int)Math.Ceiling(WidthAt96Dpi * scale);
+            int height = (int)Math.Ceiling(HeightAt96Dpi * scale);
+            int gap = (int)Math.Ceiling(29 * scale);
             var work = Screen.FromPoint(pointer).Bounds;
-            int height = width + row;
-            int gap = 3 * padding;
             int x = pointer.X + gap + width <= work.Right ? pointer.X + gap : pointer.X - gap - width;
-            int y = pointer.Y + gap + height <= work.Bottom ? pointer.Y + gap : pointer.Y - gap - height;
-            Bounds = new Rectangle(Math.Max(work.Left, Math.Min(x, work.Right - width)),
-                Math.Max(work.Top, Math.Min(y, work.Bottom - height)), width, height);
-            if (!Visible) Show(owner);
-            Invalidate();
+            int y = pointer.Y - (int)(scale * (LensSize / 2 + 5));
+            var location = new Point(Math.Max(work.Left, Math.Min(x, work.Right - width)),
+                Math.Max(work.Top, Math.Min(y, work.Bottom - height)));
+            if (!Visible)
+            {
+                Bounds = new Rectangle(location, new Size(width, height));
+                Show(owner);
+            }
+            AccessibleName = hex;
+            AccessibleDescription = feedback;
+            using (var preview = RenderPreview())
+                if (!Native.PresentLayer(Handle, preview, location)) Hide();
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        internal Bitmap RenderPreview()
         {
-            var g = e.Graphics;
-            var skin = Skins.Current;
-            g.Clear(skin.Surface);
-            using (var border = new Pen(skin.Border)) g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
-            var image = new Rectangle(padding, padding, cell * SampleSize, cell * SampleSize);
-            g.FillRectangle(SystemBrushes.ControlDark, image);
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(Pixels, image, 0, 0, SampleSize, SampleSize, GraphicsUnit.Pixel);
-            g.PixelOffsetMode = PixelOffsetMode.Default;
-            int start = padding + Radius * cell;
-            g.DrawRectangle(Pens.Black, start, start, cell - 1, cell - 1);
-            g.DrawRectangle(Pens.White, start + 1, start + 1, cell - 3, cell - 3);
+            var bitmap = new Bitmap((int)Math.Ceiling(WidthAt96Dpi * scale), (int)Math.Ceiling(HeightAt96Dpi * scale),
+                PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.ScaleTransform(scale, scale);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                var circle = new Rectangle(LensLeft, 4, LensSize, LensSize);
+                var image = Rectangle.Inflate(circle, -4, -4);
+                using (var shadow = new SolidBrush(Color.FromArgb(48, 17, 25, 43)))
+                    g.FillEllipse(shadow, circle.X - 1, circle.Y + 2, circle.Width + 2, circle.Height + 2);
+                using (var face = new SolidBrush(Color.FromArgb(32, 44, 65))) g.FillEllipse(face, circle);
+                var state = g.Save();
+                using (var clip = new GraphicsPath())
+                {
+                    clip.AddEllipse(image);
+                    g.SetClip(clip);
+                    g.FillEllipse(SystemBrushes.ControlDark, image);
+                    g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                    g.PixelOffsetMode = PixelOffsetMode.Half;
+                    g.DrawImage(Pixels, image, 0, 0, SampleSize, SampleSize, GraphicsUnit.Pixel);
+                }
+                g.Restore(state);
+                using (var rim = new Pen(Color.FromArgb(237, 243, 250))) g.DrawEllipse(rim, circle);
+                DrawSamplingMark(g, image);
 
-            int top = image.Bottom + padding;
-            var swatch = new Rectangle(padding, top + (row - cell) / 2, cell, cell);
-            using (var fill = new SolidBrush(color)) g.FillRectangle(fill, swatch);
-            using (var border = new Pen(skin.Border)) g.DrawRectangle(border, swatch);
-            var text = new Rectangle(swatch.Right + padding, top, image.Right - swatch.Right - padding, row);
-            TextRenderer.DrawText(g, hex, ToolAppearance.Font, text, skin.Ink, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(g, feedback, ToolAppearance.Font, text, skin.Ink, TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPadding);
+                var capsule = new RectangleF((WidthAt96Dpi - CapsuleWidth) / 2, 116, CapsuleWidth, 28);
+                using (var path = ToolAppearance.Rounded(capsule, 14))
+                using (var fill = new SolidBrush(Color.FromArgb(249, 251, 255)))
+                using (var border = new Pen(Color.FromArgb(171, 183, 201)))
+                {
+                    g.FillPath(fill, path);
+                    g.DrawPath(border, path);
+                }
+                using (var fill = new SolidBrush(color)) g.FillEllipse(fill, capsule.Left + 12, 125, 10, 10);
+                using (var border = new Pen(Color.FromArgb(128, 46, 58, 76))) g.DrawEllipse(border, capsule.Left + 12, 125, 10, 10);
+                bool failed = feedback == "复制失败";
+                using (var ink = new SolidBrush(failed ? Color.Firebrick : Color.FromArgb(22, 33, 53)))
+                    g.DrawString(failed ? feedback : hex, failed ? StatusFont : HexFont, ink, capsule.Left + 27, 123);
+                if (!failed && feedback.Length > 0)
+                    using (var pen = new Pen(Color.FromArgb(27, 116, 84), 1.5F))
+                        g.DrawLines(pen, new[] { new PointF(98, 130), new PointF(101, 133), new PointF(106, 127) });
+            }
+            return bitmap;
         }
 
+        private static void DrawSamplingMark(Graphics g, Rectangle image)
+        {
+            float cell = (float)image.Width / SampleSize;
+            float x = image.Left + Radius * cell + .6F, y = image.Top + Radius * cell + .6F;
+            float size = cell - 1.2F;
+            g.SmoothingMode = SmoothingMode.None;
+            using (var outside = new Pen(Color.FromArgb(20, 29, 46), 2.5F)) g.DrawRectangle(outside, x, y, size, size);
+            using (var inside = new Pen(Color.White)) g.DrawRectangle(inside, x, y, size, size);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+        }
         protected override bool ShowWithoutActivation { get { return true; } }
         protected override CreateParams CreateParams
         {
             get
             {
                 var value = base.CreateParams;
-                value.ExStyle |= 0x08000000 | 0x80; // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+                value.ExStyle |= 0x08000000 | 0x80 | 0x80000 | 0x20; // NOACTIVATE, TOOLWINDOW, LAYERED, TRANSPARENT
                 return value;
             }
         }

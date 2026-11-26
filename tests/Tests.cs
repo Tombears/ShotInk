@@ -83,7 +83,7 @@ namespace ShotInk
                 if (args.Length == 1 && args[0] == "--crop-tests") { CaptureWorkflowTests.CropScreenshot(); return 0; }
                 if (args.Length == 1 && args[0] == "--small-pin-tests") { CaptureWorkflowTests.SmallPinSize(); return 0; }
                 if (args.Length == 1 && args[0] == "--selection-edge-tests") { CaptureWorkflowTests.EdgeResizeTargets(); return 0; }
-                if (args.Length > 0 && args[0] == "--color-picker-tests") { CaptureWorkflowTests.ColorPicker(args.Length > 1 ? args[1] : null); return 0; }
+                if (args.Length > 0 && args[0] == "--color-picker-tests") { CaptureWorkflowTests.AnnotationCursors(); CaptureWorkflowTests.ColorPicker(args.Length > 1 ? args[1] : null); return 0; }
                 SkinTests.Run();
                 CaptureWorkflowTests.Run();
                 Run("renamed app preserves existing history and settings", TestDataRoot);
@@ -2234,13 +2234,13 @@ namespace ShotInk
                 Option<Button>(options, "mode-rectangle").PerformClick();
                 Assert(canvas.EraserMode == ApplyMode.Rectangle, "Eraser selection mode did not activate.");
                 tools[DrawTool.Eraser].PerformClick();
-                Assert(canvas.EraserMode == ApplyMode.Brush && canvas.Cursor == Cursors.Cross, "Eraser main button did not immediately restore its default brush.");
+                Assert(canvas.EraserMode == ApplyMode.Brush && canvas.Cursor == ToolCursors.For(DrawTool.Eraser), "Eraser main button did not immediately restore its default brush.");
                 tools[DrawTool.Rectangle].PerformClick();
                 Assert(canvas.Tool == DrawTool.Rectangle && options.Visible, "Shape button did not select its default tool.");
                 Option<Button>(options, "shape-ellipse").PerformClick();
                 Assert(canvas.Tool == DrawTool.Ellipse, "Shape options did not switch to ellipse.");
                 tools[DrawTool.Rectangle].PerformClick();
-                Assert(canvas.Tool == DrawTool.Rectangle && canvas.Cursor == Cursors.Cross, "Shape button did not immediately restore its default rectangle.");
+                Assert(canvas.Tool == DrawTool.Rectangle && canvas.Cursor == ToolCursors.For(DrawTool.Rectangle), "Shape button did not immediately restore its default rectangle.");
                 tools[DrawTool.Arrow].PerformClick();
                 Assert(canvas.Tool == DrawTool.Arrow, "Arrow button did not select its default tool.");
                 Assert(options.Controls.Find("line-polyline", true).Length == 0 && options.Controls.Find("line-polyline-arrow", true).Length == 0,
@@ -2248,11 +2248,11 @@ namespace ShotInk
                 Option<Button>(options, "line-straight").PerformClick();
                 Assert(canvas.Tool == DrawTool.Line, "Line options did not switch to straight line.");
                 tools[DrawTool.Arrow].PerformClick();
-                Assert(canvas.Tool == DrawTool.Arrow && canvas.Cursor == Cursors.Cross, "Line button did not immediately restore its default arrow.");
+                Assert(canvas.Tool == DrawTool.Arrow && canvas.Cursor == ToolCursors.For(DrawTool.Arrow), "Line button did not immediately restore its default arrow.");
                 tools[DrawTool.Pen].PerformClick(); tools[DrawTool.Pen].PerformClick();
                 Assert(canvas.Tool == DrawTool.Pen && options.Visible, "Clicking an active tool disabled it instead of showing options.");
                 tools[DrawTool.None].PerformClick();
-                Assert(canvas.Tool == DrawTool.None && !options.Visible && canvas.Cursor == Cursors.SizeAll, "Move selection mode was lost.");
+                Assert(canvas.Tool == DrawTool.None && !options.Visible && canvas.Cursor == ToolCursors.For(DrawTool.None), "Move selection mode was lost.");
                 overlay.Close();
             }
         }
