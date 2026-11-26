@@ -16,11 +16,18 @@ namespace ShotInk
         private Rectangle freeDamage;
         private SelectionModePicker modePicker;
         private Cursor SelectionCursor { get { return freeSelectionMode ? ToolCursors.Get("lasso") : ToolCursors.For(DrawTool.Rectangle); } }
+        private void RefreshSelectionCursor()
+        {
+            if (!dragging || dragMode < -1) Cursor = SelectionCursor;
+            else if (dragMode == -1) Cursor = ToolCursors.For(DrawTool.None);
+        }
         private void SetupSelectionModes()
         {
             modePicker = new SelectionModePicker();
             freeSelectionMode = !scrolling && settings.FreeSelectionMode;
             Cursor = SelectionCursor;
+            Skins.Changed += RefreshSelectionCursor;
+            Disposed += delegate { Skins.Changed -= RefreshSelectionCursor; };
             modePicker.SetMode(freeSelectionMode);
             modePicker.ModeChanged += SetSelectionMode;
             var work = Screen.FromPoint(Cursor.Position).WorkingArea; work.Offset(-screenBounds.X, -screenBounds.Y);

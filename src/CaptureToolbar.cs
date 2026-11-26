@@ -371,7 +371,7 @@ namespace ShotInk
         {
             return ToolAppearance.RenderSmooth(new Size(20, 20), delegate(Graphics g)
             {
-            using (var pen = new Pen(color, 1.7F))
+            using (var pen = new Pen(color, 1.4F))
             using (var brush = new SolidBrush(pen.Color))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -451,11 +451,15 @@ namespace ShotInk
                         g.DrawLine(pen, 10, 8, 10, 16);
                         g.DrawLines(pen, new[] { new Point(7, 13), new Point(10, 16), new Point(13, 13) }); break;
                     case "move":
-                        g.DrawLine(pen, 10, 2, 10, 18); g.DrawLine(pen, 2, 10, 18, 10);
-                        g.DrawLines(pen, new[] { new Point(7, 5), new Point(10, 2), new Point(13, 5) });
-                        g.DrawLines(pen, new[] { new Point(7, 15), new Point(10, 18), new Point(13, 15) });
-                        g.DrawLines(pen, new[] { new Point(5, 7), new Point(2, 10), new Point(5, 13) });
-                        g.DrawLines(pen, new[] { new Point(15, 7), new Point(18, 10), new Point(15, 13) }); break;
+                        pen.Width = 1.0F;
+                        g.TranslateTransform(.5F, .5F);
+                        if (Skins.Current.Kind == SkinKind.Pixel)
+                        { pen.StartCap = pen.EndCap = LineCap.Flat; pen.LineJoin = LineJoin.Miter; }
+                        g.DrawLine(pen, 10, 2.5F, 10, 17.5F); g.DrawLine(pen, 2.5F, 10, 17.5F, 10);
+                        g.DrawLines(pen, new[] { new PointF(7.8F, 4.7F), new PointF(10, 2.5F), new PointF(12.2F, 4.7F) });
+                        g.DrawLines(pen, new[] { new PointF(7.8F, 15.3F), new PointF(10, 17.5F), new PointF(12.2F, 15.3F) });
+                        g.DrawLines(pen, new[] { new PointF(4.7F, 7.8F), new PointF(2.5F, 10), new PointF(4.7F, 12.2F) });
+                        g.DrawLines(pen, new[] { new PointF(15.3F, 7.8F), new PointF(17.5F, 10), new PointF(15.3F, 12.2F) }); break;
                     case "shape":
                         g.DrawLines(pen, new[] { new Point(7, 13), new Point(3, 13), new Point(3, 3), new Point(13, 3), new Point(13, 7) });
                         g.DrawEllipse(pen, 8, 9, 9, 8); break;

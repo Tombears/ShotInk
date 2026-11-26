@@ -11,24 +11,28 @@ namespace ShotInk
     internal sealed partial class AnnotationCanvas
     {
         private ColorPickerPreview colorPreview;
-        private Cursor samplingCursor;
+        private ToolCursors.NativeCursor samplingCursor;
+        private SkinKind samplingCursorSkin;
         private Color samplingCursorColor = Color.FromArgb(91, 127, 242);
         private string copiedColors = "";
         internal event Action ColorPickerCancelled;
 
         private void SetSamplingCursor(Color color)
         {
-            if (samplingCursor != null && samplingCursorColor.ToArgb() == color.ToArgb()) return;
+            var skin = Skins.Current.Kind;
+            if (samplingCursor != null && samplingCursorSkin == skin && samplingCursorColor.ToArgb() == color.ToArgb()) return;
             var previous = samplingCursor;
             samplingCursor = ToolCursors.CreateSamplingPen(color);
             samplingCursorColor = color;
-            Cursor = samplingCursor;
+            samplingCursorSkin = skin;
+            Cursor = samplingCursor.View;
             if (previous != null) previous.Dispose();
         }
 
         private void DisposeSamplingCursor()
         {
             if (samplingCursor == null) return;
+            if (ReferenceEquals(Cursor, samplingCursor.View)) Cursor = Cursors.Default;
             samplingCursor.Dispose();
             samplingCursor = null;
         }
@@ -173,8 +177,6 @@ namespace ShotInk
                 g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                 var circle = new Rectangle(LensLeft, 4, LensSize, LensSize);
                 var image = Rectangle.Inflate(circle, -4, -4);
-                using (var shadow = new SolidBrush(Color.FromArgb(48, 17, 25, 43)))
-                    g.FillEllipse(shadow, circle.X - 1, circle.Y + 2, circle.Width + 2, circle.Height + 2);
                 using (var face = new SolidBrush(Color.FromArgb(32, 44, 65))) g.FillEllipse(face, circle);
                 var state = g.Save();
                 using (var clip = new GraphicsPath())

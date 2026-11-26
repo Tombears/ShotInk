@@ -37,12 +37,23 @@ namespace ShotInk
         {
             internal byte Operation, Flags, Opacity, Format;
         }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct DibHeader
+        {
+            internal int Size, Width, Height;
+            internal ushort Planes, BitsPerPixel;
+            internal int Compression, ImageSize, HorizontalResolution, VerticalResolution, ColorsUsed, ColorsImportant;
+        }
         [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr window, IntPtr targetDc,
             ref Point destination, ref Size size, IntPtr sourceDc, ref Point source, int colorKey, ref AlphaBlend blend, int flags);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateDIBSection(IntPtr dc, ref DibHeader bitmapInfo,
+            uint usage, out IntPtr pixels, IntPtr section, uint offset);
         [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr handle);
         [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr dc);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr handle);
+        [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+        private static extern void CopyMemory(IntPtr destination, IntPtr source, UIntPtr length);
         [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
         [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, int message, IntPtr word, IntPtr value);
         [DllImport("dwmapi.dll")] private static extern int DwmFlush();
@@ -81,10 +92,26 @@ namespace ShotInk
             if (dc == IntPtr.Zero) return false;
             try
             {
-                var bitmap = image.GetHbitmap(Color.Transparent);
+                // GetHbitmap composites transparent pixels over a background. Copy into
+                // a top-down DIB so UpdateLayeredWindow receives the original premultiplied alpha.
+                var header = new DibHeader { Size = Marshal.SizeOf(typeof(DibHeader)), Width = image.Width,
+                    Height = -image.Height, Planes = 1, BitsPerPixel = 32 };
+                IntPtr pixels;
+                var bitmap = CreateDIBSection(dc, ref header, 0, out pixels, IntPtr.Zero, 0);
+                if (bitmap == IntPtr.Zero) return false;
                 try
                 {
+                    var data = image.LockBits(new Rectangle(Point.Empty, image.Size), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+                    try
+                    {
+                        int stride = image.Width * 4;
+                        if (data.Stride == stride) CopyMemory(pixels, data.Scan0, new UIntPtr((uint)(stride * image.Height)));
+                        else for (int y = 0; y < image.Height; y++)
+                            CopyMemory(IntPtr.Add(pixels, y * stride), IntPtr.Add(data.Scan0, y * data.Stride), new UIntPtr((uint)stride));
+                    }
+                    finally { image.UnlockBits(data); }
                     var previous = SelectObject(dc, bitmap);
+                    if (previous == IntPtr.Zero || previous == new IntPtr(-1)) return false;
                     try
                     {
                         var source = Point.Empty;

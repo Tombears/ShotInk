@@ -50,7 +50,7 @@ namespace ShotInk
         {
             int index = Array.IndexOf(Names, name);
             var kind = Skins.Current.Kind;
-            if (index < 0) return ToolbarIcons.CreateOutline(name, color);
+            if (index < 0 || name == "move" && kind != SkinKind.Classic) return ToolbarIcons.CreateOutline(name, color);
             if (kind == SkinKind.Classic && name != "custom-color") return ClassicIcon(name, color);
             bool disabled = color.ToArgb() == Skins.All[(int)kind].Muted.ToArgb();
             if (kind == SkinKind.Classic) kind = SkinKind.Linear;

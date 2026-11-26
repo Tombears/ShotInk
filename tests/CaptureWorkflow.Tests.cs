@@ -4,12 +4,51 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ShotInk
 {
     internal static class CaptureWorkflowTests
     {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CursorInfo
+        {
+            internal bool Icon;
+            internal int HotspotX, HotspotY;
+            internal IntPtr Mask, Color;
+        }
+        [DllImport("user32.dll")] private static extern bool GetIconInfo(IntPtr cursor, out CursorInfo info);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr bitmap);
+
+        private static Bitmap NativeCursorPixels(Cursor cursor)
+        {
+            CursorInfo info;
+            Check(GetIconInfo(cursor.Handle, out info), "Windows could not inspect the cursor handle.");
+            try
+            {
+                Check(!info.Icon && info.Color != IntPtr.Zero, "Windows loaded the cursor as a monochrome mask.");
+                return Image.FromHbitmap(info.Color);
+            }
+            finally
+            {
+                if (info.Color != IntPtr.Zero) DeleteObject(info.Color);
+                if (info.Mask != IntPtr.Zero) DeleteObject(info.Mask);
+            }
+        }
+
+        private static bool CursorHasColor(Cursor cursor, Color expected)
+        {
+            using (var image = NativeCursorPixels(cursor))
+                for (int y = 0; y < image.Height; y++)
+                    for (int x = 0; x < image.Width; x++)
+                    {
+                        var pixel = image.GetPixel(x, y);
+                        if (Math.Abs(pixel.R - expected.R) + Math.Abs(pixel.G - expected.G) + Math.Abs(pixel.B - expected.B) <= 20) return true;
+                    }
+            return false;
+        }
+
         private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance;
         private static T Field<T>(object target, string name) { return (T)target.GetType().GetField(name, Private).GetValue(target); }
         private static void Call(object target, string name, params object[] args) { target.GetType().GetMethod(name, Private).Invoke(target, args); }
@@ -521,6 +560,22 @@ namespace ShotInk
             Console.WriteLine("PASS: small desktop pins keep the image dimensions on display, zoom and reset");
         }
 
+        private static void CopyColorAt(AnnotationCanvas canvas, int x, int y, bool append = false)
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                if (append) Call(canvas, "PreviewColorAt", new Point(x, y), true, true);
+                else Mouse(canvas, "OnMouseDown", x, y);
+                var preview = Field<ColorPickerPreview>(canvas, "colorPreview");
+                if (preview != null && preview.AccessibleDescription == (append ? "已追加" : "已复制")) return;
+                Check(preview != null && preview.AccessibleDescription == "复制失败", "Sampling click did not attempt to copy.");
+                // A clipboard manager can momentarily hold the desktop clipboard.
+                Application.DoEvents();
+                System.Threading.Thread.Sleep(50);
+            }
+            throw new Exception("The desktop clipboard stayed busy during the color picker test.");
+        }
+
         internal static void ColorPicker(string previewPath = null)
         {
             var previousClipboard = Clipboard.GetDataObject();
@@ -556,25 +611,29 @@ namespace ShotInk
                         preview.Pixels.GetPixel(radius - 1, radius).ToArgb() == Color.Coral.ToArgb() &&
                         preview.Pixels.GetPixel(radius + 2, radius).ToArgb() == Color.MediumSeaGreen.ToArgb(),
                         "Magnifier center or neighboring pixels did not match the screenshot.");
-                    Mouse(canvas, "OnMouseDown", 60, 60);
+                    CopyColorAt(canvas, 60, 60);
                     Check(Clipboard.GetText() == "#123456" && picker.Checked && preview.Visible, "Left click did not copy HEX or keep sampling active.");
-                    Call(canvas, "PreviewColorAt", new Point(61, 60), true, true);
+                    CopyColorAt(canvas, 61, 60, true);
                     Check(!ReferenceEquals(canvas.Cursor, firstCursor) && canvas.Cursor.HotSpot == new Point(5, 27),
                         "Sampling a new color did not refresh the pen or moved its tip.");
                     var coralCursor = canvas.Cursor;
+                    Check(CursorHasColor(coralCursor, Color.Coral), "The sampling pen did not display the sampled coral pixel.");
                     Mouse(canvas, "OnMouseMove", 61, 60);
                     Check(ReferenceEquals(canvas.Cursor, coralCursor), "Hovering over the same color rebuilt the pen.");
-                    Call(canvas, "PreviewColorAt", new Point(62, 60), true, true);
+                    CopyColorAt(canvas, 62, 60, true);
+                    Check(CursorHasColor(canvas.Cursor, Color.MediumSeaGreen), "The visible sampling pen did not change to the sampled green.");
                     Check(Clipboard.GetText() == string.Join(Environment.NewLine, "#123456", "#FF7F50", "#3CB371"),
                         "Ctrl+click did not append each color on its own line in click order.");
                     using (var image = preview.RenderPreview())
                     {
-                        Check(image.GetPixel(0, 0).A == 0 && image.GetPixel(image.Width / 2, image.Height / 3).A == 255 &&
+                        Check(image.GetPixel(0, 0).A == 0 && image.GetPixel(2, image.Height / 3).A == 0 &&
+                            image.GetPixel(image.Width / 2, image.Height * 114 / 150).A == 0 &&
+                            image.GetPixel(image.Width / 2, image.Height / 3).A == 255 &&
                             image.GetPixel(image.Width / 2, image.Height * 86 / 100).A == 255,
                             "Lens and color capsule did not render as a transparent circular overlay.");
                         if (previewPath != null) image.Save(previewPath, ImageFormat.Png);
                     }
-                    Mouse(canvas, "OnMouseDown", 60, 60);
+                    CopyColorAt(canvas, 60, 60);
                     Check(Clipboard.GetText() == "#123456", "A plain left click did not reset the current color list.");
                     Mouse(canvas, "OnMouseMove", 0, 0);
                     Check(preview.Pixels.GetPixel(radius, radius).ToArgb() == Color.FromArgb(31, 105, 150).ToArgb() &&
@@ -585,7 +644,7 @@ namespace ShotInk
                     Check(overlay.Visible && !preview.Visible && !picker.Checked && canvas.Tool == DrawTool.None && canvas.Cursor == ToolCursors.For(DrawTool.None) && !canvas.CanUndo,
                         "Right click closed the capture, left the picker active or added an annotation.");
                     picker.PerformClick();
-                    Call(canvas, "PreviewColorAt", new Point(61, 60), true, true);
+                    CopyColorAt(canvas, 61, 60, true);
                     Check(Clipboard.GetText() == "#FF7F50", "A new color picker session appended colors from the previous session.");
                     canvas.CancelColorPicker();
 
@@ -600,33 +659,64 @@ namespace ShotInk
                     canvas.EndCrop(true);
                     canvas.SetZoom(2);
                     picker.PerformClick();
-                    Mouse(canvas, "OnMouseDown", 66, 68);
+                    CopyColorAt(canvas, 66, 68);
+                    Check(Field<ColorPickerPreview>(canvas, "colorPreview").AccessibleName == "#00FF00",
+                        "The preview did not sample the correct pixel after scrolling, cropping and zooming.");
                     Check(Clipboard.GetText() == "#00FF00", "Zoomed, scrolled, cropped long image copied the wrong source pixel.");
                 }
             }
-            finally { if (previousClipboard != null) Clipboard.SetDataObject(previousClipboard, true, 5, 100); else Clipboard.Clear(); }
+            finally { if (previousClipboard != null) Clipboard.SetDataObject(previousClipboard, true, 10, 100); else Clipboard.Clear(); }
             Console.WriteLine("PASS: color picker preview, corner sampling, single and multiline clipboard, right-click exit and long-image coordinates");
         }
 
         internal static void AnnotationCursors()
         {
-            using (var canvas = new AnnotationCanvas(new Bitmap(80, 80)))
+            var previous = Skins.Current.Kind;
+            try
             {
-                var tools = new[] { DrawTool.Rectangle, DrawTool.Ellipse, DrawTool.Arrow, DrawTool.Line, DrawTool.Polyline,
-                    DrawTool.ArrowPolyline, DrawTool.Pen, DrawTool.Highlight, DrawTool.Mosaic, DrawTool.Eraser, DrawTool.Text, DrawTool.None };
-                var handles = new System.Collections.Generic.HashSet<IntPtr>();
-                foreach (var tool in tools)
+                using (var canvas = new AnnotationCanvas(new Bitmap(80, 80)))
                 {
-                    canvas.Tool = tool;
-                    Check(canvas.Cursor == ToolCursors.For(tool) && handles.Add(canvas.Cursor.Handle),
-                        "Annotation tool did not use its own cursor: " + tool);
+                    var tools = new[] { DrawTool.Rectangle, DrawTool.Ellipse, DrawTool.Arrow, DrawTool.Line, DrawTool.Polyline,
+                        DrawTool.ArrowPolyline, DrawTool.Pen, DrawTool.Highlight, DrawTool.Mosaic, DrawTool.Eraser, DrawTool.Text, DrawTool.None };
+                    var handles = new System.Collections.Generic.HashSet<IntPtr>();
+                    foreach (var skin in Skins.All)
+                    {
+                        canvas.Tool = DrawTool.Rectangle;
+                        Skins.Select(skin.Kind);
+                        Check(canvas.Cursor == ToolCursors.For(DrawTool.Rectangle), "Changing skins did not refresh the active cursor.");
+                        canvas.MosaicEffect = MosaicEffect.Pixelate;
+                        foreach (var tool in tools)
+                        {
+                            canvas.Tool = tool;
+                            Check(canvas.Cursor == ToolCursors.For(tool) && handles.Add(canvas.Cursor.Handle),
+                                "Annotation tool did not use its own themed cursor: " + skin.Kind + "/" + tool);
+                            using (NativeCursorPixels(canvas.Cursor)) { }
+                        }
+                        canvas.Tool = DrawTool.Pen;
+                        var fixedPen = canvas.Cursor;
+                        canvas.Ink = Color.Lime;
+                        canvas.UpdateToolCursor();
+                        Check(ReferenceEquals(canvas.Cursor, fixedPen) && CursorHasColor(fixedPen, ToolAppearance.Accent(DrawTool.Pen)),
+                            "The ordinary pen changed with the ink setting or lost its theme color.");
+                        canvas.Tool = DrawTool.Mosaic;
+                        canvas.MosaicEffect = MosaicEffect.GaussianBlur;
+                        canvas.UpdateToolCursor();
+                        Check(canvas.Cursor == ToolCursors.For(DrawTool.Mosaic, true) && handles.Add(canvas.Cursor.Handle),
+                            "Gaussian blur shared the pixelation cursor or used another skin.");
+                        using (var pen = ToolCursors.CreateSamplingPen(Color.OrangeRed))
+                            Check(pen.View.HotSpot == new Point(5, 27) && CursorHasColor(pen.View, Color.OrangeRed),
+                                "The themed pen moved its hotspot or discarded the sample in " + skin.Kind);
+                    }
+                    canvas.Tool = DrawTool.ColorPicker;
+                    var inkSamplingPen = canvas.Cursor;
+                    Skins.Select(SkinKind.Glass);
+                    Check(!ReferenceEquals(canvas.Cursor, inkSamplingPen) && canvas.Cursor.HotSpot == new Point(5, 27) &&
+                        CursorHasColor(canvas.Cursor, Color.FromArgb(91, 127, 242)),
+                        "Changing skin did not refresh the active sampling pen while preserving its color.");
                 }
-                canvas.Tool = DrawTool.Mosaic;
-                canvas.MosaicEffect = MosaicEffect.GaussianBlur;
-                canvas.UpdateToolCursor();
-                Check(canvas.Cursor == ToolCursors.For(DrawTool.Mosaic, true) && handles.Add(canvas.Cursor.Handle),
-                    "Gaussian blur shared the mosaic pixelation cursor.");
             }
+            finally { Skins.Select(previous); }
+            Console.WriteLine("PASS: native color bitmaps and sampling pen color in all eight cursor themes");
         }
 
         internal static void Run()
