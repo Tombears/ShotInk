@@ -449,7 +449,7 @@ namespace ShotInk
         private readonly AppSettings settings;
         private bool dirty;
 
-        internal EditorForm(Bitmap image, Action<Bitmap> pin, AppSettings settings = null)
+        internal EditorForm(Bitmap image, Action<Bitmap> pin, AppSettings settings = null, bool copied = false)
         {
             this.settings = settings ?? new AppSettings();
             this.pin = pin;
@@ -525,7 +525,7 @@ namespace ShotInk
             ToolAppearance.UseToolbarCursor(toolArea);
             Controls.Add(viewport); Controls.Add(status); Controls.Add(toolArea);
             SelectTool(DrawTool.Rectangle);
-            Shown += delegate { Fit(); UpdateStatus("截图已复制；编辑后可再次复制或保存"); };
+            Shown += delegate { Fit(); UpdateStatus(copied ? "截图已复制；编辑后可再次复制或保存" : "可编辑、复制或保存图片"); };
             FormClosing += delegate(object sender, FormClosingEventArgs e)
             {
                 if (!dirty) return;

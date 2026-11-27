@@ -866,7 +866,23 @@ namespace ShotInk
                     Check(Skins.Current.Kind == SkinKind.Linear, "Quick edit did not select a random skin.");
                     var editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();
                     Check(Field<bool>(editor, "ready") && Field<Rectangle>(editor, "selection").Size == region.Size, "Quick edit did not open the previous selection");
-                    editor.Close();
+                    captureSettings.AskSaveLocation = false;
+                    captureSettings.SaveDirectory = Path.Combine(root, "saved-capture");
+                    Clipboard.SetDataObject("Before screenshot save", true, 5, 100);
+                    Call(editor, "OnKeyDown", new KeyEventArgs(Keys.Control | Keys.S));
+                    Check(editor.IsDisposed && !Field<bool>(home, "captureBusy"), "Saving did not finish the capture.");
+                    using (var saved = new Bitmap(Directory.GetFiles(captureSettings.SaveDirectory, "*.png").Single()))
+                    using (var copied = Clipboard.GetImage())
+                    {
+                        Check(copied != null && copied.Size == saved.Size && saved.Size == region.Size, "Saving did not copy the saved image.");
+                        using (var pixels = new Bitmap(copied))
+                            for (int y = 0; y < saved.Height; y++)
+                                for (int x = 0; x < saved.Width; x++)
+                                    Check(saved.GetPixel(x, y) == pixels.GetPixel(x, y), "Clipboard and saved image pixels differ.");
+                    }
+                    feedback = Field<CaptureFeedback>(home, "captureFeedback");
+                    Check(feedback != null && feedback.Visible && feedback.Controls.OfType<Label>().Single().Text.Contains("已保存并复制"),
+                        "Saving and copying omitted success feedback.");
                     Call(home, "BeginFullScreenCapture"); Wait(delegate { return Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Any(f => f.Visible && Field<bool>(f, "ready")); });
                     Check(Skins.Current.Kind == SkinKind.Ink, "Full-screen capture did not select a random skin.");
                     editor = Application.OpenForms.Cast<Form>().OfType<CaptureOverlay>().Single();

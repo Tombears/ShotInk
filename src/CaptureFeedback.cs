@@ -10,13 +10,13 @@ namespace ShotInk
         private readonly Timer animation = new Timer { Interval = 20 };
         private int elapsed;
         private Point destination;
-        internal CaptureFeedback()
+        internal CaptureFeedback(string text = "截图已复制")
         {
             SetStyle(ControlStyles.Selectable, false);
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.Dpi;
             BackColor = Skins.Current.Kind == SkinKind.Classic ? Color.FromArgb(30, 40, 58) : Skins.Current.Surface; ClientSize = new Size(210, 48);
-            var message = new Label { Text = "✓  截图已复制", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
+            var message = new Label { Text = "✓  " + text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Skins.Current.Kind == SkinKind.Classic ? Color.White : Skins.Current.Ink, Font = new Font("Microsoft YaHei UI", 11), UseMnemonic = false, BackColor = Color.Transparent };
             Controls.Add(message);
             var work = Screen.FromPoint(Cursor.Position).WorkingArea;

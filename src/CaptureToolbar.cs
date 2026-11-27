@@ -107,7 +107,8 @@ namespace ShotInk
             strip.Items.Add(new ToolStripSeparator());
             Button("cancel", "取消 (Esc)", delegate { if (CancelClicked != null) CancelClicked(); });
             Button("pin", "贴到桌面", delegate { Finish(CaptureAction.Pin); });
-            Button("save", "保存 PNG (Ctrl+S)", delegate { Finish(CaptureAction.Save); });
+            var save = Button("save", "保存 PNG 并复制图片 (Ctrl+S)", delegate { Finish(CaptureAction.Save); });
+            save.AccessibleName = "保存 PNG 并复制图片";
             Button("copy", "复制并完成 (Enter / Ctrl+C)", delegate { Finish(CaptureAction.Copy); });
             int width = strip.Padding.Horizontal + 2;
             foreach (ToolStripItem item in strip.Items) { item.Margin = Padding.Empty; if (item is ToolStripSeparator) { item.AutoSize = false; item.Width = 5; } if (item.Available) width += item.Width; }

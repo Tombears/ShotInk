@@ -340,7 +340,12 @@ namespace ShotInk
                 overlay.Completed += delegate(Bitmap image, CaptureAction action)
                 {
                     captureBusy = false; restoreWindows();
-                    AcceptCapture(image, false, action == CaptureAction.Pin, action == CaptureAction.Copy);
+                    bool saved = action == CaptureAction.Save;
+                    bool copied = AcceptCapture(image, false, action == CaptureAction.Pin, saved || action == CaptureAction.Copy);
+                    if (saved && copied)
+                    {
+                        captureFeedback = new CaptureFeedback("截图已保存并复制"); captureFeedback.Show();
+                    }
                 };
                 overlay.Show(); overlay.Activate();
             }
@@ -368,7 +373,7 @@ namespace ShotInk
                     }
                     catch (Exception ex) { notice.Text = "自动保存失败：" + ex.Message + "；仍可手动保存。"; }
                 }
-                if (openEditor) { var editor = new EditorForm(image, PinImage, settings); editor.Show(); }
+                if (openEditor) { var editor = new EditorForm(image, PinImage, settings, copied); editor.Show(); }
                 else if (pinImage) PinImage(image);
                 else image.Dispose();
                 return copied;
